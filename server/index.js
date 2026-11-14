@@ -1,139 +1,371 @@
+// Fastify 5 application for《今晚，亮一盏灯》v3.0.
+//
+// buildApp() is a factory so the integration tests can drive the whole API
+// through app.inject() without binding a port.
+
 import Fastify from 'fastify'
-import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-// Validation is shared with the browser: see shared/ai-schema.js
-import { normalizePayload } from '../shared/ai-schema.js'
+import { pathToFileURL } from 'node:url'
+import { openDatabase } from './db.js'
+import { createAgentHub } from './agents.js'
+import { sanitizeWhisper, sanitizeText } from '../shared/ai-schema.js'
+import { ENDING_IDS, INDEX_TO_ROOM, MOOD_TOKEN_IDS } from '../shared/constants.js'
 
-const dataDir = process.env.DATA_DIR || join(process.cwd(), 'data')
-mkdirSync(dataDir, { recursive: true })
-const db = new DatabaseSync(join(dataDir, 'scores.sqlite'))
-db.exec(`
-  CREATE TABLE IF NOT EXISTS scores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nickname TEXT NOT NULL,
-    lit_windows INTEGER NOT NULL,
-    max_combo INTEGER NOT NULL,
-    total_warmth INTEGER NOT NULL,
-    created_at TEXT NOT NULL
-  )
-`)
+const VERSION = '3.0.0'
 
-const app = Fastify({ logger: false })
-const hits = new Map()
-const RATE_WINDOW_MS = 60_000
-const RATE_MAX = 20
+/**
+ * Sliding-window limiter with a sweeper so the map cannot grow without bound.
+ *
+ * @param {number} max requests allowed per window
+ * @param {number} windowMs
+ */
+function createLimiter(max, windowMs) {
+  /** @type {Map<string, number[]>} */
+  const hits = new Map()
+  const sweeper = setInterval(() => {
+    const now = Date.now()
+    for (const [ip, arr] of hits) {
+      const alive = arr.filter(t => now - t < windowMs)
+      if (!alive.length) hits.delete(ip)
+      else hits.set(ip, alive)
+    }
+  }, windowMs)
+  if (typeof sweeper.unref === 'function') sweeper.unref()
 
-function rateLimit(ip) {
-  const now = Date.now()
-  const arr = (hits.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS)
-  if (arr.length >= RATE_MAX) {
-    hits.set(ip, arr)
-    return false
+  return {
+    /**
+     * @param {string} ip
+     * @returns {boolean}
+     */
+    allow(ip) {
+      const now = Date.now()
+      const key = String(ip || 'unknown')
+      const arr = (hits.get(key) || []).filter(t => now - t < windowMs)
+      if (arr.length >= max) {
+        hits.set(key, arr)
+        return false
+      }
+      arr.push(now)
+      hits.set(key, arr)
+      return true
+    },
+    stop() {
+      clearInterval(sweeper)
+    }
   }
-  arr.push(now)
-  hits.set(ip, arr)
-  return true
 }
 
-// Drop IPs that have gone quiet. Without this the Map kept one entry per IP
-// forever, which is an unbounded leak on a publicly reachable endpoint.
-const rateLimitSweeper = setInterval(() => {
-  const now = Date.now()
-  for (const [ip, arr] of hits) {
-    if (!arr.length || now - arr[arr.length - 1] > RATE_WINDOW_MS) hits.delete(ip)
-  }
-}, RATE_WINDOW_MS)
-rateLimitSweeper.unref()
-
-function cleanNickname(value) {
-  const s = String(value || '今晚的某某').replace(/[<>&"']/g, '').replace(/\s+/g, ' ').trim().slice(0, 8)
+/**
+ * @param {unknown} value
+ * @param {number} max
+ * @returns {string}
+ */
+function cleanNickname(value, max = 8) {
+  const s = sanitizeText(value, max).replace(/[<>"'&]/g, '')
   return s || '今晚的某某'
 }
 
-const AI_BASE = process.env.AI_BASE || 'https://t.xiaoxin.email/v1'
-const AI_KEY = process.env.AI_KEY || ''
-const AI_MODEL = process.env.AI_MODEL || 'deepseek-v4.1-flash'
+/**
+ * @param {unknown} value
+ * @param {number} max
+ * @returns {number}
+ */
+function clampNumber(value, min, max, fallback = 0) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, Math.round(n)))
+}
 
-const SYSTEM_PROMPT = `你是一个校园夜景生成器，不是心理医生。
-只输出 JSON，不要解释。
-不诊断、不治疗、不说教，不出现临床词或危机词。
-不出现“你应该、想开点、加油、正能量”。
-故事只描述具体校园生活小景，不解释情绪。
-每晚 2-3 条故事，每条 6-24 个汉字；明信片 10-40 个汉字。
-允许安静、疲惫、阴天，不强迫积极。
-JSON 结构：{"nights":[{"night":1,"weather":"light_rain","tempo":"normal","palette":"rainy_amber","stories":[{"text":"三楼的绿萝，今天又冒了一片新叶。","item":"绿萝","icon":"🌿"}],"postcard":"今晚亮了 18 扇窗。雨很小，刚好够听见。"}]}
-三个夜晚天气不同，节奏从慢到快再到暖。`
+/**
+ * Build the Fastify app.
+ *
+ * @param {{
+ *   dataDir?: string,
+ *   aiKey?: string,
+ *   aiBase?: string,
+ *   aiModel?: string,
+ *   logger?: boolean,
+ *   fetchImpl?: typeof fetch,
+ *   aiTimeoutMs?: number,
+ *   rateLimits?: { ai?: number, api?: number }
+ * }} [opts]
+ */
+export function buildApp(opts = {}) {
+  const dataDir = opts.dataDir || process.env.DATA_DIR || join(process.cwd(), 'data')
+  const aiKey = opts.aiKey ?? process.env.AI_KEY ?? ''
+  const aiBase = opts.aiBase || process.env.AI_BASE || 'https://t.xiaoxin.email/v1'
+  const aiModel = opts.aiModel || process.env.AI_MODEL || 'deepseek-v4.1-flash'
 
-// Validation lives in shared/ai-schema.js so the browser can reuse it when a
-// player supplies their own DeepSeek key (that path bypasses this server).
-const validatePayload = (raw) => normalizePayload(raw)
+  const app = Fastify({
+    logger: opts.logger === undefined ? process.env.NODE_ENV !== 'test' : opts.logger,
+    trustProxy: true,
+    bodyLimit: 65536
+  })
 
-app.post('/api/generate', async (req, reply) => {
-  if (!AI_KEY) return reply.code(503).send({ ok: false, msg: 'AI 未配置' })
-  const ip = req.ip || 'unknown'
-  if (!rateLimit(ip)) return reply.code(429).send({ ok: false, msg: '请求太频繁' })
-  try {
-    const res = await fetch(`${AI_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AI_KEY}` },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: '生成三个连续的校园夜晚，只输出 JSON。' }],
-        temperature: 0.9,
-        max_tokens: 1200,
-        response_format: { type: 'json_object' }
-      }),
-      signal: AbortSignal.timeout(30000)
-    })
-    if (!res.ok) return reply.code(502).send({ ok: false, msg: 'AI 上游失败' })
-    const data = await res.json()
-    const content = data?.choices?.[0]?.message?.content
-    let parsed
-    try { parsed = JSON.parse(content) } catch { return reply.code(502).send({ ok: false, msg: 'AI 返回格式错误' }) }
-    const payload = validatePayload(parsed)
-    if (!payload) {
-      console.error('[ai-validate-failed]', JSON.stringify(parsed).slice(0, 1200))
-      return reply.code(502).send({ ok: false, msg: 'AI 内容校验失败' })
-    }
-    return { ok: true, payload }
-  } catch {
-    return reply.code(504).send({ ok: false, msg: 'AI 超时' })
+  const db = openDatabase(dataDir)
+  const hub = createAgentHub({
+    db,
+    aiKey,
+    aiBase,
+    aiModel,
+    fetchImpl: opts.fetchImpl,
+    timeoutMs: opts.aiTimeoutMs || 12000
+  })
+
+  const aiLimiter = createLimiter(opts.rateLimits?.ai ?? 12, 60_000)
+  const apiLimiter = createLimiter(opts.rateLimits?.api ?? 60, 60_000)
+
+  app.addHook('onClose', async () => {
+    aiLimiter.stop()
+    apiLimiter.stop()
+    db.close()
+  })
+
+  /** @param {any} req */
+  const ipOf = req => String((req && req.ip) || 'unknown')
+
+  /**
+   * @param {any} req
+   * @param {any} reply
+   * @param {ReturnType<typeof createLimiter>} limiter
+   * @returns {boolean} true when the request may proceed
+   */
+  function guard(req, reply, limiter) {
+    if (limiter.allow(ipOf(req))) return true
+    reply.code(429).send({ ok: false, msg: '请求太频繁，稍等一下' })
+    return false
   }
-})
 
-app.get('/api/ai-health', async () => ({ ok: Boolean(AI_KEY), model: AI_MODEL, base: AI_BASE }))
+  // ------------------------------------------------------------------ health
+  const healthBody = () => {
+    const stats = db.getGlobalStats()
+    return {
+      ok: true,
+      service: 'light-a-window',
+      version: VERSION,
+      dbOk: db.ping(),
+      aiConfigured: hub.configured,
+      globalLitWindows: stats.totalLit,
+      time: new Date().toISOString()
+    }
+  }
 
-app.get('/api/health', async () => ({ ok: true, service: 'light-a-window', time: new Date().toISOString() }))
+  app.get('/api/health', async () => healthBody())
+  app.get('/health', async () => healthBody())
 
-// Nginx has an explicit `location = /health` that proxies to this path, so the
-// bare /health route is a live health-check endpoint, not dead code.
-app.get('/health', async () => ({ ok: true, service: 'light-a-window', time: new Date().toISOString() }))
-app.get('/api/leaderboard', async (req) => {
-  /** @type {{limit?: number}} */
-  const query = (req.query || {})
-  const limit = Math.min(20, Math.max(1, Number(query.limit) || 20))
-  const rows = db.prepare('SELECT nickname, lit_windows, max_combo, total_warmth, created_at FROM scores ORDER BY total_warmth DESC, max_combo DESC LIMIT ?').all(limit)
-  return { ok: true, items: rows }
-})
-app.post('/api/score', async (req, reply) => {
-  const ip = req.ip || 'unknown'
-  if (!rateLimit(ip)) return reply.code(429).send({ ok: false, msg: '请求太频繁' })
-  /** @type {{nickname?: string, litWindows?: number, maxCombo?: number, totalWarmth?: number}} */
-  const body = req.body || {}
-  const nickname = cleanNickname(body.nickname)
-  const litWindows = Math.max(0, Math.min(72, Number(body.litWindows) || 0))
-  const maxCombo = Math.max(0, Math.min(999, Number(body.maxCombo) || 0))
-  const totalWarmth = Math.max(0, Math.min(9999, Number(body.totalWarmth) || 0))
-  db.prepare('INSERT INTO scores (nickname, lit_windows, max_combo, total_warmth, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(nickname, litWindows, maxCombo, totalWarmth, new Date().toISOString())
-  return { ok: true }
-})
+  app.get('/api/ai-health', async () => ({
+    ok: hub.configured,
+    model: aiModel,
+    base: aiBase,
+    cachedPlans: db.countCached('plan')
+  }))
 
-const port = Number(process.env.PORT) || 3101
-app.listen({ port, host: '127.0.0.1' }).then(() => {
-  console.log(`light-a-window server listening on ${port}`)
-}).catch(err => {
-  console.error(err)
-  process.exit(1)
-})
+  // --------------------------------------------------------------- bootstrap
+  app.get('/api/bootstrap', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const query = /** @type {any} */ (req.query || {})
+    const uid = query.uid ? String(query.uid).slice(0, 64) : ''
+    const passCode = query.passCode ? String(query.passCode).trim().toUpperCase().slice(0, 12) : ''
+
+    // A recovery code that matches nothing is a real error: silently minting a
+    // fresh profile would look like the player lost everything.
+    if (passCode && !db.getPlayerByPassCode(passCode) && !uid) {
+      return reply.code(404).send({ ok: false, msg: '这个找回码没有对应的档案' })
+    }
+
+    const player = db.getOrCreatePlayer({ uid, passCode })
+    if (!player) return reply.code(500).send({ ok: false, msg: '档案创建失败' })
+
+    return {
+      ok: true,
+      player,
+      globalStats: db.getGlobalStats(),
+      windowHeat: db.getGlobalHeatmap(),
+      whispers: db.listWindowMemories({ limit: 12 })
+    }
+  })
+
+  // ------------------------------------------------------------------ agents
+  app.post('/api/agent/plan', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runPlanAgent({
+      uid: String(body.uid || ''),
+      moodToken: String(body.moodToken || 'lamp'),
+      unlockedEndings: Array.isArray(body.unlockedEndings) ? body.unlockedEndings : [],
+      playCount: clampNumber(body.playCount, 0, 9999),
+      communityMemory: body.communityMemory
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  app.post('/api/agent/evolve', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runEvolveAgent({
+      uid: String(body.uid || ''),
+      moodToken: String(body.moodToken || 'lamp'),
+      night1Telemetry: body.night1Telemetry,
+      firstNight: clampNumber(body.firstNight, 2, 3, 2)
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  app.post('/api/agent/epilogue', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runEpilogueAgent({
+      endingId: String(body.endingId || ''),
+      bondRoomId: clampNumber(body.bondRoomId, 101, 406, 0),
+      totalWarmth: clampNumber(body.totalWarmth, 0, 99999),
+      litTotal: clampNumber(body.litTotal, 0, 999),
+      maxCombo: clampNumber(body.maxCombo, 0, 999),
+      resonanceCount: clampNumber(body.resonanceCount, 0, 999),
+      stampsEarned: clampNumber(body.stampsEarned, 0, 9),
+      choicesHistory: Array.isArray(body.choicesHistory) ? body.choicesHistory : []
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  // v2 compatibility: /api/generate used to return { nights }.
+  app.post('/api/generate', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runPlanAgent({
+      uid: String(body.uid || ''),
+      moodToken: String(body.moodToken || 'lamp'),
+      playCount: 0
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  // ------------------------------------------------------------------- score
+  app.post('/api/score', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const endingId = ENDING_IDS.includes(String(body.endingId)) ? String(body.endingId) : 'ENDING_F_DRIFT'
+    const litRoomIds = Array.isArray(body.litRoomIds)
+      ? body.litRoomIds.map(Number).filter(r => INDEX_TO_ROOM.includes(r))
+      : []
+
+    const result = db.recordRunAndSyncPlayer({
+      uid: String(body.uid || ''),
+      nickname: cleanNickname(body.nickname),
+      endingId,
+      archetype: sanitizeText(body.archetype, 10) || '夜色漫步者',
+      litWindows: clampNumber(body.litWindows, 0, 72),
+      maxCombo: clampNumber(body.maxCombo, 0, 999),
+      totalWarmth: clampNumber(body.totalWarmth, 0, 99999),
+      resonances: clampNumber(body.resonances, 0, 999),
+      stamps: clampNumber(body.stamps, 0, 9),
+      items: Array.isArray(body.items) ? body.items.map(i => sanitizeText(i, 8)).filter(Boolean) : [],
+      unlockedEndings: Array.isArray(body.unlockedEndings) ? body.unlockedEndings : [endingId],
+      residentBonds: body.residentBonds,
+      titles: Array.isArray(body.titles) ? body.titles : [],
+      litRoomIds,
+      nightsSummary: body.nightsSummary,
+      letter: body.letter
+    })
+
+    if (!result.ok) return reply.code(500).send({ ok: false, msg: '保存失败' })
+    db.recordTelemetry('run_end', {
+      endingId,
+      totalWarmth: clampNumber(body.totalWarmth, 0, 99999),
+      litWindows: clampNumber(body.litWindows, 0, 72)
+    })
+    return { ok: true, rank: result.rank, player: result.player }
+  })
+
+  app.get('/api/leaderboard', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const query = /** @type {any} */ (req.query || {})
+    const limit = clampNumber(query.limit, 1, 50, 20)
+    const scope = query.scope === 'tonight' ? 'tonight' : 'all'
+    const stats = db.getGlobalStats()
+    return { ok: true, items: db.getLeaderboard(limit, scope), totalPlayers: stats.totalPlayers, scope }
+  })
+
+  // ---------------------------------------------------------------- whispers
+  app.post('/api/whispers', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const content = sanitizeWhisper(body.content)
+    if (!content) return reply.code(400).send({ ok: false, msg: '这句话不太合适，换一句试试' })
+
+    const roomId = Number(body.roomId)
+    if (!INDEX_TO_ROOM.includes(roomId)) return reply.code(400).send({ ok: false, msg: '房号不存在' })
+
+    const moodToken = MOOD_TOKEN_IDS.includes(String(body.moodToken)) ? String(body.moodToken) : 'lamp'
+    const player = db.getOrCreatePlayer({ uid: String(body.uid || '') })
+    const nickname = cleanNickname(body.nickname || player?.nickname)
+
+    const whisper = db.addWindowMemory({
+      roomId,
+      playerUid: player ? player.uid : 'anon',
+      nickname,
+      content,
+      moodToken
+    })
+    if (!whisper) return reply.code(500).send({ ok: false, msg: '封存失败' })
+
+    db.recordTelemetry('whisper_sealed', { roomId, length: content.length })
+    return { ok: true, whisper }
+  })
+
+  app.post('/api/whispers/:id/like', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const id = clampNumber(/** @type {any} */ (req.params || {}).id, 1, 2 ** 31, 0)
+    const out = db.likeWindowMemory(id)
+    if (!out) return reply.code(404).send({ ok: false, msg: '这条留声不在了' })
+    return { ok: true, resonances: out.resonances }
+  })
+
+  app.get('/api/whispers', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const query = /** @type {any} */ (req.query || {})
+    const roomId = query.roomId === undefined ? undefined : clampNumber(query.roomId, 101, 406, 0)
+    return { ok: true, items: db.listWindowMemories({ roomId, limit: clampNumber(query.limit, 1, 50, 12) }) }
+  })
+
+  // --------------------------------------------------------------- telemetry
+  app.post('/api/telemetry', async (req, reply) => {
+    if (!guard(req, reply, apiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const type = sanitizeText(body.eventType, 32) || 'client_event'
+    const payload = body.payload && typeof body.payload === 'object' ? body.payload : {}
+    db.recordTelemetry(type, payload)
+    return { ok: true }
+  })
+
+  app.setErrorHandler((err, req, reply) => {
+    req.log?.error?.(err)
+    if (reply.raw.headersSent) return
+    reply.code(500).send({ ok: false, msg: '服务开了个小差' })
+  })
+
+  app.lightWindow = { db, hub }
+  return app
+}
+
+/**
+ * Start listening when this file is the process entry point.
+ */
+async function main() {
+  const app = buildApp()
+  const port = Number(process.env.PORT) || 3101
+  const host = process.env.HOST || '127.0.0.1'
+  try {
+    await app.listen({ port, host })
+    console.log(`light-a-window v${VERSION} listening on ${host}:${port}`)
+  } catch (err) {
+    console.error(err)
+    process.exit(1)
+  }
+}
+
+const entry = process.argv[1] ? pathToFileURL(process.argv[1]).href : ''
+if (import.meta.url === entry) {
+  main()
+}
+
+export default buildApp
