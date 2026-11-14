@@ -1,0 +1,49 @@
+# deploy/light-a-window.service — backend daemon for https://hynu.site
+#
+# Install:
+#   sudo cp deploy/light-a-window.service /etc/systemd/system/
+#   sudo install -d -o www-data -g www-data -m 0755 /opt/light-a-window
+#   sudo install -d -o www-data -g www-data -m 0750 /opt/light-a-window/data
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now light-a-window
+#
+# Secrets (AI_BASE / AI_MODEL / AI_KEY / PORT / DATA_DIR) live in
+# /etc/default/light-a-window with mode 600. The leading '-' makes that file
+# optional so a missing file cannot stop the unit from starting.
+
+[Unit]
+Description=Light A Window backend (Fastify API for hynu.site)
+Documentation=https://hynu.site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/light-a-window
+EnvironmentFile=-/etc/default/light-a-window
+Environment=NODE_ENV=production
+Environment=PORT=3101
+Environment=DATA_DIR=/opt/light-a-window/data
+ExecStart=/opt/node22/bin/node server/index.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=light-a-window
+
+# Hardening: the process only ever writes its SQLite directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/light-a-window/data
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

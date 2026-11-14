@@ -1,7 +1,7 @@
 {
   "name": "light-a-window",
   "private": true,
-  "version": "2.1.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,7 +27,7 @@
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
   },
-  "description": "今晚，亮一盏灯 · Light A Window — a healing-style browser mini-game",
+  "description": "今晚，亮一盏灯 · Light A Window v3 — a painterly healing browser game with a four-agent narrative pipeline",
   "engines": {
     "node": ">=22"
   }
