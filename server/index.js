@@ -106,13 +106,16 @@ app.get('/api/ai-health', async () => ({ ok: Boolean(AI_KEY), model: AI_MODEL, b
 
 app.get('/api/health', async () => ({ ok: true, service: 'light-a-window', time: new Date().toISOString() }))
 app.get('/api/leaderboard', async (req) => {
-  const limit = Math.min(20, Math.max(1, Number(req.query?.limit) || 20))
+  /** @type {{limit?: number}} */
+  const query = (req.query || {})
+  const limit = Math.min(20, Math.max(1, Number(query.limit) || 20))
   const rows = db.prepare('SELECT nickname, lit_windows, max_combo, total_warmth, created_at FROM scores ORDER BY total_warmth DESC, max_combo DESC LIMIT ?').all(limit)
   return { ok: true, items: rows }
 })
 app.post('/api/score', async (req, reply) => {
   const ip = req.ip || 'unknown'
   if (!rateLimit(ip)) return reply.code(429).send({ ok: false, msg: '请求太频繁' })
+  /** @type {{nickname?: string, litWindows?: number, maxCombo?: number, totalWarmth?: number}} */
   const body = req.body || {}
   const nickname = cleanNickname(body.nickname)
   const litWindows = Math.max(0, Math.min(72, Number(body.litWindows) || 0))
