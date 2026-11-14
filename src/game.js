@@ -273,11 +273,18 @@ export class Game {
 
   _showCoachIfNeeded() {
     if (this.nightIndex !== 0) return
-    const w = this.scene.actionableWindows()[0]
-    if (!w) return
-    const p = this.scene.windowScreenPos(w)
-    if (p) this.ui.coach('点亮这扇正在发光的窗', p.x, p.y - 58)
-    setTimeout(() => this.ui.hideCoach(), 6000)
+    // Glimmer windows expire, so re-aim the coach at whatever is lit right now
+    // instead of pointing at a window that has already gone dark.
+    const place = () => {
+      if (this.state !== 'night' || this.nightIndex !== 0) return
+      const w = this.scene.actionableWindows()[0]
+      if (!w) return
+      const p = this.scene.windowScreenPos(w)
+      if (p) this.ui.coach('点亮这扇正在发光的窗', p.x, p.y - 58)
+    }
+    place()
+    const timer = setInterval(place, 450)
+    setTimeout(() => { clearInterval(timer); this.ui.hideCoach() }, 7000)
   }
 
   // -------------------------------------------------------------- scheduler
