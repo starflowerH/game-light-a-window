@@ -70,6 +70,47 @@ function brushHaloTexture() {
   return t
 }
 
+/**
+ * The ground-floor lobby door: warm glass with a transom and push bars. Drawn
+ * so the doorway reads as a door even when the building is still dark, instead
+ * of as a 25th black window.
+ */
+function doorTexture() {
+  const W = 96
+  const H = 168
+  const c = document.createElement('canvas'); c.width = W; c.height = H
+  const g = c.getContext('2d')
+  const grad = g.createLinearGradient(0, H, 0, 0)
+  grad.addColorStop(0, '#ffe0ab')
+  grad.addColorStop(0.38, '#e0a458')
+  grad.addColorStop(0.72, '#7a4a1e')
+  grad.addColorStop(1, '#241608')
+  g.fillStyle = grad
+  g.fillRect(0, 0, W, H)
+
+  // transom bar
+  g.fillStyle = 'rgba(28,18,10,0.92)'
+  g.fillRect(0, H * 0.28, W, 5)
+  // the two leaves
+  g.strokeStyle = 'rgba(28,18,10,0.88)'
+  g.lineWidth = 3
+  g.beginPath(); g.moveTo(W / 2, H * 0.28); g.lineTo(W / 2, H); g.stroke()
+  // push bars
+  g.fillStyle = 'rgba(255,242,214,0.8)'
+  g.fillRect(W * 0.12, H * 0.58, W * 0.20, 3)
+  g.fillRect(W * 0.68, H * 0.58, W * 0.20, 3)
+  // light spilling on the floor
+  const fl = g.createRadialGradient(W / 2, H * 1.04, 2, W / 2, H * 1.04, W * 0.95)
+  fl.addColorStop(0, 'rgba(255,230,180,0.95)')
+  fl.addColorStop(1, 'rgba(255,230,180,0)')
+  g.fillStyle = fl
+  g.fillRect(0, H * 0.62, W, H * 0.38)
+
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
 /** A gold wax-seal style badge sprite for the STORY_BEACON state. */
 function beaconTexture() {
   const S = 128
@@ -275,12 +316,14 @@ function windowTexture(S, state, warmHex, silhouette, variant) {
       g.stroke()
     }
   } else {
-    g.fillStyle = 'rgba(11,18,38,0.96)'
+    g.fillStyle = 'rgba(17,30,58,0.97)'
     roundedRect(g, 2, 2, S - 4, S - 4, 10)
     g.fill()
+    // A slightly stronger moon sheen so a sleeping window reads as glass, not
+    // as a hole punched in the facade.
     const sheen = g.createLinearGradient(0, 0, S, S * 0.7)
-    sheen.addColorStop(0, 'rgba(110,145,205,0.22)')
-    sheen.addColorStop(0.55, 'rgba(70,100,160,0.06)')
+    sheen.addColorStop(0, 'rgba(126,162,222,0.34)')
+    sheen.addColorStop(0.55, 'rgba(78,110,172,0.12)')
     sheen.addColorStop(1, 'rgba(0,0,0,0)')
     g.fillStyle = sheen
     roundedRect(g, 8, 6, S - 16, S * 0.5, 8)
@@ -413,7 +456,7 @@ export class Scene {
     this.renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;touch-action:none'
 
     this.scene = new THREE.Scene()
-    this.scene.fog = new THREE.FogExp2(0x1b2b4d, 0.0009)
+    this.scene.fog = new THREE.FogExp2(0x1b2b4d, 0.00018)
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 4000)
 
     const pmrem = new THREE.PMREMGenerator(this.renderer)
@@ -610,38 +653,29 @@ export class Scene {
 
     this._buildWindows()
 
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x101728, roughness: 1 })
-    const entrance = new THREE.Mesh(new THREE.BoxGeometry(58, 70, 6), doorMat)
-    entrance.position.set(-BW * 0.18, BASE_Y + 34, BD / 2 + 2)
-    this.dorm.add(entrance)
+    const sillMat = new THREE.MeshStandardMaterial({ color: 0x2a3350, roughness: 1 })
 
-    this.doorGlow = new THREE.Mesh(new THREE.PlaneGeometry(50, 62), new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0, toneMapped: false }))
-    this.doorGlow.position.set(-BW * 0.18, BASE_Y + 34, BD / 2 + 3.2)
+    // The doorway sits in the gap between the 4th and 5th columns of the bottom
+    // row. v2 put a 58x70 black box here, which read as a 25th dark window.
+    const doorX = 68.3
+    const doorY = BASE_Y + 42
+    const doorW = 24
+    const doorH = 44
+    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(doorW + 8, doorH + 8, 4), new THREE.MeshStandardMaterial({ color: 0x0e1424, roughness: 0.85 }))
+    doorFrame.position.set(doorX, doorY, BD / 2 + 1)
+    this.dorm.add(doorFrame)
+    // Dimmed so the lobby light never competes with a clickable GLIMMER window.
+    const doorPanel = new THREE.Mesh(new THREE.PlaneGeometry(doorW, doorH), new THREE.MeshBasicMaterial({ map: doorTexture(), color: 0xc9a97e, toneMapped: false }))
+    doorPanel.position.set(doorX, doorY, BD / 2 + 4.6)
+    this.dorm.add(doorPanel)
+
+    this.doorGlow = new THREE.Mesh(new THREE.PlaneGeometry(doorW + 6, doorH + 6), new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0, toneMapped: false }))
+    this.doorGlow.position.set(doorX, doorY, BD / 2 + 5.4)
     this.dorm.add(this.doorGlow)
 
-    const sillMat = new THREE.MeshStandardMaterial({ color: 0x2a3350, roughness: 1 })
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(74, 4, 26), sillMat)
-    canopy.position.set(-BW * 0.18, BASE_Y + 74, BD / 2 + 10)
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(46, 4, 20), sillMat)
+    canopy.position.set(doorX, BASE_Y + 74, BD / 2 + 9)
     this.dorm.add(canopy)
-
-    const boardCanvas = document.createElement('canvas')
-    boardCanvas.width = 128
-    boardCanvas.height = 96
-    const bg2 = boardCanvas.getContext('2d')
-    bg2.fillStyle = 'rgba(22,38,32,0.95)'
-    bg2.fillRect(0, 0, 128, 96)
-    bg2.strokeStyle = 'rgba(255,220,160,0.75)'
-    bg2.lineWidth = 3
-    bg2.strokeRect(6, 6, 116, 84)
-    bg2.fillStyle = 'rgba(255,238,206,0.9)'
-    bg2.fillRect(22, 28, 84, 4)
-    bg2.fillRect(22, 44, 60, 4)
-    bg2.fillRect(22, 60, 72, 4)
-    const boardTex = new THREE.CanvasTexture(boardCanvas)
-    boardTex.colorSpace = THREE.SRGBColorSpace
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(30, 22), new THREE.MeshBasicMaterial({ map: boardTex, toneMapped: false }))
-    board.position.set(-BW * 0.18 + 50, BASE_Y + 52, BD / 2 + 3.4)
-    this.dorm.add(board)
 
     const bikeMat = new THREE.MeshStandardMaterial({ color: 0x101a2e, roughness: 1 })
     for (const [bx, bz] of [[BW * 0.06, BD / 2 + 8], [BW * 0.12, BD / 2 + 12]]) {
@@ -1062,7 +1096,7 @@ export class Scene {
     glassMat.needsUpdate = true
 
     const lit = w.state !== WINDOW_STATES.DARK
-    glassMat.color.set(lit ? 0xffffff : 0x8fb0e0)
+    glassMat.color.set(lit ? 0xffffff : 0xa9c6ee)
     // The middle layer is a dark ink silhouette standing in front of the warm
     // back panel, which is what gives the interior its fake depth.
     const silMat = /** @type {THREE.MeshBasicMaterial} */ (w.silhouette.material)
@@ -1349,8 +1383,12 @@ export class Scene {
     this._rainTarget = rain ? 0.62 : 0
     this.groundMat.uniforms.wet.value = rain ? 1 : 0
     this._windTarget = weather === 'wind' ? 2.4 : 0
+    // Density is tuned for a camera about 900 units out: the old 0.0016 turned
+    // fog nights into a 57%-brightness grey slab and made every dark window
+    // read as a black hole.
     const fog = /** @type {THREE.FogExp2} */ (this.scene.fog)
-    fog.density = weather === 'fog' ? 0.0016 : 0.0009
+    const DENSITY = { light_rain: 0.00022, rain: 0.00022, fog: 0.00042, snow: 0.00042, wind: 0.00016 }
+    fog.density = DENSITY[weather] !== undefined ? DENSITY[weather] : 0.00018
   }
 
   /** @param {number} value 0..1 */
