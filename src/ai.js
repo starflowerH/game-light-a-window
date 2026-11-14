@@ -23,7 +23,7 @@ export async function generateNights(seedHint = '') {
     const data = await res.json()
     if (!data?.ok || !data?.payload?.nights?.length) throw new Error('no payload')
     return { nights: data.payload.nights, source: 'ai' }
-  } catch (e) {
+  } catch {
     return { nights: FALLBACK_NIGHTS, source: 'fallback' }
   }
 }

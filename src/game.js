@@ -1,13 +1,24 @@
 import { PALETTES } from './scene.js'
-import { generateNights } from './ai.js'
+import { generateNights, FALLBACK_NIGHTS } from './ai.js'
 import { loadRecords, saveRecords, mergeRun } from './records.js'
 import { drawPostcard } from './postcard.js'
+import {
+  NIGHT_COUNT,
+  NIGHT_SECONDS,
+  gainForCombo,
+  pickSurprise,
+  canSurprise,
+  comboMilestone,
+  pickUnlitWindow,
+  SURPRISES,
+  STORY_SCHEDULE
+} from './game-logic.js'
 
-const NIGHT_COUNT = 3
-const NIGHT_SECONDS = 75
-const COLORS = ['#ffd27a', '#ffe7b0', '#ffb454']
 
 export class Game {
+  /** Optional hook: the UI can attach a callback to refresh the leaderboard. */
+  refreshBoard
+
   constructor({ scene, ui }) {
     this.scene = scene
     this.ui = ui
@@ -21,7 +32,7 @@ export class Game {
 
   _initAudio() {
     try {
-      const AC = window.AudioContext || window.webkitAudioContext
+      const AC = window.AudioContext || /** @type {any} */ (window).webkitAudioContext
       if (!AC) return
       this.ac = new AC()
       this.master = this.ac.createGain(); this.master.gain.value = 0.6; this.master.connect(this.ac.destination)
@@ -115,19 +126,43 @@ export class Game {
   async start() {
     this._unlockAudio()
     this.ui.showLoading()
+    this._began = false
     this.nights = null; this.nightIndex = 0
     this.run = { totalWarmth: 0, maxCombo: 0, litTotal: 0, bestNightWarmth: 0, items: [], nights: NIGHT_COUNT, stories: [] }
     const gen = generateNights()
     // let the scene breathe while AI loads
     const timeout = new Promise(r => setTimeout(() => r({ nights: null, source: 'timeout' }), 4500))
     const first = await Promise.race([gen, timeout])
-    if (first.nights) { this.nights = first.nights; this.aiSource = first.source; this._beginNights() }
-    else { this.nights = null }
-    gen.then(r => { this.aiReady = r; if (this.nights) this.nights = r.nights; this.aiSource = r.source })
-    if (this.nights) this._beginNights()
+    if (first.nights) {
+      this.nights = first.nights; this.aiSource = first.source; this._beginNights()
+    } else {
+      // AI is slow. Fall back to the local content set so the game can start now,
+      // then swap in the AI payload if it lands later.
+      this.nights = FALLBACK_NIGHTS; this.aiSource = 'fallback'; this._beginNights()
+    }
+    gen.then(r => {
+      this.aiReady = r; this.aiSource = r.source
+      if (r.nights && r.nights.length) {
+        if (this._began) {
+          // Game already running on fallback content: adopt AI nights that have
+          // not been played yet, so later nights still feel generated.
+          if (!this.night) this.nights = r.nights
+          else if (this.nightIndex < r.nights.length) {
+            const cur = this.nights[this.nightIndex]
+            if (cur && cur.source === 'fallback') this.nights[this.nightIndex] = r.nights[this.nightIndex]
+          }
+        } else {
+          this.nights = r.nights; this._beginNights()
+        }
+      }
+    })
   }
 
   _beginNights() {
+    // Idempotent: start() can reach this from the fast-AI path and the late-AI
+    // path. Running it twice stacked two #intro overlays and launched night 1 twice.
+    if (this._began) return
+    this._began = true
     const seen = (() => { try { return localStorage.getItem('law.intro.seen') === '1' } catch { return false } })()
     const go = () => { try { localStorage.setItem('law.intro.seen', '1') } catch {}; this.ui.hideAll(); this._launchNight(0) }
     if (seen) { go(); return }
@@ -149,7 +184,7 @@ export class Game {
     this.scene.setWeatherFx(night.weather)
     this.night = { warmth: 0, combo: 0, maxCombo: 0, lit: new Set(), startedAt: performance.now(), endsAt: performance.now() + NIGHT_SECONDS * 1000, timeLeft: NIGHT_SECONDS, litCount: 0, litAll: false }
     this.story = { index: 0, lastAt: -7000, shown: new Set() }
-    this._surprise = { coolUntil: 0, lastSurprise: -9000 }
+    this._surprise = { coolUntil: 0, lastSurprise: -9000, sinceRare: 0 }
     this._lastTap = 0
     this._nextLitSpeed = 1700 - Math.min(600, i * 180)
     this._scheduleNextLit(400)
@@ -186,9 +221,8 @@ export class Game {
 
   _lightOne() {
     if (this.state !== 'night' || !this.night) return
-    const pending = this.scene.windows.filter(w => !w.lit)
-    if (!pending.length) return
-    const w = pending[Math.floor(Math.random() * pending.length)]
+    const w = pickUnlitWindow(this.scene.windows)
+    if (!w) return
     if (this.scene.litWindow(w)) this.night.litCount = this.scene.windows.filter(x => x.lit).length
     const n = this.night
     this._scheduleNextLit(Math.max(700, this._nextLitSpeed - n.litCount * 40) + Math.random() * 500)
@@ -240,7 +274,6 @@ export class Game {
     if (lit) {
       n.lit.add(w.idx); n.litCount++
       n.warmth += 2 + (n.combo >= 5 ? 1 : 0)
-      this.run.items.length
       this.ui.floatText('+' + (2 + (n.combo >= 5 ? 1 : 0)), screenX, screenY, '#ffe7b0', 'big')
     } else {
       n.warmth += this._gainForCombo(n.combo)
@@ -273,7 +306,7 @@ export class Game {
     this.ui.setStats(this)
   }
 
-  _gainForCombo(c) { return c >= 8 ? 5 : c >= 5 ? 4 : c >= 3 ? 3 : 2 }
+  _gainForCombo(c) { return gainForCombo(c) }
 
   _comboTail(now) {
     clearTimeout(this._comboTimer)
@@ -283,7 +316,7 @@ export class Game {
   _maybeTimeStory() {
     if (!this.night || this.story.shown.size >= 2) return
     const t = (performance.now() - this.night.startedAt) / 1000
-    const schedule = this.nightIndex === 0 ? [30] : this.nightIndex === 1 ? [28, 55] : [25, 50]
+    const schedule = STORY_SCHEDULE[this.nightIndex] || []
     const idx = schedule.findIndex((s, i) => t >= s && !this.story.shown.has(i))
     if (idx >= 0) this._storyWindow(idx)
   }
@@ -307,25 +340,25 @@ export class Game {
   }
 
   _checkSurprise(w, n, now) {
-    if (now - this._surprise.lastSurprise < 6500) return
-    const roll = Math.random()
-    if (roll < 0.22) this._surpriseEvent('golden', w, n, now)
-    else if (roll < 0.40) this._surpriseEvent('star', w, n, now)
-    else if (roll < 0.56) this._surpriseEvent('lanterns', w, n, now)
-    else if (roll < 0.68) this._surpriseEvent('cat', w, n, now)
-    else if (roll < 0.82) this._surpriseEvent('chain', w, n, now)
+    if (!canSurprise(now, this._surprise.lastSurprise)) return
+    const kind = pickSurprise(Math.random(), this._surprise.sinceRare || 0)
+    this._surpriseEvent(kind, w, n, now)
   }
 
   _surpriseEvent(kind, w, n, now) {
     this._surprise.lastSurprise = now
-    const defs = {
-      golden:  { text: '金窗 · 一间屋子忽然全亮了', gain: 12, fx: () => { this.scene.litWindow(w); } },
-      star:    { text: '流星划过 · 许个愿吧', gain: 9, fx: () => this.scene.shootingStar() },
-      lanterns: { text: '有人放了灯 · 一整排飘起来', gain: 10, fx: () => this.scene.releaseLanterns(6) },
-      cat:     { text: '屋顶上蹲着一只猫 · 它看着你', gain: 8, fx: () => this.scene.rooftopCat() },
-      chain:   { text: '连光 · 隔壁的窗也亮了', gain: 8, fx: () => this._lightRandom(3) }
+    const rarity = SURPRISES[kind]?.rarity
+    if (rarity && rarity !== 'common') this._surprise.sinceRare = 0
+    else this._surprise.sinceRare = (this._surprise.sinceRare || 0) + 1
+    const fx = {
+      golden:  () => { this.scene.litWindow(w) },
+      star:    () => this.scene.shootingStar(),
+      lanterns: () => this.scene.releaseLanterns(6),
+      cat:     () => this.scene.rooftopCat(),
+      chain:   () => this._lightRandom(3)
     }
-    const d = defs[kind]
+    const def = SURPRISES[kind]
+    const d = def ? { text: def.text, gain: def.gain, fx: fx[kind] } : null
     if (!d) return
     n.warmth += d.gain
     d.fx()
@@ -345,8 +378,9 @@ export class Game {
   }
 
   _maybeSurprise(w, n, now) {
-    if (n.combo > 0 && n.combo % 5 === 0) this.sfx('comboUp')
-    if (n.combo > 0 && n.combo % 10 === 0) {
+    const ms = comboMilestone(n.combo)
+    if (ms.sound) this.sfx(ms.sound)
+    if (ms.chain) {
       n.warmth += 10
       this.ui.flash('combo')
       this.ui.toast('光链 ×' + n.combo + ' · 整面墙在回应你', '+10')
