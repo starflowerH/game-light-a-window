@@ -343,6 +343,7 @@ export function buildApp(opts = {}) {
     reply.code(500).send({ ok: false, msg: '服务开了个小差' })
   })
 
+  // @ts-expect-error decorate the instance so integration tests can reach the db
   app.lightWindow = { db, hub }
   return app
 }

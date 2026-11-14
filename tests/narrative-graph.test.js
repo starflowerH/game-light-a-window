@@ -55,7 +55,7 @@ describe('the six residents', () => {
         expect(c.outcome.length).toBeGreaterThan(6)
       }
       for (const n of [1, 2]) {
-        const node = r.nights[n]
+        const node = /** @type {any} */ (r.nights[n])
         for (const key of ['A', 'B']) {
           const v = node.variants[key]
           expect(v).toBeTruthy()

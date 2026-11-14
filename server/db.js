@@ -82,7 +82,6 @@ function parseRecord(raw) {
 }
 
 /**
- * @param {unknown} value
  * @returns {string}
  */
 function nowIso() {

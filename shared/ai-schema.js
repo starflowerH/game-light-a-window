@@ -453,7 +453,7 @@ export function isEndingId(id) {
  * @param {any} telemetry
  * @returns {string}
  */
-export function telemetryBucket(telemetry) {
+export function telemetryBucket(telemetry = {}) {
   const t = telemetry && typeof telemetry === 'object' ? telemetry : {}
   const combo = Number(t.maxCombo) || 0
   const tier = combo >= 14 ? 'high' : combo >= 8 ? 'mid' : 'low'

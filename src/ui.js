@@ -1,322 +1,795 @@
-// All DOM overlays: title, HUD, story cards, night summaries, result + leaderboard.
+// All DOM overlays.
+//
+// Two rules keep the frame rate honest:
+//   1. tick() compares against the last written value before touching the DOM.
+//   2. the warmth bar animates with transform: scaleX(), never width.
 
-/**
- * Typed querySelector. `Element` does not carry `onclick`/`style`, so every
- * DOM lookup in this module goes through this helper.
- * @param {ParentNode} root
- * @param {string} sel
- * @returns {HTMLElement}
- */
-const qs = (root, sel) => /** @type {HTMLElement} */ (root.querySelector(sel))
+import { paintIcons } from './icons.js'
+import { fetchLeaderboard } from './records.js'
+import { ENDINGS, MOOD_TOKENS, WINDOW_IDS, WINDOW_STATES } from '../shared/constants.js'
+import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
 
-/**
- * Typed querySelectorAll for a list of elements.
- * @param {ParentNode} root
- * @param {string} sel
- * @returns {NodeListOf<HTMLElement>}
- */
-const qsa = (root, sel) => /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(sel))
-const esc = s => String(s ?? '').replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]))
+const qs = (root, sel) => root.querySelector(sel)
+const qsa = (root, sel) => root.querySelectorAll(sel)
+
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]))
+
+const MOOD_ICONS = ['umbrella', 'headphones', 'quilt', 'bulb']
 
 export class UI {
+  /**
+   * @param {HTMLElement} root
+   */
   constructor(root) {
     this.root = root
-    this.el = document.createElement('div'); this.el.id = 'ui'; this.el.style.cssText = 'position:absolute;inset:0;z-index:5;pointer-events:none'
+    this.el = document.createElement('div')
+    this.el.id = 'ui'
     root.appendChild(this.el)
     this.fx = document.getElementById('fx')
+    this._cur = null
+    this._coachEl = null
+    this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
+    this._onStart = null
+    /** @type {any} */ this._choiceTimer = 0
+    /** @type {any} */ this._toastTimer = 0
   }
 
-  /** @returns {HTMLElement} */
-  _layer(html, cls = '') { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; return d }
-
-  showTitle(onStart) {
-    this.hideAll()
-    const s = this._layer(`
-      <div class="screen" data-screen="title">
-        <div class="panel fade-in">
-          <div class="kicker">A COZY CAMPUS NIGHT</div>
-          <h1>今晚，<span class="accent">亮一盏灯</span></h1>
-          <p class="lede">一栋宿舍，二十四扇窗。<br/>点亮正在发光的窗户，<b>看整栋楼慢慢亮起来</b>。</p>
-          <div class="pills"><span class="pill">只有一个动作：点亮</span><span class="pill">连击有光链</span><span class="pill">没有失败，也不会扣分</span></div>
-          <button class="btn primary" data-act="start">开始今晚</button>
-          <button class="btn ghost" data-act="board">看看排行榜</button>
-          <div class="note">AI 会为每一晚生成天气、小故事和一张明信片。你的成绩会进入今晚的匿名榜单。</div>
-        </div>
-      </div>`, '')
-    qs(s, 'button[data-act="start"]').onclick = onStart
-    qs(s, 'button[data-act="board"]').onclick = () => this.showLeaderboard()
-    this.el.appendChild(s); this._cur = s
-    requestAnimationFrame(() => { qs(this.el, '.panel')?.classList.add('fade-in') })
-    this.onStart = onStart
-  }
-
-  showLoading() {
-    this.hideAll()
-    const s = this._layer(`<div class="screen"><div class="panel" style="text-align:center"><div class="spin" style="margin:0 auto 16px"></div><h1 style="font-size:26px">灯，正在一盏盏亮起</h1><p class="lede" style="margin-bottom:0">正在为今晚准备天气、小故事和明信片…</p></div></div>`)
-    this.el.appendChild(s); this._cur = s
+  _layer() {
+    const d = document.createElement('div')
+    d.className = 'screen'
+    this.el.appendChild(d)
+    this._cur = d
+    return d
   }
 
   hideAll() {
-    qsa(this.el, '.screen').forEach(n => n.remove())
-    this.hideStory(); this.hidePause(); this.hideCoach()
+    for (const n of qsa(this.el, '.screen')) n.remove()
+    this.hideChoice()
+    this.hidePause()
+    this.hideCoach()
     this._cur = null
+    this.el.innerHTML = ''
     const hud = document.getElementById('hud')
-    if (hud) { hud.classList.remove('on'); setTimeout(() => hud.remove(), 400) }
+    if (hud) hud.remove()
     this.hudEl = null
+    this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
-  startNight({ night, index, count, onPause, onMute }) {
-    this.hideAll(); this.hideStory()
-    document.getElementById('hud')?.remove()
-    const hud = document.createElement('div'); hud.id = 'hud'
-    hud.innerHTML = `
-      <div class="brand"><b>今晚，亮一盏灯</b><span>LIGHT A WINDOW</span></div>
-      <div class="hud-top">
-        <div class="stats">
-          <div class="stat"><span class="chip">第 ${index + 1} 晚 / ${count}</span></div>
-          <div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>
-          <div class="warmbar"><i data-warmbar></i></div>
-          <div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>
-          <div class="stat"><span class="lab">剩余</span><b data-time>75</b><span class="lab">s</span></div>
-        </div>
-      </div>
-      <div class="hud-actions"><button class="iconbtn" data-mute title="声音">🔊</button><button class="iconbtn" data-pause title="暂停">⏸</button></div>
-      <div class="hint">点击发光的窗户 · 连续点亮形成光链 · 偶尔有惊喜</div>`
-    this.el.appendChild(hud)
-    requestAnimationFrame(() => hud.classList.add('on'))
-    qs(hud, 'button[data-pause]').onclick = onPause
-    qs(hud, 'button[data-mute]').onclick = (e) => { const m = onMute(); /** @type {HTMLElement} */ (e.currentTarget).textContent = m ? '🔇' : '🔊' }
-    this.hudEl = hud
-    this._warmEl = qs(hud, 'b[data-warm]'); this._barEl = qs(hud, 'i[data-warmbar]')
-    this._comboEl = qs(hud, 'b[data-combo]'); this._timeEl = qs(hud, 'b[data-time]')
-  }
+  // -------------------------------------------------------------- loading
 
-  setStats(game) {
-    if (!game.night || !this._warmEl) return
-    this._warmEl.textContent = String(game.night.warmth)
-    this._barEl.style.width = Math.min(100, game.night.warmth / 1.2) + '%'
-    this._comboEl.textContent = String(game.night.combo)
-  }
-
-  tick(game) {
-    if (!this._timeEl || !game.night) return
-    this._timeEl.textContent = String(Math.ceil(game.night.timeLeft))
-    if (game.night.timeLeft < 10) this._timeEl.style.color = '#ff9a7a'
-    this._warmEl.textContent = game.night.warmth
-    this._barEl.style.width = Math.min(100, game.night.warmth / 1.2) + '%'
-    this._comboEl.textContent = game.night.combo
-  }
-
-  combo(n) {
-    let c = this._comboEl2
-    if (!c) { c = document.createElement('div'); c.id = 'combo'; this.el.appendChild(c); this._comboEl2 = c }
-    if (!n) { c.classList.remove('show'); return }
-    const words = n >= 15 ? '灯海' : n >= 10 ? '光链' : n >= 6 ? '连击' : '点亮'
-    c.innerHTML = `<div class="n" style="transform:scale(${Math.min(1.4, 0.8 + n * 0.03)})">×${n}</div><div class="t">${words}</div>`
-    c.classList.add('show'); c.style.transform = 'translate(-50%,-50%) scale(1)'
-    c.animate([{ transform: 'translate(-50%,-50%) scale(.85)' }, { transform: 'translate(-50%,-50%) scale(1)' }], { duration: 160, easing: 'ease-out' })
-  }
-
-  floatText(text, x, y, color = '#ffd27a', kind = '') {
-    const d = document.createElement('div'); d.className = 'pop' + (kind === 'center' ? ' center' : '')
-    d.textContent = text; d.style.color = color
-    if (kind === 'center') { d.style.left = '50%'; d.style.top = '42%'; d.style.fontSize = '34px' }
-    else { d.style.left = x + 'px'; d.style.top = y + 'px' }
-    if (kind === 'big') d.style.fontSize = '34px'
-    this.fx.appendChild(d)
-    d.animate([{ opacity: 1, transform: `translate(-50%,-50%) translateY(0) scale(1)` }, { opacity: 0, transform: `translate(-50%,-50%) translateY(-70px) scale(1.15)` }], { duration: 900, easing: 'cubic-bezier(.2,.9,.25,1)' }).onfinish = () => d.remove()
-  }
-
-  pulse() {
-    let d = document.getElementById('tapglow')
-    if (!d) { d = document.createElement('div'); d.id = 'tapglow'; document.body.appendChild(d) }
-    d.animate([{ opacity: .9 }, { opacity: 0 }], { duration: 260, easing: 'ease-out' })
-  }
-
-  shockwave(x, y) {
-    const d = document.createElement('div'); d.className = 'shock'; d.style.left = x + 'px'; d.style.top = y + 'px'
-    this.fx.appendChild(d)
-    d.animate([{ width: '10px', height: '10px', opacity: .9, marginLeft: '-5px', marginTop: '-5px' }, { width: '120px', height: '120px', opacity: 0, marginLeft: '-60px', marginTop: '-60px' }], { duration: 520, easing: 'ease-out' }).onfinish = () => d.remove()
-  }
-
-  toast(text, gain) {
-    document.getElementById('toast')?.remove()
-    const d = document.createElement('div'); d.id = 'toast'
-    d.style.cssText = 'position:fixed;left:50%;top:calc(74px + env(safe-area-inset-top));transform:translateX(-50%) translateY(0);opacity:1;z-index:9999;display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:16px;background:linear-gradient(135deg,rgba(38,28,18,.94),rgba(60,40,22,.94));border:1px solid rgba(255,205,140,.45);box-shadow:0 18px 50px rgba(0,0,0,.5),0 0 30px rgba(255,180,90,.28);backdrop-filter:blur(10px);max-width:90vw;pointer-events:none'
-    d.innerHTML = `<div class="tw" style="color:#ffd27a;font-size:20px;filter:drop-shadow(0 0 8px rgba(255,190,100,.9))">✦</div><div class="tb" style="display:flex;flex-direction:column;gap:2px"><b style="font-size:14px;color:#ffedc8;font-weight:700;letter-spacing:.02em">${esc(text)}</b>${gain ? `<span style="font-size:12px;color:#ffbe6a;font-weight:800">${esc(gain)}</span>` : ''}</div>`
-    document.body.appendChild(d)
-    clearTimeout(this._toastTimer)
-    this._toastTimer = setTimeout(() => d.remove(), 2400)
-  }
-
-  banner(text) {
-    const d = document.createElement('div'); d.className = 'lit-banner'; d.textContent = text
-    this.el.appendChild(d); requestAnimationFrame(() => d.classList.add('show'))
-    setTimeout(() => { d.classList.remove('show'); setTimeout(() => d.remove(), 500) }, 1600)
-  }
-
-  flash(kind) {
-    const d = document.createElement('div')
-    d.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:6'
-    const col = kind === 'golden' ? '255,210,120' : '255,180,90'
-    d.animate([{ background: `radial-gradient(circle at 50% 45%, rgba(${col},.35), transparent 55%)`, opacity: 1 }, { background: `radial-gradient(circle at 50% 45%, rgba(${col},0), transparent 55%)`, opacity: 0 }], { duration: 700 })
-    this.fx.appendChild(d); setTimeout(() => d.remove(), 720)
-  }
-
-  story(s, onClose, duration = 6000) {
-    document.getElementById('story')?.remove()
-    const d = document.createElement('div'); d.id = 'story'
-    d.innerHTML = `<div class="eyebrow">窗后的小事</div><div class="icon"><span class="halo"></span>${esc(s.icon || '✧')}</div><h3>${esc(s.text)}</h3><div class="band">+6 温暖 · 收进了今晚的小物件：${esc(s.item || '小回忆')}</div>`
-    this.el.appendChild(d); requestAnimationFrame(() => d.classList.add('show'))
-    this._storyTimer = setTimeout(() => { d.classList.remove('show'); setTimeout(() => d.remove(), 500) }, duration)
-    d.onclick = () => { clearTimeout(this._storyTimer); d.classList.remove('show'); onClose?.(); setTimeout(() => d.remove(), 500) }
-  }
-  hideStory() { document.getElementById('story')?.remove(); clearTimeout(this._storyTimer) }
-
-  nightSummary(sum, onNext) {
-    this.hideStory(); this.hideAll()
-    const last = sum.night === sum.count
-    const s = this._layer(`<div class="screen"><div class="panel fade-in" style="text-align:center">
-      <div class="kicker">第 ${sum.night} 晚 · 结束</div>
-      <h1 style="font-size:30px">${['灯，安静地亮着','风把灯吹得更暖了','整栋楼都有了回声'][sum.night - 1] || '灯，亮了'}</h1>
-      <div class="statgrid"><div class="cell"><b>${sum.warmth}</b><span>温暖</span></div><div class="cell"><b>${sum.lit}</b><span>点亮窗</span></div><div class="cell"><b>${sum.maxCombo}</b><span>最高连击</span></div></div>
-      <p class="lede" style="margin-bottom:16px">${last ? '最后一晚了，把灯都点亮吧。' : '天还会一点一点暗下去，下一晚的窗会更少、更慢。'}</p>
-      <button class="btn primary" data-act="next">${last ? '看看今晚的明信片' : '继续第 ' + (sum.night + 1) + ' 晚'}</button>
-    </div></div>`)
-    qs(s, 'button[data-act="next"]').onclick = onNext
-    this.el.appendChild(s); this._cur = s
-  }
-
-  async result({ run, records, postcard, nights, aiSource, onReplay }) {
+  showLoading(text) {
     this.hideAll()
-    const s = this._layer(`<div class="screen"><div class="panel fade-in" style="max-width:560px">
-      <div class="kicker">今晚的明信片</div>
-      <h1 style="font-size:28px;margin-bottom:12px">你点亮了 <span class="accent">${run.litTotal}</span> 扇窗</h1>
-      <img class="postcard" src="${postcard}" alt="今晚的明信片"/>
-      <a class="btn ghost" data-act="save" download="light-a-window-${Date.now()}.png" href="${postcard}" style="margin:-4px 0 14px">保存这张明信片</a>
-      <div class="statgrid"><div class="cell"><b>${run.totalWarmth}</b><span>温暖值</span></div><div class="cell"><b>${run.maxCombo}</b><span>最高连击</span></div><div class="cell"><b>${records.bestWarmth}</b><span>历史最佳</span></div></div>
-      ${run.items?.length ? `<p class="lede" style="margin:4px 0 14px">今晚收集到：${run.items.map(esc).join(' · ')}</p>` : ''}
-      <div class="tabs"><button class="on" data-tab="board">今晚排行榜</button><button data-tab="me">我的记录</button></div>
-      <div data-body class="board"></div>
-      <div style="display:flex;gap:10px;margin-top:14px">
-        <input data-nick maxlength="8" placeholder="留个昵称上榜" style="flex:1;border:1px solid rgba(150,110,60,.35);border-radius:12px;padding:13px;font-size:15px;background:rgba(255,255,255,.6);color:#3a2410;font-family:inherit"/>
-        <button class="btn primary" data-act="submit" style="width:130px">上榜</button>
-      </div>
-      <button class="btn ghost" data-act="replay">再来一晚</button>
-      <div class="note">AI 来源：${aiSource === 'ai' ? '本次天气与故事由 AI 实时生成' : '本地内容（AI 暂不可用）'} · 明信片可长按保存</div>
-    </div></div>`)
-    this.el.appendChild(s); this._cur = s
-    const body = qs(s, 'div[data-body]')
-    const tabs = qsa(s, 'button[data-tab]')
-    const nick = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
-    try { nick.value = localStorage.getItem('law.nick') || '' } catch {}
-    const submit = /** @type {HTMLButtonElement} */ (qs(s, 'button[data-act="submit"]'))
-    submit.onclick = async () => {
-      const name = (nick.value || '').trim() || '今晚的某某'
-      try { localStorage.setItem('law.nick', name) } catch {}
-      submit.textContent = '…'; submit.disabled = true
-      const res = await /** @type {any} */ (window).__game.submitScore(name)
-      submit.textContent = res?.ok ? '已上榜' : '稍后再试'; setTimeout(() => { submit.disabled = false; submit.textContent = '上榜' }, 1200)
-      showBoard(name)
-    }
-    qs(s, 'button[data-act="replay"]').onclick = () => { this.hideAll(); onReplay() }
-    const showBoard = (mine) => {
-      tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === 'board'))
-      body.innerHTML = '<div class="empty">正在读取今晚的灯…</div>'
-      fetch('/api/leaderboard?limit=20').then(r => r.json()).then(d => {
-        const items = d?.items || []
-        if (!items.length) { body.innerHTML = '<div class="empty">今晚还没有人上榜，做第一个吧</div>'; return }
-        body.innerHTML = items.map((it, i) => `<div class="row ${i < 3 ? 'top' : ''} ${mine && it.nickname === mine ? 'me' : ''}">
-          <div class="rk">${i + 1}</div><div class="nm">${esc(it.nickname)}</div>
-          <div style="text-align:right"><div class="sc">${it.total_warmth} 温暖</div><div class="meta">点亮 ${it.lit_windows} · 连击 ${it.max_combo}</div></div></div>`).join('')
-      }).catch(() => { body.innerHTML = '<div class="empty">榜单暂时连接不上，稍后再看</div>' })
-    }
-    const showMe = () => {
-      tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === 'me'))
-      const h = records.history || []
-      body.innerHTML = `
-        <div class="row"><div class="nm">历史最佳温暖</div><div class="sc">${records.bestWarmth}</div></div>
-        <div class="row"><div class="nm">最高连击</div><div class="sc">${records.bestCombo}</div></div>
-        <div class="row"><div class="nm">总共点亮窗户</div><div class="sc">${records.totalWindows}</div></div>
-        <div class="row"><div class="nm">玩过几晚</div><div class="sc">${records.plays}</div></div>
-        ${h.length ? '<div class="row" style="background:transparent;justify-content:center;color:#9a7a52;font-size:11px">最近记录</div>' + h.slice(0, 8).map(x => `<div class="row"><div class="nm">${new Date(x.t).toLocaleDateString('zh-CN')} · 点亮 ${x.lit}</div><div class="sc">${x.warmth}</div></div>`).join('') : ''}`
-    }
-    tabs.forEach(t => t.onclick = () => t.dataset.tab === 'me' ? showMe() : showBoard(null))
-    showBoard(null)
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '灯，正在一盏盏亮起') + '</h2><p class="lede center">正在为今晚准备天气、小故事和明信片</p></div>'
+    paintIcons(s)
   }
 
+  // ---------------------------------------------------------------- title
 
-  // Cinematic intro: typewriter narration, then resolve when finished.
+  /**
+   * @param {{ records: any, whispers: any[], stats: any, keyStatus: any,
+   *   onStart: Function, onCollection: Function, onLeaderboard: Function,
+   *   onWhisperWall: Function, onKeyConfig: Function }} opts
+   */
+  showTitle({ records, whispers, stats, keyStatus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig }) {
+    this.hideAll()
+    this._onStart = onStart
+    const unlocked = (records && records.unlockedEndings) ? records.unlockedEndings.length : 0
+    const total = stats && stats.totalLit ? stats.totalLit.toLocaleString('zh-CN') : '0'
+    const firstWhisper = whispers && whispers.length ? whispers[0] : null
+
+    const s = this._layer()
+    s.classList.add('title-screen')
+    s.innerHTML = '<div class="title-veil"></div>' +
+      '<div class="title-wrap">' +
+        '<div class="kicker">A COZY CAMPUS NIGHT</div>' +
+        '<h1 class="title-h1">今晚，<span class="accent">亮一盏灯</span></h1>' +
+        '<p class="lede">一栋十七号宿舍楼，二十四扇窗。<br/>点亮正在发光的窗，或者按住不放，一笔把整排划亮。</p>' +
+        '<div class="pills"><span class="pill">只有一个动作：点亮</span><span class="pill">没有失败，也不会扣分</span><span class="pill">三晚，六个结局</span></div>' +
+        '<div class="title-actions">' +
+          '<button class="btn primary" data-act="start">开始守夜</button>' +
+          '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
+          '<button class="btn ghost" data-act="board">今夜榜单</button>' +
+          '<button class="btn ghost icon" data-act="key" data-icon="key" title="AI 模式 / 评审 Key 设置"></button>' +
+        '</div>' +
+        '<div class="title-foot">' +
+          '<span class="global">全服守夜人已点亮 <b>' + esc(total) + '</b> 扇窗</span>' +
+          '<button class="linkish" data-act="whispers">' + (firstWhisper ? '流光留声机 · 「' + esc(firstWhisper.content) + '」' : '流光留声机') + '</button>' +
+          '<span class="key-state ' + (keyStatus && keyStatus.enabled ? 'on' : '') + '">' + (keyStatus && keyStatus.enabled ? '浏览器直连已启用 · ' + esc(keyStatus.masked) : '云端智能体模式') + '</span>' +
+        '</div>' +
+      '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="start"]').onclick = () => onStart()
+    qs(s, '[data-act="collection"]').onclick = () => onCollection()
+    qs(s, '[data-act="board"]').onclick = () => onLeaderboard()
+    qs(s, '[data-act="whispers"]').onclick = () => onWhisperWall()
+    qs(s, '[data-act="key"]').onclick = () => onKeyConfig()
+  }
+
+  // ------------------------------------------------------------- prologue
+
+  /** @param {{ records: any, onChoose: (mood: string) => void }} opts */
+  showPrologue({ onChoose }) {
+    this.hideAll()
+    const s = this._layer()
+    const cards = MOOD_TOKENS.map((m, i) => '<button class="mood-card" data-mood="' + esc(m.id) + '">' +
+      '<span class="mood-icon" data-icon="' + (MOOD_ICONS[i] || 'star') + '"></span>' +
+      '<b>' + esc(m.name) + '</b>' +
+      '<span class="mood-hint">' + esc(m.hint) + '</span>' +
+    '</button>').join('')
+    s.innerHTML = '<div class="panel glass">' +
+      '<div class="kicker">序章 · 今夜的心境</div>' +
+      '<h2 class="h2">先挑一件东西，带你走进今晚</h2>' +
+      '<p class="lede">它只决定今晚的节奏和天色，不会锁住任何结局。</p>' +
+      '<div class="mood-grid">' + cards + '</div>' +
+    '</div>'
+    paintIcons(s)
+    for (const b of qsa(s, '.mood-card')) {
+      b.onclick = () => onChoose(b.getAttribute('data-mood'))
+    }
+  }
+
+  // ------------------------------------------------------------- cinematic
+
+  /**
+   * @param {string[]} lines
+   * @param {() => void} onDone
+   */
   intro(lines, onDone) {
     this.hideAll()
     const wrap = document.createElement('div')
     wrap.id = 'intro'
-    wrap.style.cssText = 'position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:radial-gradient(70% 60% at 50% 45%,rgba(8,12,26,.35),rgba(4,7,16,.82));opacity:0;transition:opacity .6s'
-    wrap.innerHTML = `<div style="max-width:min(88vw,560px);text-align:center;padding:0 24px">
-      <div id="intro-line" style="font-family:var(--serif);font-size:clamp(20px,3.4vw,30px);line-height:1.7;color:#f4ecd8;min-height:3.4em;letter-spacing:.04em;text-shadow:0 4px 30px rgba(0,0,0,.5)"></div>
-      <div id="intro-skip" style="margin-top:26px;font-size:12px;letter-spacing:.3em;color:#9aa7c4;cursor:pointer;pointer-events:auto">轻触继续 ▸</div>
-    </div>`
+    wrap.innerHTML = '<div class="intro-inner">' +
+      '<div id="intro-line" class="intro-line"></div>' +
+      '<button id="intro-skip" class="intro-skip">跳过 ▸</button>' +
+    '</div>'
     document.body.appendChild(wrap)
-    requestAnimationFrame(() => wrap.style.opacity = '1')
-    let idx = 0, typing = false, finishedAll = false
+    requestAnimationFrame(() => wrap.classList.add('on'))
     const lineEl = qs(wrap, '#intro-line')
-    const finish = () => { finishedAll = true; wrap.style.opacity = '0'; setTimeout(() => { wrap.remove(); onDone?.() }, 550) }
+    let idx = 0
+    let typing = false
+    let finished = false
+    /** @type {any} */ let timer = 0
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      wrap.classList.remove('on')
+      setTimeout(() => { wrap.remove(); onDone && onDone() }, 520)
+    }
     const typeLine = () => {
-      if (idx >= lines.length) { finishedAll = true; setTimeout(finish, 900); return }
-      const text = lines[idx]; lineEl.textContent = ''; typing = true
+      if (finished) return
+      if (idx >= lines.length) { setTimeout(finish, 820); return }
+      const text = lines[idx]
+      lineEl.textContent = ''
+      typing = true
       let i = 0
       const step = () => {
-        if (finishedAll) return
-        if (i <= text.length) { lineEl.textContent = text.slice(0, i); i++; this._introTimer = setTimeout(step, 58) }
-        else { typing = false; idx++; this._introTimer = setTimeout(typeLine, 1100) }
+        if (finished) return
+        if (i <= text.length) {
+          lineEl.textContent = text.slice(0, i)
+          i += 1
+          timer = setTimeout(step, 54)
+        } else {
+          typing = false
+          idx += 1
+          timer = setTimeout(typeLine, 1050)
+        }
       }
       step()
     }
-    const advance = (e) => {
-      e && e.stopPropagation()
-      if (finishedAll) return
-      if (typing) { clearTimeout(this._introTimer); typing = false; lineEl.textContent = lines[idx]; idx++; this._introTimer = setTimeout(typeLine, 380) }
-      else finish()
-    }
-    wrap.addEventListener('pointerdown', advance)
-    qs(wrap, '#intro-skip').addEventListener('pointerdown', (e) => { e.stopPropagation(); finishedAll = true; clearTimeout(this._introTimer); finish() })
-    this._introEl = wrap
+    wrap.addEventListener('pointerdown', e => {
+      const target = e.target
+      if (target instanceof HTMLElement && target.id === 'intro-skip') return
+      if (typing) {
+        clearTimeout(timer)
+        typing = false
+        lineEl.textContent = lines[idx]
+        idx += 1
+        timer = setTimeout(typeLine, 320)
+      } else finish()
+    })
+    qs(wrap, '#intro-skip').onclick = e => { e.stopPropagation(); finish() }
     typeLine()
   }
 
-  // In-game coach mark pointing at a screen position
-  coach(text, x, y) {
-    this.hideCoach()
-    const d = document.createElement('div'); d.id = 'coach'
-    d.innerHTML = `<div class="ct">${text}</div><div class="ring"></div>`
-    d.style.left = x + 'px'; d.style.top = y + 'px'
-    d.style.cssText += ';position:fixed;z-index:12;pointer-events:none;transform:translate(-50%,-50%)'
+  // ------------------------------------------------------------------ HUD
+
+  /**
+   * @param {{ night: any, index: number, count: number, commissions: any[],
+   *   directorNote: string, muted: boolean, onPause: Function, onMute: Function }} opts
+   */
+  startNight({ night, index, count, commissions, directorNote, muted, onPause, onMute }) {
+    this.hideAll()
+    const hud = document.createElement('div')
+    hud.id = 'hud'
+    const ledger = (commissions || []).map(c => '<div class="ledger-item" data-cid="' + esc(c.id || c.type) + '">' +
+      '<span class="ledger-dot"></span>' +
+      '<span class="ledger-label">' + esc(c.label) + '</span>' +
+      '<span class="ledger-prog"><i></i></span>' +
+    '</div>').join('')
+
+    hud.innerHTML = '<div class="hud-top">' +
+        '<div class="brand"><b>今晚，亮一盏灯</b><span>第 ' + (index + 1) + ' 晚 / ' + count + '</span></div>' +
+        '<div class="stats">' +
+          '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
+          '<div class="warmbar"><i data-warmbar></i></div>' +
+          '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
+          '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/24</span></div>' +
+          '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
+        '</div>' +
+        '<div class="hud-actions">' +
+          '<button class="iconbtn" data-act="mute" data-icon="' + (muted ? 'mute' : 'sound') + '" title="声音"></button>' +
+          '<button class="iconbtn" data-act="pause" data-icon="pause" title="暂停"></button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ledger glass" id="ledger">' +
+        '<div class="ledger-head"><span class="kicker">今夜手账</span><span class="weather">' + esc(weatherLabel(night && night.weather)) + ' · ' + esc(tempoLabel(night && night.tempo)) + '</span></div>' +
+        ledger +
+        (directorNote ? '<div class="ledger-note">' + esc(directorNote) + '</div>' : '') +
+      '</div>' +
+      '<div class="hint">点一下发光的窗 · 按住划过去可以一笔连亮</div>'
+
+    this.el.appendChild(hud)
+    paintIcons(hud)
+    requestAnimationFrame(() => hud.classList.add('on'))
+    qs(hud, '[data-act="pause"]').onclick = onPause
+    qs(hud, '[data-act="mute"]').onclick = () => {
+      const m = onMute()
+      const btn = qs(hud, '[data-act="mute"]')
+      btn.setAttribute('data-icon', m ? 'mute' : 'sound')
+      paintIcons(btn.parentNode || hud)
+    }
+    this.hudEl = hud
+    this._warmEl = qs(hud, 'b[data-warm]')
+    this._barEl = qs(hud, 'i[data-warmbar]')
+    this._comboEl = qs(hud, 'b[data-combo]')
+    this._timeEl = qs(hud, 'b[data-time]')
+    this._litEl = qs(hud, 'b[data-lit]')
+    this._ledger = qs(hud, '#ledger')
+    this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
+  }
+
+  /** @param {any} game */
+  tick(game) {
+    if (!this._timeEl || !game.night) return
+    const sec = Math.ceil(game.night.timeLeft)
+    if (sec !== this._dirty.sec) {
+      this._dirty.sec = sec
+      this._timeEl.textContent = String(sec)
+      this._timeEl.classList.toggle('urgent', sec <= 10)
+    }
+    // Re-sync the counters here too: warmth can change from a commission or a
+    // surprise between taps, and the tick is the one place that always runs.
+    this.setStats(game)
+  }
+
+  /** @param {any} game */
+  setStats(game) {
+    if (!game.night) return
+    const n = game.night
+    if (this._warmEl && n.warmth !== this._dirty.warmth) {
+      this._dirty.warmth = n.warmth
+      this._warmEl.textContent = String(n.warmth)
+      if (this._barEl) this._barEl.style.setProperty('--p', String(Math.min(1, n.warmth / 460)))
+    }
+    if (this._comboEl && n.combo !== this._dirty.combo) {
+      this._dirty.combo = n.combo
+      this._comboEl.textContent = String(n.combo)
+    }
+    if (this._litEl && n.litCount !== this._dirty.lit) {
+      this._dirty.lit = n.litCount
+      this._litEl.textContent = String(n.litCount)
+    }
+  }
+
+  /** @param {any[]} items */
+  updateCommissions(items) {
+    if (!this._ledger) return
+    for (const item of items || []) {
+      const row = this._ledger.querySelector('[data-cid="' + String(item.id).replace(/"/g, '') + '"]')
+      if (!row) continue
+      const bar = row.querySelector('.ledger-prog i')
+      if (bar) bar.style.setProperty('--p', String(Math.min(1, item.progress / item.target)))
+      row.classList.toggle('done', item.done)
+    }
+  }
+
+  /** @param {string} id @param {string} label */
+  stampCommission(id, label) {
+    if (!this._ledger) return
+    const row = this._ledger.querySelector('[data-cid="' + String(id).replace(/"/g, '') + '"]')
+    if (row) {
+      row.classList.add('done', 'stamped')
+      const seal = document.createElement('span')
+      seal.className = 'seal'
+      seal.textContent = '印'
+      row.appendChild(seal)
+      setTimeout(() => seal.classList.add('settled'), 20)
+    }
+    this.toast('火漆盖章 · ' + (label || '委托完成'), '+12')
+  }
+
+  // ------------------------------------------------------------- feedback
+
+  /** @param {number} n */
+  combo(n) {
+    let c = document.getElementById('combo')
+    if (!c) {
+      c = document.createElement('div')
+      c.id = 'combo'
+      this.el.appendChild(c)
+    }
+    if (!n || n < 2) { c.classList.remove('show'); return }
+    const words = n >= 15 ? '灯海' : n >= 10 ? '光链' : n >= 6 ? '连击' : '点亮'
+    c.innerHTML = '<div class="n">×' + n + '</div><div class="t">' + words + '</div>'
+    c.classList.add('show')
+  }
+
+  /** @param {string} text @param {number} x @param {number} y @param {string} color @param {string} kind */
+  floatText(text, x, y, color, kind) {
+    if (!this.fx) return
+    const d = document.createElement('div')
+    d.className = 'pop' + (kind === 'big' ? ' big' : '')
+    d.textContent = text
+    d.style.color = color || '#ffe7b0'
+    d.style.left = x + 'px'
+    d.style.top = y + 'px'
+    this.fx.appendChild(d)
+    const anim = d.animate([
+      { opacity: 1, transform: 'translate(-50%,-50%) translateY(0) scale(1)' },
+      { opacity: 0, transform: 'translate(-50%,-50%) translateY(-68px) scale(1.12)' }
+    ], { duration: 900, easing: 'cubic-bezier(.2,.9,.25,1)' })
+    anim.onfinish = () => d.remove()
+  }
+
+  /** @param {number} x @param {number} y */
+  shockwave(x, y) {
+    if (!this.fx) return
+    const d = document.createElement('div')
+    d.className = 'shock'
+    d.style.left = x + 'px'
+    d.style.top = y + 'px'
+    this.fx.appendChild(d)
+    const anim = d.animate([
+      { width: '12px', height: '12px', opacity: 0.9 },
+      { width: '132px', height: '132px', opacity: 0 }
+    ], { duration: 540, easing: 'cubic-bezier(.2,.8,.3,1)' })
+    anim.onfinish = () => d.remove()
+  }
+
+  /** @param {string} text @param {string} gain */
+  toast(text, gain) {
+    const old = document.getElementById('toast')
+    if (old) old.remove()
+    const d = document.createElement('div')
+    d.id = 'toast'
+    d.innerHTML = '<span class="tw" data-icon="star"></span><span class="tb"><b>' + esc(text) + '</b>' + (gain ? '<em>' + esc(gain) + '</em>' : '') + '</span>'
     document.body.appendChild(d)
-    this._coachEl = d
-  }
-  hideCoach() { this._coachEl?.remove(); this._coachEl = null }
-
-  showLeaderboard() {
-    const s = this._layer(`<div class="screen"><div class="panel fade-in">
-      <div class="kicker">TONIGHT'S LIGHTS</div>
-      <h1 style="font-size:28px">今晚的排行榜</h1>
-      <p class="lede">匿名昵称，按整晚温暖值排序。</p>
-      <div class="board" data-body><div class="empty">正在读取今晚的灯…</div></div>
-      <button class="btn ghost" data-act="back">返回</button>
-    </div></div>`)
-    qs(s, '[data-act="back"]').onclick = () => { this.showTitle(this.onStart) }
-    this.el.appendChild(s); this._cur = s
-    fetch('/api/leaderboard?limit=20').then(r => r.json()).then(d => {
-      const items = d?.items || []
-      const body = qs(s, 'div[data-body]')
-      body.innerHTML = items.length ? items.map((it, i) => `<div class="row ${i < 3 ? 'top' : ''}"><div class="rk">${i + 1}</div><div class="nm">${esc(it.nickname)}</div><div style="text-align:right"><div class="sc">${it.total_warmth} 温暖</div><div class="meta">点亮 ${it.lit_windows} · 连击 ${it.max_combo}</div></div></div>`).join('') : '<div class="empty">今晚还没有人上榜</div>'
-    }).catch(() => { qs(s, 'div[data-body]').innerHTML = '<div class="empty">榜单暂时连接不上</div>' })
+    paintIcons(d)
+    clearTimeout(this._toastTimer)
+    this._toastTimer = setTimeout(() => d.remove(), 2400)
   }
 
-  pause(onResume) {
-    const s = this._layer(`<div class="screen" style="z-index:30"><div class="panel" style="text-align:center"><div class="kicker">PAUSED</div><h1 style="font-size:26px">灯先替你留着</h1><p class="lede">暂停时，天色和窗户都不会变化。</p><button class="btn primary" data-act="resume">继续点亮</button></div></div>`)
+  /** @param {string} text @param {string} [sub] */
+  banner(text, sub) {
+    const d = document.createElement('div')
+    d.className = 'lit-banner'
+    d.innerHTML = '<b>' + esc(text) + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '')
+    this.el.appendChild(d)
+    requestAnimationFrame(() => d.classList.add('show'))
+    setTimeout(() => { d.classList.remove('show'); setTimeout(() => d.remove(), 520) }, 1700)
+  }
+
+  /** @param {string} kind */
+  flash(kind) {
+    if (!this.fx) return
+    const d = document.createElement('div')
+    d.className = 'screenflash ' + (kind === 'golden' ? 'golden' : 'warm')
+    this.fx.appendChild(d)
+    const anim = d.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 720, easing: 'ease-out' })
+    anim.onfinish = () => d.remove()
+  }
+
+  // -------------------------------------------------------------- choices
+
+  /**
+   * @param {{ story: any, resident: any, whisper: any, onLike: Function,
+   *   onChoose: (c: any) => void, onTimeout: () => void }} opts
+   */
+  showChoice({ story, resident, whisper, onLike, onChoose, onTimeout }) {
+    this.hideChoice()
+    const card = document.createElement('div')
+    card.id = 'choice'
+    const options = (story.choices || []).map(c => '<button class="choice-btn" data-choice="' + esc(c.id) + '">' +
+      '<span class="choice-id">' + esc(c.id) + '</span><span class="choice-label">' + esc(c.label) + '</span>' +
+    '</button>').join('')
+    const whisperHtml = whisper ? '<div class="whisper-note">' +
+      '<span class="whisper-text">「' + esc(whisper.content) + '」</span>' +
+      '<span class="whisper-from">· ' + esc(whisper.nickname || '远方的守夜人') + '</span>' +
+      '<button class="whisper-like" data-like="' + Number(whisper.id) + '"><span data-icon="heart"></span><b>' + Number(whisper.resonances || 0) + '</b></button>' +
+    '</div>' : ''
+
+    card.innerHTML = '<div class="choice-card glass">' +
+      '<div class="choice-head"><span class="kicker">' + esc(resident ? resident.resident : '窗后的小事') + '</span>' +
+        '<span class="freeze">连击已冻结 5s</span></div>' +
+      '<p class="choice-text">' + esc(story.text) + '</p>' +
+      whisperHtml +
+      '<div class="choice-opts">' + options + '</div>' +
+      '<div class="choice-bar"><i></i></div>' +
+    '</div>'
+    this.el.appendChild(card)
+    paintIcons(card)
+    requestAnimationFrame(() => card.classList.add('on'))
+
+    for (const b of qsa(card, '.choice-btn')) {
+      b.onclick = () => {
+        const id = b.getAttribute('data-choice')
+        const choice = (story.choices || []).find(c => c.id === id) || story.choices[0]
+        this.hideChoice()
+        onChoose(choice)
+      }
+    }
+    const likeBtn = qs(card, '[data-like]')
+    if (likeBtn) {
+      likeBtn.onclick = async () => {
+        const n = await onLike(Number(likeBtn.getAttribute('data-like')))
+        if (typeof n === 'number') qs(likeBtn, 'b').textContent = String(n)
+      }
+    }
+    this._choiceTimer = setTimeout(() => {
+      this.hideChoice()
+      onTimeout()
+    }, 6000)
+    this._choiceEl = card
+  }
+
+  hideChoice() {
+    clearTimeout(this._choiceTimer)
+    if (this._choiceEl) { this._choiceEl.remove(); this._choiceEl = null }
+    const n = document.getElementById('choice')
+    if (n) n.remove()
+  }
+
+  /**
+   * @param {{ text: string, choiceLabel: string, outcome: string, auto: boolean, icon: string, item: string }} opts
+   */
+  storyResult({ choiceLabel, outcome, auto, item }) {
+    const d = document.createElement('div')
+    d.className = 'story-flash'
+    d.innerHTML = '<div class="sf-head">' + esc(choiceLabel) + (auto ? ' · 默认' : '') + '</div>' +
+      '<div class="sf-body">' + esc(outcome) + '</div>' +
+      (item ? '<div class="sf-item">收进今晚的小物件：' + esc(item) + '</div>' : '')
+    this.el.appendChild(d)
+    requestAnimationFrame(() => d.classList.add('on'))
+    setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 480) }, 4200)
+  }
+
+  // ------------------------------------------------------------- summaries
+
+  /** @param {any} sum @param {Function} onNext */
+  nightSummary(sum, onNext) {
+    this.hideAll()
+    const titles = ['灯，安静地亮着', '风把灯吹得更暖了', '整栋楼都有了回声']
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass center">' +
+      '<div class="kicker">第 ' + sum.night + ' 晚 · 结束</div>' +
+      '<h2 class="h2">' + esc(titles[sum.night - 1] || '灯，亮了') + '</h2>' +
+      '<div class="statgrid">' +
+        '<div class="cell"><b>' + sum.warmth + '</b><span>温暖</span></div>' +
+        '<div class="cell"><b>' + sum.lit + '</b><span>点亮窗</span></div>' +
+        '<div class="cell"><b>' + sum.maxCombo + '</b><span>最高连击</span></div>' +
+        '<div class="cell"><b>' + sum.stamps + '</b><span>火漆章</span></div>' +
+      '</div>' +
+      '<p class="lede center">' + (sum.allLit ? '整栋楼都亮过了。' : '今晚亮到这里也很好。') + (sum.resonanceCount ? ' 你连起了 ' + sum.resonanceCount + ' 次星轨。' : '') + '</p>' +
+      '<div class="commission-recap">' + (sum.commissions || []).map(c => '<span class="recap ' + (c.done ? 'on' : '') + '">' + esc(c.label) + '</span>').join('') + '</div>' +
+      '<button class="btn primary" data-act="next">' + (sum.night === sum.count ? '看看今晚的明信片' : '继续第 ' + (sum.night + 1) + ' 晚') + '</button>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="next"]').onclick = onNext
+  }
+
+  /** @param {{ ending: any, run: any }} opts */
+  showEnding({ ending }) {
+    const script = endingScript(ending.id)
+    const d = document.createElement('div')
+    d.className = 'ending-card'
+    d.innerHTML = '<div class="ending-badge" data-icon="star"></div>' +
+      '<div class="kicker">ENDING · ' + esc(ending.type) + '</div>' +
+      '<h2 class="ending-name">' + esc(ending.name) + '</h2>' +
+      '<p class="ending-narration">' + esc(script.narration) + '</p>' +
+      '<div class="ending-title">称号 · ' + esc(ending.title) + '</div>' +
+      '<div class="ending-motto">' + esc(script.motto) + '</div>'
+    this.el.appendChild(d)
+    paintIcons(d)
+    requestAnimationFrame(() => d.classList.add('on'))
+    setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 700) }, 3600)
+  }
+
+  // ---------------------------------------------------------------- result
+
+  /**
+   * @param {{ run: any, records: any, postcard: string, ending: any, letter: any,
+   *   rank: number, aiSource: string, suggestedWhisper: string,
+   *   onSealWhisper: Function, onLikeWhisper: Function,
+   *   onReplay: Function, onHome: Function }} opts
+   */
+  showResult(opts) {
+    this.hideAll()
+    const { run, records, postcard, ending, letter, rank, aiSource, suggestedWhisper } = opts
+    const s = this._layer()
+    s.classList.add('result-screen')
+    s.innerHTML = '<div class="result-scroll">' +
+      '<div class="panel glass result-panel">' +
+        '<div class="kicker">今晚的明信片</div>' +
+        '<h2 class="h2">你点亮了 <span class="accent">' + run.litTotal + '</span> 扇窗</h2>' +
+        '<div class="ending-chip"><span class="badge" data-icon="star"></span><span>' + esc(ending.name) + '</span><em>' + esc(run.archetype) + '</em></div>' +
+        '<img class="postcard" alt="今晚的明信片" src="' + postcard + '"/>' +
+        '<a class="btn ghost" data-act="save" download="light-a-window-' + Date.now() + '.png" href="' + postcard + '"><span data-icon="download"></span>保存明信片</a>' +
+        '<div class="statgrid">' +
+          '<div class="cell"><b>' + run.totalWarmth + '</b><span>温暖值</span></div>' +
+          '<div class="cell"><b>' + run.maxCombo + '</b><span>最高连击</span></div>' +
+          '<div class="cell"><b>' + run.resonanceCount + '</b><span>星轨共鸣</span></div>' +
+          '<div class="cell"><b>' + run.stampsEarned + '</b><span>火漆章</span></div>' +
+        '</div>' +
+        (rank ? '<div class="rank-line">今晚第 <b>' + rank + '</b> 名</div>' : '') +
+        '<div class="letter">' +
+          '<div class="letter-from">' + esc(letter ? letter.fromRoom : '') + '</div>' +
+          '<div class="letter-salutation">' + esc(letter ? letter.salutation : '') + '</div>' +
+          '<p class="letter-body">' + esc(letter ? letter.body : '') + '</p>' +
+          '<div class="letter-sign">' + esc(letter ? letter.sign : '') + '</div>' +
+        '</div>' +
+        '<div class="seal-block">' +
+          '<div class="kicker">把一句微光封存进窗户</div>' +
+          '<p class="lede small">它会留在服务端，被后来路过的人点亮时看见。</p>' +
+          '<div class="window-picker" data-picker></div>' +
+          '<div class="seal-row"><input data-whisper maxlength="40" placeholder="' + esc(suggestedWhisper || '今晚的雨很轻，祝你也做个好梦。') + '"/><button class="btn primary" data-act="seal"><span data-icon="send"></span>封存</button></div>' +
+          '<div class="seal-status" data-status></div>' +
+        '</div>' +
+        '<div class="result-actions">' +
+          '<button class="btn primary" data-act="replay"><span data-icon="replay"></span>再来三晚</button>' +
+          '<button class="btn ghost" data-act="home"><span data-icon="home"></span>回到标题</button>' +
+        '</div>' +
+        '<div class="note">AI 来源：' + esc(sourceLabel(aiSource)) + ' · 历史最佳 ' + (records.bestWarmth || 0) + ' · 明信片可长按保存</div>' +
+      '</div>' +
+    '</div>'
+    paintIcons(s)
+
+    // window picker: 4 x 6 grid, matching the facade
+    const picker = qs(s, '[data-picker]')
+    let picked = run.bondRoomId || 304
+    for (const win of WINDOW_IDS) {
+      const b = document.createElement('button')
+      b.className = 'wp' + (win.roomId === picked ? ' on' : '')
+      b.textContent = String(win.roomId).slice(1)
+      b.title = String(win.roomId) + ' 室'
+      b.onclick = () => {
+        picked = win.roomId
+        for (const other of qsa(picker, '.wp')) other.classList.remove('on')
+        b.classList.add('on')
+      }
+      picker.appendChild(b)
+    }
+
+    qs(s, '[data-act="replay"]').onclick = () => opts.onReplay()
+    qs(s, '[data-act="home"]').onclick = () => opts.onHome()
+    const input = qs(s, 'input[data-whisper]')
+    const status = qs(s, '[data-status]')
+    qs(s, '[data-act="seal"]').onclick = async () => {
+      const content = (input.value || '').trim() || String(suggestedWhisper || '').trim()
+      if (content.length < 6) {
+        status.textContent = '再写长一点点吧'
+        status.className = 'seal-status bad'
+        return
+      }
+      status.textContent = '正在封存…'
+      status.className = 'seal-status'
+      const out = await opts.onSealWhisper({ roomId: picked, content })
+      if (out) {
+        status.textContent = '已封存进 ' + picked + ' 室，等下一个路过的人'
+        status.className = 'seal-status good'
+        input.value = ''
+      } else {
+        status.textContent = '暂时封存不了，稍后再试'
+        status.className = 'seal-status bad'
+      }
+    }
+  }
+
+  // ------------------------------------------------------- collection etc.
+
+  /** @param {{ records: any, onClose: Function }} opts */
+  showCollection({ records, onClose }) {
+    const unlocked = new Set(records.unlockedEndings || [])
+    const tiles = endingGallery().map(e => '<div class="ending-tile ' + (unlocked.has(e.id) ? 'on' : 'locked') + '">' +
+      '<span class="et-badge">' + esc(unlocked.has(e.id) ? e.badge : '？') + '</span>' +
+      '<b>' + esc(unlocked.has(e.id) ? e.name : '未解锁的结局') + '</b>' +
+      '<span class="et-clue">' + esc(unlocked.has(e.id) ? e.title : e.clue) + '</span>' +
+    '</div>').join('')
+
+    const residentRows = Object.keys(RESIDENT_ORDER).map(room => {
+      const level = Number(records.residentBonds ? records.residentBonds[room] : 0) || 0
+      const pips = [1, 2, 3].map(i => '<i class="' + (i <= level ? 'on' : '') + '"></i>').join('')
+      return '<div class="resident-row"><span class="rr-name">' + esc(RESIDENT_ORDER[room]) + '</span><span class="pips">' + pips + '</span><span class="rr-bond">' + esc(bondLabel(level)) + '</span></div>'
+    }).join('')
+
+    const items = (records.items || []).length
+      ? (records.items || []).map(i => '<span class="item-chip">' + esc(i) + '</span>').join('')
+      : '<span class="empty">还没有收进任何小物件</span>'
+
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass wide">' +
+      '<div class="kicker">守夜人档案 · 结局星图</div>' +
+      '<h2 class="h2">已解锁 ' + unlocked.size + ' / 6 个结局</h2>' +
+      '<div class="ending-grid">' + tiles + '</div>' +
+      '<div class="kicker section">住户羁绊</div>' +
+      '<div class="resident-list">' + residentRows + '</div>' +
+      '<div class="kicker section">物件图鉴</div>' +
+      '<div class="item-list">' + items + '</div>' +
+      '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="back"]').onclick = onClose
+  }
+
+  /** @param {{ onClose: Function }} opts */
+  async showLeaderboard({ onClose }) {
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass">' +
+      '<div class="kicker">TONIGHT\'S LIGHTS</div>' +
+      '<h2 class="h2">今夜守夜榜</h2>' +
+      '<div class="board" data-body><div class="empty">正在读取今晚的灯…</div></div>' +
+      '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="back"]').onclick = onClose
+    const body = qs(s, '[data-body]')
+    const items = await fetchLeaderboard({ scope: 'all', limit: 20 })
+    if (!items.length) {
+      body.innerHTML = '<div class="empty">今晚还没有人上榜</div>'
+      return
+    }
+    body.innerHTML = items.map((it, i) => '<div class="row ' + (i < 3 ? 'top' : '') + '">' +
+      '<span class="rk">' + (i + 1) + '</span>' +
+      '<span class="nm">' + esc(it.nickname) + '</span>' +
+      '<span class="sc"><b>' + Number(it.total_warmth) + '</b> 温暖<em>' + esc(it.archetype || '') + '</em></span>' +
+    '</div>').join('')
+  }
+
+  /** @param {{ whispers: any[], onLike: Function, onClose: Function }} opts */
+  showWhisperWall({ whispers, onLike, onClose }) {
+    const rows = (whispers || []).length
+      ? whispers.map(w => '<div class="wall-row">' +
+          '<span class="wr-room">' + Number(w.roomId) + '</span>' +
+          '<div class="wr-body"><div class="wr-text">「' + esc(w.content) + '」</div><div class="wr-from">' + esc(w.nickname) + '</div></div>' +
+          '<button class="whisper-like" data-like="' + Number(w.id) + '"><span data-icon="heart"></span><b>' + Number(w.resonances || 0) + '</b></button>' +
+        '</div>').join('')
+      : '<div class="empty">还没有人留下声音</div>'
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass wide">' +
+      '<div class="kicker">流光留声机</div>' +
+      '<h2 class="h2">别人留在窗户上的话</h2>' +
+      '<div class="wall-list">' + rows + '</div>' +
+      '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="back"]').onclick = onClose
+    for (const b of qsa(s, '[data-like]')) {
+      b.onclick = async () => {
+        const n = await onLike(Number(b.getAttribute('data-like')))
+        if (typeof n === 'number') qs(b, 'b').textContent = String(n)
+      }
+    }
+  }
+
+  /** @param {{ status: any, onVerify: Function, onClose: Function }} opts */
+  showKeyDialog({ status, onVerify, onClose }) {
+    const s = this._layer()
+    s.innerHTML = '<div class="panel glass small">' +
+      '<div class="kicker">AI 模式</div>' +
+      '<h2 class="h2">评审 / 自带 Key</h2>' +
+      '<p class="lede small">填一个 DeepSeek Key，浏览器会直接连 api.deepseek.com。Key 只存在这一页的内存里，不写本地存储，也不发到本服。</p>' +
+      '<div class="key-state ' + (status && status.enabled ? 'on' : '') + '" data-state>' + (status && status.enabled ? '✓ 已启用浏览器直连模式（Key 仅驻留内存）' : '当前为云端智能体模式') + '</div>' +
+      '<input data-key type="password" spellcheck="false" placeholder="sk-..." autocomplete="off"/>' +
+      '<div class="dialog-actions"><button class="btn primary" data-act="verify">验证并启用</button><button class="btn ghost" data-act="back">返回</button></div>' +
+      '<div class="seal-status" data-msg></div>' +
+      '<div class="note">也可以直接开始游戏：云端模式会用本服的智能体管线，离线时自动使用手写剧本。</div>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="back"]').onclick = onClose
+    const input = qs(s, 'input[data-key]')
+    const msg = qs(s, '[data-msg]')
+    qs(s, '[data-act="verify"]').onclick = async () => {
+      msg.textContent = '正在用最小请求验证…'
+      msg.className = 'seal-status'
+      const res = await onVerify(input.value, undefined)
+      msg.textContent = res.message
+      msg.className = 'seal-status ' + (res.ok ? 'good' : 'bad')
+      if (res.ok) {
+        const state = qs(s, '[data-state]')
+        state.textContent = '✓ 已启用浏览器直连模式（Key 仅驻留内存）'
+        state.classList.add('on')
+        input.value = ''
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- chrome
+
+  /** @param {string} text @param {number} x @param {number} y */
+  coach(text, x, y) {
+    if (!this._coachEl) {
+      this._coachEl = document.createElement('div')
+      this._coachEl.id = 'coach'
+      this._coachEl.innerHTML = '<div class="ct"></div><div class="ring"></div>'
+      document.body.appendChild(this._coachEl)
+    }
+    qs(this._coachEl, '.ct').textContent = text
+    this._coachEl.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px) translate(-50%,-50%)'
+    this._coachEl.classList.add('on')
+  }
+
+  hideCoach() {
+    if (this._coachEl) { this._coachEl.remove(); this._coachEl = null }
+  }
+
+  /** @param {{ onResume: Function, onHome: Function }} opts */
+  pause({ onResume, onHome }) {
+    this.hidePause()
+    const s = this._layer()
+    s.classList.add('pause-screen')
+    s.innerHTML = '<div class="panel glass center small">' +
+      '<div class="kicker">PAUSED</div>' +
+      '<h2 class="h2">灯先替你留着</h2>' +
+      '<p class="lede center">暂停时，天色和窗户都不会变化。</p>' +
+      '<div class="dialog-actions"><button class="btn primary" data-act="resume"><span data-icon="play"></span>继续点亮</button>' +
+      '<button class="btn ghost" data-act="home">离开这一晚</button></div>' +
+    '</div>'
+    paintIcons(s)
     qs(s, '[data-act="resume"]').onclick = onResume
-    this.el.appendChild(s); this._pauseEl = s
+    qs(s, '[data-act="home"]').onclick = onHome
+    this._pauseEl = s
   }
-  hidePause() { this._pauseEl?.remove(); this._pauseEl = null }
+
+  hidePause() {
+    if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null }
+  }
+
+  /** @param {boolean} muted */
+  setMuted(muted) {
+    const btn = document.querySelector('#hud [data-act="mute"]')
+    if (!btn) return
+    btn.setAttribute('data-icon', muted ? 'mute' : 'sound')
+    paintIcons(btn.parentNode || document.body)
+  }
 }
+
+const RESIDENT_ORDER = {
+  102: '102 · 林阿姨（宿管值班室）',
+  203: '203 · 小禾（插画系）',
+  205: '205 · 阿澈（广播站）',
+  301: '301 · 阿满与室友（夜宵）',
+  304: '304 · 知夏（考研）',
+  406: '406 · 星野（天文社）'
+}
+
+const WEATHER_LABEL = { light_rain: '细雨', fog: '薄雾', wind: '晚风', clear: '晴夜' }
+const TEMPO_LABEL = { slow: '慢一点', normal: '刚刚好', brisk: '快一些' }
+
+function weatherLabel(weather) {
+  return WEATHER_LABEL[weather] || '夜'
+}
+
+function tempoLabel(tempo) {
+  return TEMPO_LABEL[tempo] || '刚刚好'
+}
+
+function sourceLabel(source) {
+  if (source === 'ai') return '本次天气与故事由 AI 实时生成'
+  if (source === 'direct') return '由你的 Key 直连 DeepSeek 生成'
+  if (source === 'cache') return 'AI 缓存复用'
+  return '本地手写剧本（离线可用）'
+}
+
+export { ENDINGS, WINDOW_STATES, esc }

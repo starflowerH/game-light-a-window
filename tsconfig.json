@@ -1,1 +1,18 @@
-{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "strict": false, "allowJs": true, "checkJs": false, "skipLibCheck": true, "lib": ["ES2022", "DOM", "DOM.Iterable"] } }
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": false,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.js", "src/**/*.d.ts", "shared/**/*.js", "server/**/*.js", "tests/**/*.js", "*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

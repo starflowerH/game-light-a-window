@@ -304,7 +304,7 @@ export function evaluateCommissions(commissions, nightState) {
  *   resonanceCount?: number,
  *   stampsEarned?: number,
  *   nights?: NightSummaryInput[],
- *   choices?: Array<{ roomId: number, choiceId?: 'A'|'B', label?: string }>,
+ *   choices?: Array<{ roomId: number, choiceId?: string, label?: string }>,
  *   residentsAwoken?: number[],
  *   events?: Record<string, number>,
  *   bonds?: Record<string, number>
@@ -331,10 +331,10 @@ function nightRooms(n) {
  *
  * The order in ENDINGS is the priority order: the most specific IF lines win.
  *
- * @param {RunSummary} runSummary
+ * @param {RunSummary} [runSummary]
  * @returns {{ endingId: string, bondRoomId: number, reason: string }}
  */
-export function resolveEnding(runSummary) {
+export function resolveEnding(runSummary = {}) {
   const s = runSummary || {}
   const nights = Array.isArray(s.nights) ? s.nights : []
   const choices = Array.isArray(s.choices) ? s.choices : []
@@ -390,7 +390,7 @@ export function resolveEnding(runSummary) {
 }
 
 /**
- * @param {Array<{ roomId: number, choiceId?: 'A'|'B' }>} choices
+ * @param {Array<{ roomId: number, choiceId?: string }>} choices
  * @param {Record<string, number>} [bonds]
  * @returns {number}
  */

@@ -724,7 +724,7 @@ export function buildOfflinePlan(mood, records = {}) {
  *   maxCombo?: number,
  *   dragChains?: number,
  *   resonancesCompleted?: number,
- *   choicesMade?: Array<{ roomId: number, choiceId: 'A'|'B', label?: string }>,
+ *   choicesMade?: Array<{ roomId: number, choiceId: string, label?: string }>,
  *   litCount?: number
  * }} telemetry
  * @returns {{ nights: any[] }}

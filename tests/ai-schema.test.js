@@ -97,7 +97,7 @@ import {
 } from '../shared/ai-schema.js'
 import { CORE_RESIDENT_ROOMS, ENDING_IDS, WINDOW_IDS } from '../shared/constants.js'
 
-const samplePlan = () => ({
+const samplePlan = () => /** @type {any} */ ({
   directorNote: '今夜从微雨开始，慢一点也没关系。',
   nights: [1, 2, 3].map(n => ({
     night: n,
