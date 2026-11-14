@@ -1,5 +1,5 @@
 import './style.css'
-import { Scene, PALETTES } from './scene.js'
+import { Scene } from './scene.js'
 import { Game } from './game.js'
 import { UI } from './ui.js'
 
@@ -11,8 +11,18 @@ const app = document.getElementById('app')
 app.append(host, fx, vignette, grain)
 
 const ui = new UI(app)
-const scene = new Scene(host, { onWindowTap: (w, x, y) => game.tap(w, x, y) })
-const game = new Game({ scene, ui })
-window.__game = game
+
+// The scene needs a tap handler, but the handler needs the game. Use a
+// late-bound holder so neither has to be constructed before the other.
+/** @type {{ game: Game | null }} */
+const holder = { game: null }
+
+const scene = new Scene(host, {
+  onWindowTap: (w, x, y) => { if (holder.game) holder.game.tap(w, x, y) }
+})
+
+const gameInstance = new Game({ scene, ui })
+holder.game = gameInstance
+window.__game = gameInstance
 scene.applyTheme('warm_blue', true)
-ui.showTitle(() => game.start())
+ui.showTitle(() => { gameInstance.start() })
