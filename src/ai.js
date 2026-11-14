@@ -1,29 +1,363 @@
-// Talks to our own backend at /api/generate. Falls back to local content.
-// FALLBACK_NIGHTS is exported so the game can start immediately when the AI is
-// slow, and swap in generated content for nights that have not been played yet.
-export const FALLBACK_NIGHTS = [
-    { night: 1, weather: 'light_rain', tempo: 'slow', palette: 'rainy_amber',
-      stories: [{ text: '图书馆闭馆铃响了两遍，还有人趴着没动。', item: '闭馆铃', icon: '🔔' }, { text: '三楼窗台那盆绿萝，又冒了一片新叶。', item: '绿萝', icon: '🌿' }],
-      postcard: '今晚亮了十六扇窗。雨很小，刚好盖过走廊的拖鞋声。' },
-    { night: 2, weather: 'fog', tempo: 'normal', palette: 'warm_blue',
-      stories: [{ text: '操场的跑道还湿着，有人绕圈慢慢走。', item: '跑道', icon: '🏃' }, { text: '食堂阿姨多打了一勺汤，什么也没说。', item: '汤勺', icon: '🥣' }],
-      postcard: '天是灰的，风有点闷。自习室的灯一直亮到十一点半。' },
-    { night: 3, weather: 'clear', tempo: 'brisk', palette: 'clear_peach',
-      stories: [{ text: '宿舍走廊有人抱着被子出来晒月亮。', item: '被子', icon: '🛏️' }, { text: '楼下便利店的关东煮，今晚最后一份被买走。', item: '关东煮', icon: '🍢' }],
-      postcard: '云散了，月亮挂在树梢。有人在阳台小声聊天，一直没有回去。' }
-].map(n => ({ ...n, source: 'fallback' }))
+// Dual-mode AI client.
+//
+//   direct  — a judge pastes their own DeepSeek key; the browser talks to
+//             api.deepseek.com itself and the key never reaches our server.
+//   proxy   — the default: same-origin /api/agent/* routes, which run the four
+//             agents behind SQLite caching and rate limiting.
+//   offline — src/narrative-graph.js, the hand-written graph. Always available.
+//
+// The key lives only in a module-private closure. It is never written to
+// localStorage, sessionStorage, a cookie, or window.
 
-export async function generateNights(seedHint = '') {
+import {
+  normalizePlanPayload,
+  normalizeEvolvePayload,
+  normalizeEpiloguePayload
+} from '../shared/ai-schema.js'
+import { PLAN_SYSTEM_PROMPT, EVOLVE_SYSTEM_PROMPT, EPILOGUE_SYSTEM_PROMPT } from '../shared/ai-prompts.js'
+import { buildOfflinePlan, buildOfflineEvolution, buildOfflineEpilogue } from './narrative-graph.js'
+import { ENDING_IDS, MOOD_TOKEN_IDS } from '../shared/constants.js'
+
+export const DIRECT_BASE = 'https://api.deepseek.com/v1'
+
+/** @type {string} */
+let _memoryApiKey = ''
+/** @type {string} */
+let _memoryApiBase = DIRECT_BASE
+
+/**
+ * Store the user's key in memory for this page lifetime only.
+ * @param {string} key
+ * @param {string} [base]
+ * @returns {boolean} true when the key looks structurally valid
+ */
+export function setUserApiKey(key, base = DIRECT_BASE) {
+  const trimmed = String(key || '').trim()
+  if (!/^sk-[A-Za-z0-9_-]{12,}$/.test(trimmed)) return false
+  _memoryApiKey = trimmed
+  _memoryApiBase = String(base || DIRECT_BASE).replace(/\/+$/, '')
+  return true
+}
+
+export function clearUserApiKey() {
+  _memoryApiKey = ''
+  _memoryApiBase = DIRECT_BASE
+}
+
+/**
+ * @returns {{ enabled: boolean, masked: string, base: string }}
+ */
+export function getUserApiKeyStatus() {
+  if (!_memoryApiKey) return { enabled: false, masked: '', base: _memoryApiBase }
+  const tail = _memoryApiKey.slice(-4)
+  return { enabled: true, masked: 'sk-****' + tail, base: _memoryApiBase }
+}
+
+/**
+ * Probe a key with the smallest possible completion.
+ * The request goes straight from the browser to DeepSeek; nothing is proxied.
+ *
+ * @param {string} key
+ * @param {string} [base]
+ * @returns {Promise<{ ok: boolean, status: number, message: string }>}
+ */
+export async function verifyUserApiKey(key, base = DIRECT_BASE) {
+  const candidate = String(key || '').trim()
+  if (!/^sk-[A-Za-z0-9_-]{12,}$/.test(candidate)) {
+    return { ok: false, status: 0, message: 'Key 格式看起来不对，通常以 sk- 开头' }
+  }
   try {
-    const ctrl = new AbortController()
-    const to = setTimeout(() => ctrl.abort(), 12000)
-    const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed: seedHint }), signal: ctrl.signal })
-    clearTimeout(to)
-    if (!res.ok) throw new Error('bad status ' + res.status)
-    const data = await res.json()
-    if (!data?.ok || !data?.payload?.nights?.length) throw new Error('no payload')
-    return { nights: data.payload.nights, source: 'ai' }
+    const res = await fetch(String(base || DIRECT_BASE).replace(/\/+$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + candidate },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1
+      }),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (res.ok) {
+      setUserApiKey(candidate, base)
+      return { ok: true, status: res.status, message: '已启用浏览器直连模式（Key 仅驻留内存）' }
+    }
+    if (res.status === 401) return { ok: false, status: 401, message: 'Key 无效或已过期（401）' }
+    if (res.status === 402) return { ok: false, status: 402, message: '账户余额不足（402）' }
+    if (res.status === 429) return { ok: false, status: 429, message: '请求太频繁（429），稍后再试' }
+    return { ok: false, status: res.status, message: '上游返回 ' + res.status }
   } catch {
-    return { nights: FALLBACK_NIGHTS, source: 'fallback' }
+    return { ok: false, status: 0, message: '连不上 api.deepseek.com，请检查网络或代理' }
+  }
+}
+
+/**
+ * @param {string} content
+ * @returns {string}
+ */
+function stripFences(content) {
+  const raw = String(content || '').trim()
+  const m = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/i)
+  if (m) return m[1].trim()
+  const first = raw.indexOf('{')
+  const last = raw.lastIndexOf('}')
+  if (first >= 0 && last > first) return raw.slice(first, last + 1)
+  return raw
+}
+
+/**
+ * A complete offline plan, deep-cloned so a caller can mutate it freely.
+ * Kept exported because v2 code and the spec both refer to FALLBACK_NIGHTS.
+ */
+export const FALLBACK_NIGHTS = buildOfflinePlan('lamp', {}).nights.map(n => ({ ...n, source: 'fallback' }))
+
+export class AIClient {
+  /**
+   * @param {{ timeoutMs?: number, onSource?: (source: string) => void }} [opts]
+   */
+  constructor({ timeoutMs = 12000, onSource } = {}) {
+    this.timeoutMs = timeoutMs
+    this.onSource = onSource
+    /** @type {'ai'|'cache'|'offline'|'direct'} */
+    this.lastSource = 'offline'
+  }
+
+  /** @returns {'direct'|'proxy'} */
+  get mode() {
+    return _memoryApiKey ? 'direct' : 'proxy'
+  }
+
+  /**
+   * @param {string} system
+   * @param {string} user
+   * @param {number} maxTokens
+   * @returns {Promise<any>}
+   */
+  async _callDirect(system, user, maxTokens) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
+    try {
+      const res = await fetch(_memoryApiBase + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + _memoryApiKey },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          temperature: 0.9,
+          max_tokens: maxTokens,
+          response_format: { type: 'json_object' }
+        }),
+        signal: ctrl.signal
+      })
+      if (!res.ok) throw new Error('direct ' + res.status)
+      const data = await res.json()
+      const content = data && data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : ''
+      if (!content) throw new Error('empty completion')
+      return JSON.parse(stripFences(content))
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * @param {string} path
+   * @param {any} body
+   * @returns {Promise<any>}
+   */
+  async _postProxy(path, body) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      })
+      if (!res.ok) throw new Error('proxy ' + res.status)
+      return await res.json()
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * @param {'ai'|'cache'|'offline'|'direct'} source
+   */
+  _report(source) {
+    this.lastSource = source
+    if (this.onSource) this.onSource(source)
+  }
+
+  /**
+   * Agent 1 + 2 — the three-night baseline.
+   * @param {{ moodToken?: string, unlockedEndings?: string[], playCount?: number, communityMemory?: any, uid?: string }} input
+   * @returns {Promise<{ source: string, payload: any }>}
+   */
+  async requestInitialPlan(input = {}) {
+    const mood = MOOD_TOKEN_IDS.includes(String(input.moodToken)) ? String(input.moodToken) : 'lamp'
+    const unlocked = Array.isArray(input.unlockedEndings)
+      ? input.unlockedEndings.filter(id => ENDING_IDS.includes(String(id)))
+      : []
+    const playCount = Number(input.playCount) || 0
+
+    const offline = () => {
+      const payload = normalizePlanPayload(buildOfflinePlan(mood, { unlockedEndings: unlocked, playCount }))
+        || buildOfflinePlan(mood, { playCount })
+      this._report('offline')
+      return { source: 'offline', payload }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          PLAN_SYSTEM_PROMPT,
+          JSON.stringify({ moodToken: mood, unlockedEndings: unlocked, playCount, communityMemory: input.communityMemory || null }),
+          2200
+        )
+        const payload = normalizePlanPayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/plan', {
+        uid: input.uid || '',
+        moodToken: mood,
+        unlockedEndings: unlocked,
+        playCount,
+        communityMemory: input.communityMemory
+      })
+      const payload = data && data.payload ? data.payload : null
+      const normalised = payload ? normalizePlanPayload(payload) : null
+      if (!normalised) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload: normalised }
+    } catch {
+      return offline()
+    }
+  }
+
+  /**
+   * Agent 3 — rewrite the nights the player has not reached yet.
+   * @param {{ moodToken?: string, night1Telemetry?: any, firstNight?: number, uid?: string }} input
+   * @returns {Promise<{ source: string, payload: any }>}
+   */
+  async requestMidGameEvolution(input = {}) {
+    const mood = MOOD_TOKEN_IDS.includes(String(input.moodToken)) ? String(input.moodToken) : 'lamp'
+    const telemetry = input.night1Telemetry || {}
+    const firstNight = Math.max(2, Math.min(3, Number(input.firstNight) || 2))
+
+    const offline = () => {
+      const fallback = buildOfflineEvolution(telemetry)
+      const nights = fallback.nights.filter(n => n.night >= firstNight)
+      this._report('offline')
+      return { source: 'offline', payload: normalizeEvolvePayload({ nights }, firstNight) || { nights } }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          EVOLVE_SYSTEM_PROMPT,
+          JSON.stringify({ moodToken: mood, night1Telemetry: telemetry, fromNight: firstNight }),
+          2200
+        )
+        const payload = normalizeEvolvePayload(raw, firstNight)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/evolve', {
+        uid: input.uid || '',
+        moodToken: mood,
+        night1Telemetry: telemetry,
+        firstNight
+      })
+      const normalised = data && data.payload ? normalizeEvolvePayload(data.payload, firstNight) : null
+      if (!normalised) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload: normalised }
+    } catch {
+      return offline()
+    }
+  }
+
+  /**
+   * Agent 4 — the closing letter.
+   * @param {{ endingId?: string, bondRoomId?: number, totalWarmth?: number, litTotal?: number, maxCombo?: number, resonanceCount?: number, stampsEarned?: number, choicesHistory?: any[], path?: string, uid?: string }} input
+   * @returns {Promise<{ source: string, payload: any }>}
+   */
+  async requestEndingEpilogue(input = {}) {
+    const endingId = ENDING_IDS.includes(String(input.endingId)) ? String(input.endingId) : 'ENDING_F_DRIFT'
+    const bondRoomId = Number(input.bondRoomId) || 0
+
+    const offline = () => {
+      const payload = normalizeEpiloguePayload(buildOfflineEpilogue({
+        endingId,
+        bondRoomId,
+        path: input.path === 'B' ? 'B' : 'A',
+        totalWarmth: Number(input.totalWarmth) || 0
+      }))
+      this._report('offline')
+      return { source: 'offline', payload }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          EPILOGUE_SYSTEM_PROMPT,
+          JSON.stringify({
+            endingId,
+            totalWarmth: Number(input.totalWarmth) || 0,
+            litTotal: Number(input.litTotal) || 0,
+            maxCombo: Number(input.maxCombo) || 0,
+            resonanceCount: Number(input.resonanceCount) || 0,
+            stampsEarned: Number(input.stampsEarned) || 0,
+            bondRoomId,
+            choicesHistory: Array.isArray(input.choicesHistory) ? input.choicesHistory : []
+          }),
+          1200
+        )
+        const payload = normalizeEpiloguePayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/epilogue', {
+        uid: input.uid || '',
+        endingId,
+        bondRoomId,
+        totalWarmth: Number(input.totalWarmth) || 0,
+        litTotal: Number(input.litTotal) || 0,
+        maxCombo: Number(input.maxCombo) || 0,
+        resonanceCount: Number(input.resonanceCount) || 0,
+        stampsEarned: Number(input.stampsEarned) || 0,
+        choicesHistory: Array.isArray(input.choicesHistory) ? input.choicesHistory : []
+      })
+      const normalised = data && data.payload ? normalizeEpiloguePayload(data.payload) : null
+      if (!normalised) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload: normalised }
+    } catch {
+      return offline()
+    }
   }
 }
