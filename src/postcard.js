@@ -9,6 +9,7 @@ export function drawPostcard({ run, nights, records }) {
     bg.addColorStop(0, '#f7efdd'); bg.addColorStop(0.55, '#f3e7cf'); bg.addColorStop(1, '#e9d8b8')
     g.fillStyle = bg; g.fillRect(0, 0, W, H)
     // soft watercolor blobs
+    /** @type {[string, number, number, number][]} */
     const blobs = [['rgba(255,196,122,.35)', 180, 260, 320], ['rgba(160,190,240,.30)', 880, 380, 380], ['rgba(255,150,120,.22)', 300, 1080, 300], ['rgba(140,220,190,.20)', 820, 1180, 300]]
     for (const [col, x, y, r] of blobs) { const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, col); rg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = rg; g.fillRect(0, 0, W, H) }
     // night sky band with 24 windows

@@ -16,19 +16,6 @@ export const PALETTES = {
 }
 
 const hex = n => '#' + n.toString(16).padStart(6, '0')
-function lerp(a, b, t) { return a + (b - a) * t }
-
-function makeGradient(colors) {
-  const c = document.createElement('canvas'); c.width = 8; c.height = 512
-  const g = c.getContext('2d')
-  const grad = g.createLinearGradient(0, 0, 0, 512)
-  grad.addColorStop(0.0, hex(colors[0]))
-  grad.addColorStop(0.5, hex(colors[1]))
-  grad.addColorStop(0.82, hex(colors[2]))
-  grad.addColorStop(1.0, hex(colors[0]))
-  g.fillStyle = grad; g.fillRect(0, 0, 8, 512)
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
-}
 
 function roundedRect(g, x, y, w, h, r) {
   g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath()
@@ -111,34 +98,6 @@ function drawInterior(g, S, variant) {
   g.restore()
 }
 
-function facadeTexture() {
-  const W = 1024, H = 720; const c = document.createElement('canvas'); c.width = W; c.height = H
-  const g = c.getContext('2d')
-  g.fillStyle = '#151827'; g.fillRect(0, 0, W, H)
-  // brick / plaster noise
-  for (let i = 0; i < 5000; i++) {
-    const a = Math.random() * 0.05
-    g.fillStyle = `rgba(${Math.random() > 0.5 ? 40 : 8},${20 + Math.random() * 20},40,${a})`
-    g.fillRect(Math.random() * W, Math.random() * H, 2 + Math.random() * 3, 2 + Math.random() * 3)
-  }
-  // warm vertical light wash
-  const wg = g.createLinearGradient(0, H, 0, 0)
-  wg.addColorStop(0, 'rgba(120,80,40,0.25)'); wg.addColorStop(0.5, 'rgba(40,40,70,0.0)')
-  g.fillStyle = wg; g.fillRect(0, 0, W, H)
-  // faint brick courses
-  g.strokeStyle = 'rgba(255,255,255,0.02)'; g.lineWidth = 1
-  for (let y = 12; y < H; y += 18) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke() }
-  // room cells (recessed boxes w/ inner shadow)
-  const cw = W / COLS, ch = H / ROWS
-  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
-    const x = col * cw, y = r * ch
-    g.fillStyle = 'rgba(4,7,16,0.42)'; g.fillRect(x + 12, y + 10, cw - 24, ch - 20)
-    g.fillStyle = 'rgba(120,150,210,0.06)'; g.fillRect(x + 12, y + 10, cw - 24, 4)
-    g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + 12, y + ch - 24, cw - 24, 14)
-  }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
-}
-
 function rooftopSvg() {
   // dense ink-wash skyline: rooftops + silhouetted trees for far layer
   const W = 2048, H = 300; const c = document.createElement('canvas'); c.width = W; c.height = H
@@ -175,6 +134,10 @@ function drawTreeSil(g, x, base, h) {
 }
 
 export class Scene {
+  /**
+   * @param {HTMLElement} host
+   * @param {{ onWindowTap?: (w: any, x: number, y: number) => void }} [opts]
+   */
   constructor(host, { onWindowTap } = {}) {
     this.host = host
     this.onWindowTap = onWindowTap
@@ -618,7 +581,6 @@ export class Scene {
     const anim = () => {
       const t = (performance.now() - start) / 1400
       if (t >= 1) { this.scene.remove(line); this.scene.remove(tail); geo.dispose(); mat.dispose(); return }
-      const head = new THREE.Vector3().lerpVectors(from, to, t)
       const p2 = geo.attributes.position.array
       for (let i = 0; i < pts; i++) { const tt = Math.max(0, t - i * 0.012); const v = new THREE.Vector3().lerpVectors(from, to, tt); p2[i*3]=v.x; p2[i*3+1]=v.y; p2[i*3+2]=v.z }
       geo.attributes.position.needsUpdate = true

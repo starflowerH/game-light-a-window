@@ -1,4 +1,21 @@
 // All DOM overlays: title, HUD, story cards, night summaries, result + leaderboard.
+
+/**
+ * Typed querySelector. `Element` does not carry `onclick`/`style`, so every
+ * DOM lookup in this module goes through this helper.
+ * @param {ParentNode} root
+ * @param {string} sel
+ * @returns {HTMLElement}
+ */
+const qs = (root, sel) => /** @type {HTMLElement} */ (root.querySelector(sel))
+
+/**
+ * Typed querySelectorAll for a list of elements.
+ * @param {ParentNode} root
+ * @param {string} sel
+ * @returns {NodeListOf<HTMLElement>}
+ */
+const qsa = (root, sel) => /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(sel))
 const esc = s => String(s ?? '').replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]))
 
 export class UI {
@@ -9,6 +26,7 @@ export class UI {
     this.fx = document.getElementById('fx')
   }
 
+  /** @returns {HTMLElement} */
   _layer(html, cls = '') { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; return d }
 
   showTitle(onStart) {
@@ -25,10 +43,10 @@ export class UI {
           <div class="note">AI 会为每一晚生成天气、小故事和一张明信片。你的成绩会进入今晚的匿名榜单。</div>
         </div>
       </div>`, '')
-    s.querySelector('[data-act="start"]').onclick = onStart
-    s.querySelector('[data-act="board"]').onclick = () => this.showLeaderboard()
+    qs(s, 'button[data-act="start"]').onclick = onStart
+    qs(s, 'button[data-act="board"]').onclick = () => this.showLeaderboard()
     this.el.appendChild(s); this._cur = s
-    requestAnimationFrame(() => { this.el.querySelector('.panel')?.classList.add('fade-in') })
+    requestAnimationFrame(() => { qs(this.el, '.panel')?.classList.add('fade-in') })
     this.onStart = onStart
   }
 
@@ -39,7 +57,7 @@ export class UI {
   }
 
   hideAll() {
-    this.el.querySelectorAll('.screen').forEach(n => n.remove())
+    qsa(this.el, '.screen').forEach(n => n.remove())
     this.hideStory(); this.hidePause(); this.hideCoach()
     this._cur = null
     const hud = document.getElementById('hud')
@@ -66,23 +84,23 @@ export class UI {
       <div class="hint">点击发光的窗户 · 连续点亮形成光链 · 偶尔有惊喜</div>`
     this.el.appendChild(hud)
     requestAnimationFrame(() => hud.classList.add('on'))
-    hud.querySelector('[data-pause]').onclick = onPause
-    hud.querySelector('[data-mute]').onclick = (e) => { const m = onMute(); e.currentTarget.textContent = m ? '🔇' : '🔊' }
+    qs(hud, 'button[data-pause]').onclick = onPause
+    qs(hud, 'button[data-mute]').onclick = (e) => { const m = onMute(); /** @type {HTMLElement} */ (e.currentTarget).textContent = m ? '🔇' : '🔊' }
     this.hudEl = hud
-    this._warmEl = hud.querySelector('[data-warm]'); this._barEl = hud.querySelector('[data-warmbar]')
-    this._comboEl = hud.querySelector('[data-combo]'); this._timeEl = hud.querySelector('[data-time]')
+    this._warmEl = qs(hud, 'b[data-warm]'); this._barEl = qs(hud, 'i[data-warmbar]')
+    this._comboEl = qs(hud, 'b[data-combo]'); this._timeEl = qs(hud, 'b[data-time]')
   }
 
   setStats(game) {
     if (!game.night || !this._warmEl) return
-    this._warmEl.textContent = game.night.warmth
+    this._warmEl.textContent = String(game.night.warmth)
     this._barEl.style.width = Math.min(100, game.night.warmth / 1.2) + '%'
-    this._comboEl.textContent = game.night.combo
+    this._comboEl.textContent = String(game.night.combo)
   }
 
   tick(game) {
     if (!this._timeEl || !game.night) return
-    this._timeEl.textContent = Math.ceil(game.night.timeLeft)
+    this._timeEl.textContent = String(Math.ceil(game.night.timeLeft))
     if (game.night.timeLeft < 10) this._timeEl.style.color = '#ff9a7a'
     this._warmEl.textContent = game.night.warmth
     this._barEl.style.width = Math.min(100, game.night.warmth / 1.2) + '%'
@@ -165,7 +183,7 @@ export class UI {
       <p class="lede" style="margin-bottom:16px">${last ? '最后一晚了，把灯都点亮吧。' : '天还会一点一点暗下去，下一晚的窗会更少、更慢。'}</p>
       <button class="btn primary" data-act="next">${last ? '看看今晚的明信片' : '继续第 ' + (sum.night + 1) + ' 晚'}</button>
     </div></div>`)
-    s.querySelector('[data-act="next"]').onclick = onNext
+    qs(s, 'button[data-act="next"]').onclick = onNext
     this.el.appendChild(s); this._cur = s
   }
 
@@ -188,20 +206,20 @@ export class UI {
       <div class="note">AI 来源：${aiSource === 'ai' ? '本次天气与故事由 AI 实时生成' : '本地内容（AI 暂不可用）'} · 明信片可长按保存</div>
     </div></div>`)
     this.el.appendChild(s); this._cur = s
-    const body = s.querySelector('[data-body]')
-    const tabs = s.querySelectorAll('[data-tab]')
-    const nick = s.querySelector('[data-nick]')
+    const body = qs(s, 'div[data-body]')
+    const tabs = qsa(s, 'button[data-tab]')
+    const nick = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
     try { nick.value = localStorage.getItem('law.nick') || '' } catch {}
-    const submit = s.querySelector('[data-act="submit"]')
+    const submit = /** @type {HTMLButtonElement} */ (qs(s, 'button[data-act="submit"]'))
     submit.onclick = async () => {
       const name = (nick.value || '').trim() || '今晚的某某'
       try { localStorage.setItem('law.nick', name) } catch {}
       submit.textContent = '…'; submit.disabled = true
-      const res = await window.__game.submitScore(name)
+      const res = await /** @type {any} */ (window).__game.submitScore(name)
       submit.textContent = res?.ok ? '已上榜' : '稍后再试'; setTimeout(() => { submit.disabled = false; submit.textContent = '上榜' }, 1200)
       showBoard(name)
     }
-    s.querySelector('[data-act="replay"]').onclick = () => { this.hideAll(); onReplay() }
+    qs(s, 'button[data-act="replay"]').onclick = () => { this.hideAll(); onReplay() }
     const showBoard = (mine) => {
       tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === 'board'))
       body.innerHTML = '<div class="empty">正在读取今晚的灯…</div>'
@@ -241,7 +259,7 @@ export class UI {
     document.body.appendChild(wrap)
     requestAnimationFrame(() => wrap.style.opacity = '1')
     let idx = 0, typing = false, finishedAll = false
-    const lineEl = wrap.querySelector('#intro-line')
+    const lineEl = qs(wrap, '#intro-line')
     const finish = () => { finishedAll = true; wrap.style.opacity = '0'; setTimeout(() => { wrap.remove(); onDone?.() }, 550) }
     const typeLine = () => {
       if (idx >= lines.length) { finishedAll = true; setTimeout(finish, 900); return }
@@ -261,7 +279,7 @@ export class UI {
       else finish()
     }
     wrap.addEventListener('pointerdown', advance)
-    wrap.querySelector('#intro-skip').addEventListener('pointerdown', (e) => { e.stopPropagation(); finishedAll = true; clearTimeout(this._introTimer); finish() })
+    qs(wrap, '#intro-skip').addEventListener('pointerdown', (e) => { e.stopPropagation(); finishedAll = true; clearTimeout(this._introTimer); finish() })
     this._introEl = wrap
     typeLine()
   }
@@ -286,18 +304,18 @@ export class UI {
       <div class="board" data-body><div class="empty">正在读取今晚的灯…</div></div>
       <button class="btn ghost" data-act="back">返回</button>
     </div></div>`)
-    s.querySelector('[data-act="back"]').onclick = () => { this.showTitle(this.onStart) }
+    qs(s, '[data-act="back"]').onclick = () => { this.showTitle(this.onStart) }
     this.el.appendChild(s); this._cur = s
     fetch('/api/leaderboard?limit=20').then(r => r.json()).then(d => {
       const items = d?.items || []
-      const body = s.querySelector('[data-body]')
+      const body = qs(s, 'div[data-body]')
       body.innerHTML = items.length ? items.map((it, i) => `<div class="row ${i < 3 ? 'top' : ''}"><div class="rk">${i + 1}</div><div class="nm">${esc(it.nickname)}</div><div style="text-align:right"><div class="sc">${it.total_warmth} 温暖</div><div class="meta">点亮 ${it.lit_windows} · 连击 ${it.max_combo}</div></div></div>`).join('') : '<div class="empty">今晚还没有人上榜</div>'
-    }).catch(() => { s.querySelector('[data-body]').innerHTML = '<div class="empty">榜单暂时连接不上</div>' })
+    }).catch(() => { qs(s, 'div[data-body]').innerHTML = '<div class="empty">榜单暂时连接不上</div>' })
   }
 
   pause(onResume) {
     const s = this._layer(`<div class="screen" style="z-index:30"><div class="panel" style="text-align:center"><div class="kicker">PAUSED</div><h1 style="font-size:26px">灯先替你留着</h1><p class="lede">暂停时，天色和窗户都不会变化。</p><button class="btn primary" data-act="resume">继续点亮</button></div></div>`)
-    s.querySelector('[data-act="resume"]').onclick = onResume
+    qs(s, '[data-act="resume"]').onclick = onResume
     this.el.appendChild(s); this._pauseEl = s
   }
   hidePause() { this._pauseEl?.remove(); this._pauseEl = null }
