@@ -105,6 +105,10 @@ app.post('/api/generate', async (req, reply) => {
 app.get('/api/ai-health', async () => ({ ok: Boolean(AI_KEY), model: AI_MODEL, base: AI_BASE }))
 
 app.get('/api/health', async () => ({ ok: true, service: 'light-a-window', time: new Date().toISOString() }))
+
+// Nginx has an explicit `location = /health` that proxies to this path, so the
+// bare /health route is a live health-check endpoint, not dead code.
+app.get('/health', async () => ({ ok: true, service: 'light-a-window', time: new Date().toISOString() }))
 app.get('/api/leaderboard', async (req) => {
   /** @type {{limit?: number}} */
   const query = (req.query || {})
