@@ -12,11 +12,22 @@
 import {
   normalizePlanPayload,
   normalizeEvolvePayload,
-  normalizeEpiloguePayload
+  normalizeEpiloguePayload,
+  normalizeDialoguePayload,
+  normalizePuzzlePayload,
+  normalizeDebriefPayload
 } from '../shared/ai-schema.js'
-import { PLAN_SYSTEM_PROMPT, EVOLVE_SYSTEM_PROMPT, EPILOGUE_SYSTEM_PROMPT } from '../shared/ai-prompts.js'
+import {
+  PLAN_SYSTEM_PROMPT,
+  EVOLVE_SYSTEM_PROMPT,
+  EPILOGUE_SYSTEM_PROMPT,
+  DIALOGUE_SYSTEM_PROMPT,
+  PUZZLE_SYSTEM_PROMPT,
+  DEBRIEF_SYSTEM_PROMPT
+} from '../shared/ai-prompts.js'
 import { buildOfflinePlan, buildOfflineEvolution, buildOfflineEpilogue } from './narrative-graph.js'
-import { ENDING_IDS, MOOD_TOKEN_IDS } from '../shared/constants.js'
+import { buildOfflineDialogue } from './npc-portraits.js'
+import { ENDING_IDS, MOOD_TOKEN_IDS, dormDef, gameModeDef } from '../shared/constants.js'
 
 export const DIRECT_BASE = 'https://api.deepseek.com/v1'
 
@@ -356,6 +367,170 @@ export class AIClient {
       if (!normalised) throw new Error('bad proxy payload')
       this._report(data.source || 'ai')
       return { source: data.source || 'ai', payload: normalised }
+    } catch {
+      return offline()
+    }
+  }
+
+  /**
+   * Agent DialogueDirector: generate opening / dorm-switch NPC dialogue adapted to weather & season.
+   * @param {{ dormType?: string, season?: string, weather?: string, gameMode?: string, playerNick?: string }} input
+   */
+  async requestOpeningDialogue(input = {}) {
+    const dorm = dormDef(input.dormType || 'university')
+    const season = String(input.season || 'autumn')
+    const weather = String(input.weather || 'clear')
+    const mode = gameModeDef(input.gameMode || 'memory_sequence')
+
+    const offline = () => {
+      const payload = buildOfflineDialogue(dorm.id, season, weather)
+      this._report('offline')
+      return { source: 'offline', payload }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          DIALOGUE_SYSTEM_PROMPT,
+          JSON.stringify({ dormId: dorm.id, dormName: dorm.name, season, weather, gameMode: mode.name, playerNick: input.playerNick || '夜巡员' }),
+          900
+        )
+        const payload = normalizeDialoguePayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/dialogue', {
+        dormType: dorm.id,
+        season,
+        weather,
+        gameMode: mode.id,
+        playerNick: input.playerNick || '夜巡员'
+      })
+      const payload = data && data.payload ? normalizeDialoguePayload(data.payload) : null
+      if (!payload) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload }
+    } catch {
+      return offline()
+    }
+  }
+
+  /**
+   * Agent PuzzleArchitect: design geometric / symmetrical target window pattern for memory levels.
+   * @param {{ dormType?: string, rows?: number, cols?: number, count?: number, level?: number, mode?: string }} input
+   */
+  async requestAiPuzzle(input = {}) {
+    const dorm = dormDef(input.dormType || 'university')
+    const total = dorm.windowCount
+    const wanted = Math.max(2, Math.min(total - 1, Number(input.count) || 4))
+
+    const offline = () => {
+      const picks = []
+      const pool = Array.from({ length: total }, (_, i) => i).sort(() => Math.random() - 0.5)
+      for (const idx of pool.slice(0, wanted)) picks.push(idx)
+      this._report('offline')
+      return {
+        source: 'offline',
+        payload: { patternName: '对称楼道巡灯', flavorHint: '留意同排与楼梯间的灯影', targets: picks }
+      }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          PUZZLE_SYSTEM_PROMPT,
+          JSON.stringify({ dormName: dorm.name, rows: dorm.rows, cols: dorm.cols, count: wanted, level: input.level || 1, mode: input.mode || 'memory_sequence' }),
+          600
+        )
+        const payload = normalizePuzzlePayload(raw, total, wanted)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/puzzle', {
+        dormType: dorm.id,
+        rows: dorm.rows,
+        cols: dorm.cols,
+        count: wanted,
+        level: Number(input.level) || 1,
+        mode: String(input.mode || 'memory_sequence')
+      })
+      const payload = data && data.payload ? normalizePuzzlePayload(data.payload, total, wanted) : null
+      if (!payload) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload }
+    } catch {
+      return offline()
+    }
+  }
+
+  /**
+   * Agent InspectorCommentator: write personalized AI evaluation after minigame completion.
+   * @param {{ gameMode?: string, dormType?: string, stageReached?: number, accuracyPct?: number, score?: number, playerNick?: string }} input
+   */
+  async requestInspectorDebrief(input = {}) {
+    const dorm = dormDef(input.dormType || 'university')
+    const mode = gameModeDef(input.gameMode || 'memory_sequence')
+    const acc = Math.max(0, Math.min(100, Math.round(Number(input.accuracyPct) || 0)))
+    const stage = Math.max(1, Number(input.stageReached) || 1)
+
+    const offline = () => {
+      const rankTitle = acc >= 92 ? '精准夜巡官' : acc >= 75 ? '细心守灯人' : '温柔见习生'
+      const auntComment = `${dorm.shortName}今晚的第 ${stage} 关巡查记录妥当，准确率 ${acc}%，宿管室的热茶给你留着。`
+      const deanComment = acc >= 85 ? '周副校长在巡查本旁记了一句“路线熟悉，值得表扬”。' : '周副校长点点头：记住先看楼层参考窗，下次会更稳。'
+      this._report('offline')
+      return {
+        source: 'offline',
+        payload: {
+          rankTitle,
+          auntComment,
+          deanComment,
+          sleepTip: '把桌边小灯关剩一盏暖光，喝半杯温水再休息。',
+          whisperSuggestion: `今晚在${dorm.shortName}巡完夜灯，愿大家做个好梦。`
+        }
+      }
+    }
+
+    if (this.mode === 'direct') {
+      try {
+        const raw = await this._callDirect(
+          DEBRIEF_SYSTEM_PROMPT,
+          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score: Number(input.score) || 0, playerNick: input.playerNick || '夜巡员' }),
+          600
+        )
+        const payload = normalizeDebriefPayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        this._report('direct')
+        return { source: 'direct', payload }
+      } catch {
+        return offline()
+      }
+    }
+
+    try {
+      const data = await this._postProxy('/api/agent/debrief', {
+        gameMode: mode.id,
+        dormType: dorm.id,
+        stageReached: stage,
+        accuracyPct: acc,
+        score: Number(input.score) || 0,
+        playerNick: input.playerNick || '夜巡员'
+      })
+      const payload = data && data.payload ? normalizeDebriefPayload(data.payload) : null
+      if (!payload) throw new Error('bad proxy payload')
+      this._report(data.source || 'ai')
+      return { source: data.source || 'ai', payload }
     } catch {
       return offline()
     }

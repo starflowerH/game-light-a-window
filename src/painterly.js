@@ -15,13 +15,13 @@ export const PainterlyShader = {
   uniforms: {
     tDiffuse: { value: null },
     resolution: { value: new THREE.Vector2(1, 1) },
-    strength: { value: 0.55 },
+    strength: { value: 0.40 },
     time: { value: 0 },
     paperScale: { value: 1.0 },
     tint: { value: new THREE.Color(0x2a1c3a) },
     uRainAmount: { value: 0 },
     uDawn: { value: 0 },
-    uKuwaharaRadius: { value: 2.5 }
+    uKuwaharaRadius: { value: 0.95 }
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -302,9 +302,25 @@ export const PainterlyShader = {
 
 export function createPainterlyPass() {
   const pass = new ShaderPass(PainterlyShader)
-  pass.material.uniforms.strength.value = 0.55
-  pass.material.uniforms.uKuwaharaRadius.value = 2.5
+  setPainterlyStyle(pass, 'stardew')
   pass.material.uniforms.uRainAmount.value = 0
   pass.material.uniforms.uDawn.value = 0
   return pass
+}
+
+/**
+ * 切换后处理画风：'stardew' 保留像素砖瓦锐度，'oil' 使用强笔触油画感
+ * @param {any} pass
+ * @param {'stardew' | 'oil'=} mode
+ */
+export function setPainterlyStyle(pass, mode = 'stardew') {
+  if (!pass?.material?.uniforms) return
+  const u = pass.material.uniforms
+  if (mode === 'oil') {
+    u.strength.value = 0.55
+    u.uKuwaharaRadius.value = 2.4
+  } else {
+    u.strength.value = 0.40
+    u.uKuwaharaRadius.value = 0.95
+  }
 }

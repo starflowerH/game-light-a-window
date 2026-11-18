@@ -11,14 +11,32 @@ import {
   normalizeEpiloguePayload,
   normalizeEvolvePayload,
   normalizePlanPayload,
+  normalizeDialoguePayload,
+  normalizePuzzlePayload,
+  normalizeDebriefPayload,
   sanitizeText,
   telemetryBucket
 } from '../shared/ai-schema.js'
-import { MOOD_TOKEN_IDS, ENDING_IDS } from '../shared/constants.js'
+import { MOOD_TOKEN_IDS, ENDING_IDS, DORM_IDS, GAME_MODE_IDS, dormDef, gameModeDef } from '../shared/constants.js'
 import { buildOfflineEpilogue, buildOfflineEvolution, buildOfflinePlan } from '../src/narrative-graph.js'
+import { buildOfflineDialogue } from '../src/npc-portraits.js'
 
-import { PLAN_SYSTEM_PROMPT, EVOLVE_SYSTEM_PROMPT, EPILOGUE_SYSTEM_PROMPT } from '../shared/ai-prompts.js'
-export { PLAN_SYSTEM_PROMPT, EVOLVE_SYSTEM_PROMPT, EPILOGUE_SYSTEM_PROMPT }
+import {
+  PLAN_SYSTEM_PROMPT,
+  EVOLVE_SYSTEM_PROMPT,
+  EPILOGUE_SYSTEM_PROMPT,
+  DIALOGUE_SYSTEM_PROMPT,
+  PUZZLE_SYSTEM_PROMPT,
+  DEBRIEF_SYSTEM_PROMPT
+} from '../shared/ai-prompts.js'
+export {
+  PLAN_SYSTEM_PROMPT,
+  EVOLVE_SYSTEM_PROMPT,
+  EPILOGUE_SYSTEM_PROMPT,
+  DIALOGUE_SYSTEM_PROMPT,
+  PUZZLE_SYSTEM_PROMPT,
+  DEBRIEF_SYSTEM_PROMPT
+}
 
 /**
  * @param {string} content
@@ -301,6 +319,113 @@ export function createAgentHub({
           const normalised = normalizeEpiloguePayload(reused)
           if (normalised) return { source: 'cache', payload: normalised }
         }
+        return offline()
+      }
+    },
+
+    /** Agent DialogueDirector: dynamic opening/dorm-switch NPC dialogue. */
+    async runDialogueAgent(input = {}) {
+      const dormType = DORM_IDS.includes(String(input.dormType)) ? String(input.dormType) : 'university'
+      const season = sanitizeText(input.season, 16) || 'autumn'
+      const weather = sanitizeText(input.weather, 16) || 'clear'
+      const dorm = dormDef(dormType)
+      const cacheKey = 'dialogue|' + fnv1a([dormType, season, weather].join('|'))
+      const cached = db.getCachedAiPayload(cacheKey)
+      if (cached) {
+        const normalised = normalizeDialoguePayload(cached)
+        if (normalised) return { source: 'cache', payload: normalised }
+      }
+      const offline = () => ({ source: 'offline', payload: buildOfflineDialogue(dormType, season, weather) })
+      if (!configured) return offline()
+
+      try {
+        const raw = await callModel(
+          DIALOGUE_SYSTEM_PROMPT,
+          JSON.stringify({ dormId: dorm.id, dormName: dorm.name, season, weather, playerNick: sanitizeText(input.playerNick, 8) || '夜巡员' }),
+          900
+        )
+        const payload = normalizeDialoguePayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        db.setCachedAiPayload({ key: cacheKey, agentType: 'dialogue', payload })
+        return { source: 'ai', payload }
+      } catch {
+        return offline()
+      }
+    },
+
+    /** Agent PuzzleArchitect: geometric & rhythmic window puzzle target generator. */
+    async runPuzzleAgent(input = {}) {
+      const dormType = DORM_IDS.includes(String(input.dormType)) ? String(input.dormType) : 'university'
+      const dorm = dormDef(dormType)
+      const total = dorm.windowCount
+      const wanted = Math.max(2, Math.min(total - 1, Number(input.count) || 4))
+      const level = Math.max(1, Math.min(20, Number(input.level) || 1))
+      const cacheKey = 'puzzle|' + fnv1a([dormType, level, wanted].join('|'))
+      const cached = db.getCachedAiPayload(cacheKey)
+      if (cached) {
+        const normalised = normalizePuzzlePayload(cached, total, wanted)
+        if (normalised) return { source: 'cache', payload: normalised }
+      }
+      const offline = () => {
+        const picks = Array.from({ length: total }, (_, i) => i).sort(() => Math.random() - 0.5).slice(0, wanted)
+        return { source: 'offline', payload: { patternName: '对称楼道巡灯', flavorHint: '留意同排与楼梯间的灯影', targets: picks } }
+      }
+      if (!configured) return offline()
+
+      try {
+        const raw = await callModel(
+          PUZZLE_SYSTEM_PROMPT,
+          JSON.stringify({ dormName: dorm.name, rows: dorm.rows, cols: dorm.cols, count: wanted, level, mode: String(input.mode || 'memory_sequence') }),
+          600
+        )
+        const payload = normalizePuzzlePayload(raw, total, wanted)
+        if (!payload) throw new Error('schema rejected')
+        db.setCachedAiPayload({ key: cacheKey, agentType: 'puzzle', payload })
+        return { source: 'ai', payload }
+      } catch {
+        return offline()
+      }
+    },
+
+    /** Agent InspectorCommentator: post-round AI inspector critique. */
+    async runDebriefAgent(input = {}) {
+      const modeId = GAME_MODE_IDS.includes(String(input.gameMode)) ? String(input.gameMode) : 'memory_sequence'
+      const dormType = DORM_IDS.includes(String(input.dormType)) ? String(input.dormType) : 'university'
+      const mode = gameModeDef(modeId)
+      const dorm = dormDef(dormType)
+      const stage = Math.max(1, Math.min(99, Number(input.stageReached) || 1))
+      const acc = Math.max(0, Math.min(100, Math.round(Number(input.accuracyPct) || 0)))
+      const score = Math.max(0, Number(input.score) || 0)
+
+      const offline = () => ({
+        source: 'offline',
+        payload: {
+          rankTitle: acc >= 92 ? '精准夜巡官' : acc >= 75 ? '细心守灯人' : '温柔见习生',
+          auntComment: `${dorm.shortName}今晚的第 ${stage} 关巡查记录妥当，准确率 ${acc}%，宿管室的热茶给你留着。`,
+          deanComment: acc >= 85 ? '周副校长在巡查本旁记了一句“路线熟悉，值得表扬”。' : '周副校长点点头：记住先看楼层参考窗，下次会更稳。',
+          sleepTip: '把桌边小灯关剩一盏暖光，喝半杯温水再休息。',
+          whisperSuggestion: `今晚在${dorm.shortName}巡完夜灯，愿大家做个好梦。`
+        }
+      })
+      if (!configured) return offline()
+
+      const cacheKey = 'debrief|' + fnv1a([modeId, dormType, stage, Math.floor(acc / 10)].join('|'))
+      const cached = db.getCachedAiPayload(cacheKey)
+      if (cached) {
+        const normalised = normalizeDebriefPayload(cached)
+        if (normalised) return { source: 'cache', payload: normalised }
+      }
+      try {
+        const raw = await callModel(
+          DEBRIEF_SYSTEM_PROMPT,
+          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score, playerNick: sanitizeText(input.playerNick, 8) || '夜巡员' }),
+          600
+        )
+        const payload = normalizeDebriefPayload(raw)
+        if (!payload) throw new Error('schema rejected')
+        db.setCachedAiPayload({ key: cacheKey, agentType: 'debrief', payload })
+        return { source: 'ai', payload }
+      } catch {
         return offline()
       }
     }

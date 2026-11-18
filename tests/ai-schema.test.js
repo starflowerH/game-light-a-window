@@ -91,6 +91,9 @@ import {
   normalizePlanPayload,
   normalizeEvolvePayload,
   normalizeEpiloguePayload,
+  normalizeDialoguePayload,
+  normalizePuzzlePayload,
+  normalizeDebriefPayload,
   sanitizeWhisper,
   telemetryBucket,
   isEndingId
@@ -440,6 +443,49 @@ describe('shared constants', () => {
   it('never repeats a room', () => {
     const rooms = WINDOW_IDS.map(w => w.roomId)
     expect(new Set(rooms).size).toBe(24)
+  })
+})
+
+describe('v4 agent schemas (dialogue, puzzle, debrief)', () => {
+  it('normalizes dialogue payload with speaker whitelist and buff choices', () => {
+    const out = normalizeDialoguePayload({
+      lines: [
+        { speakerId: 'aunt_lin', line: '林阿姨刚披上黄雨衣，把大厅钥匙串挂回门口。' },
+        { speakerId: 'unknown_npc', line: '周副校长敲了敲木头巡查板。' }
+      ],
+      choices: [{ label: '先看顺序', buffType: 'extra_shield', buffLabel: '护盾+1' }]
+    })
+    expect(out).not.toBeNull()
+    expect(out?.lines).toHaveLength(2)
+    expect(out?.lines[1].speakerId).toBe('aunt_lin')
+    expect(out?.choices).toHaveLength(2)
+  })
+
+  it('rejects dialogue containing clinical or preachy language', () => {
+    expect(normalizeDialoguePayload({ lines: [{ speakerId: 'aunt_lin', line: '你应该早点睡别熬夜' }] })).toBeNull()
+  })
+
+  it('clamps & deduplicates AI puzzle targets within dorm window bounds', () => {
+    const out = normalizePuzzlePayload({
+      patternName: '银河L折线',
+      flavorHint: '沿着西侧楼梯间依次往上点亮。',
+      targets: [0, 0, 5, 999, -2, 11, 14]
+    }, 18, 3)
+    expect(out).not.toBeNull()
+    expect(out?.targets).toEqual([0, 5, 11])
+    expect(out?.patternName).toBe('银河L折线')
+  })
+
+  it('normalizes inspector debrief commentary and repairs missing sleep tip', () => {
+    const out = normalizeDebriefPayload({
+      rankTitle: '精准夜巡官',
+      auntComment: '十七号楼今晚每一排窗户都记得分毫不差！',
+      deanComment: '周副校长满意地在巡查记录本签下了名字。'
+    })
+    expect(out).not.toBeNull()
+    expect(out?.rankTitle).toBe('精准夜巡官')
+    expect(out?.sleepTip.length).toBeGreaterThan(6)
+    expect(out?.whisperSuggestion.length).toBeGreaterThan(6)
   })
 })
 

@@ -36,7 +36,7 @@ describe('health', () => {
     const body = res.json()
     expect(body.ok).toBe(true)
     expect(body.service).toBe('light-a-window')
-    expect(body.version).toBe('3.0.0')
+    expect(body.version).toBe('4.0.0')
     expect(body.dbOk).toBe(true)
     expect(body.aiConfigured).toBe(false)
     expect(typeof body.globalLitWindows).toBe('number')
@@ -399,5 +399,65 @@ describe('persistence across restarts', () => {
     expect(restored.player.bestWarmth).toBe(222)
     const whispers = (await again.inject({ method: 'GET', url: '/api/whispers?roomId=205' })).json()
     expect(whispers.items.some(w => w.content.includes('这期节目'))).toBe(true)
+  })
+})
+
+describe('v4 minigame agents, filtered leaderboard & myRank', () => {
+  it('serves offline dialogue, puzzle and debrief routes cleanly', async () => {
+    const { app } = makeApp()
+    const dlg = (await app.inject({
+      method: 'POST', url: '/api/agent/dialogue',
+      payload: { dormType: 'grad', season: 'winter', weather: 'snow' }
+    })).json()
+    expect(dlg.ok).toBe(true)
+    expect(dlg.payload.lines.length).toBeGreaterThanOrEqual(2)
+
+    const puz = (await app.inject({
+      method: 'POST', url: '/api/agent/puzzle',
+      payload: { dormType: 'staff', count: 4, level: 2, mode: 'memory_sequence' }
+    })).json()
+    expect(puz.ok).toBe(true)
+    expect(puz.payload.targets).toHaveLength(4)
+
+    const deb = (await app.inject({
+      method: 'POST', url: '/api/agent/debrief',
+      payload: { gameMode: 'memory_sequence', dormType: 'university', stageReached: 4, accuracyPct: 92, score: 860 }
+    })).json()
+    expect(deb.ok).toBe(true)
+    expect(deb.payload.auntComment.length).toBeGreaterThan(8)
+  })
+
+  it('filters leaderboard by gameMode & dormType and computes exact myRank + nextGap', async () => {
+    const { app } = makeApp()
+    const u1 = (await app.inject({ method: 'GET', url: '/api/bootstrap?uid=u-top' })).json().player.uid
+    const u2 = (await app.inject({ method: 'GET', url: '/api/bootstrap?uid=u-mid' })).json().player.uid
+    const u3 = (await app.inject({ method: 'GET', url: '/api/bootstrap?uid=u-low' })).json().player.uid
+
+    await app.inject({
+      method: 'POST', url: '/api/score',
+      payload: { uid: u1, nickname: '学霸猫', gameMode: 'memory_sequence', dormType: 'grad', stageReached: 6, accuracyPct: 98, score: 1200, litWindows: 24 }
+    })
+    await app.inject({
+      method: 'POST', url: '/api/score',
+      payload: { uid: u2, nickname: '巡夜人', gameMode: 'memory_sequence', dormType: 'grad', stageReached: 5, accuracyPct: 88, score: 900, litWindows: 20 }
+    })
+    // Different gameMode should be isolated by filter
+    await app.inject({
+      method: 'POST', url: '/api/score',
+      payload: { uid: u3, nickname: '熄灯侠', gameMode: 'lights_out_puzzle', dormType: 'staff', stageReached: 5, accuracyPct: 100, score: 2500, litWindows: 12 }
+    })
+
+    const board = (await app.inject({
+      method: 'GET',
+      url: `/api/leaderboard?mode=memory_sequence&dormType=grad&uid=${u2}`
+    })).json()
+    expect(board.ok).toBe(true)
+    expect(board.items).toHaveLength(2)
+    expect(board.items[0].nickname).toBe('学霸猫')
+    expect(board.myRank).not.toBeNull()
+    expect(board.myRank.rank).toBe(2)
+    expect(board.myRank.total).toBe(2)
+    expect(board.myRank.nextGap).toBe(300)
+    expect(board.myRank.nextNickname).toBe('学霸猫')
   })
 })

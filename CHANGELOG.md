@@ -7,6 +7,21 @@
 ---
 
 
+## [4.0.0] — 2026-11-19 · Stardew 3D 校园夜巡版
+
+> 从单一宿舍升级为真实 Blender 建模校园建筑群、多玩法矩阵与动态天气人物叙事。
+
+### 新增
+
+- **Blender 3D 宿舍楼群与公共校园底盘**（`tools/blender/build_campus_v4.py`）：`campus_grounds.glb`（石板广场、卵石大道、复古路灯、四季树群）及 4 栋差异化可切换宿舍 GLB（`dorm_staff.glb` 12 窗、`dorm_highschool.glb` 18 窗、`dorm_university.glb` 24 窗、`dorm_grad.glb` 30 窗）。
+- **像素-油画混成 PBR 与真实大气系统**：`src/textures-procedural.js` 生成 128×128 砖瓦/屋瓦/石板贴图与法线；重构 `src/scene.js` 引入有界 `OrbitControls`、4 档视角预设、切楼航拍转场、8 层 FBM 体积雾效、细雨涟漪水面与四季植被/覆雪切换。
+- **开场过场动画与天气换装 NPC 系统**：`src/npc-portraits.js` 为 8 位校园角色生成 5 套随天气/季节切换的 SVG 装束，联动过场对话与门口 3D NPC 立牌。
+- **五大宿舍小游戏引擎与随机事件**：`src/minigames/memory-patrol.js`（依次记忆 & 全景快照）、`src/minigames/dorm-reflex.js`（查寝夜猫子）、`src/minigames/lights-out.js`（GF(2) 精确解谜与提示）、`src/random-events.js`（8 种校园随机事件），保留 v3 三晚六结局 `star_sweep` 故事线。
+- **可见 AI 智能体与个人排名系统**：新增 `/api/agent/dialogue`、`/api/agent/puzzle`、`/api/agent/debrief` 三大路由；SQLite 幂等迁移扩充玩法/宿舍/准确率字段；排行榜支持筛选与置顶「我的当前排名 / 分差 / 领先百分比」，空昵称自动赋予随机校园代号。
+- **单测扩充**：新增 `tests/minigames.test.js` 及 v4 Schema / API 集成用例（共 7 个测试套件 234 条用例）。
+
+---
+
 ## [3.0.0] — 2026-11-14 · 商业化重制
 
 > 从「能点亮的原型」重制为「可上架的完整体验」。

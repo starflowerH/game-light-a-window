@@ -1,10 +1,9 @@
-// Shared constants for《今晚，亮一盏灯 · Light A Window》v3.0.
+// Shared constants for《今晚，亮一盏灯 · Light A Window》v4.0
+// (Stardew 3D Campus Night Patrol Edition).
 //
-// This module is imported by BOTH the backend and the browser, exactly like
-// shared/ai-schema.js. Keep it dependency-free and side-effect-free: it must
-// run in Node and in a bundler without a build step.
+// Imported by BOTH Node (server/) and browser (src/). Keep zero dependencies.
 
-// ---------------------------------------------------------------- geometry
+// ---------------------------------------------------------------- geometry (default 4x6 university)
 
 export const ROWS = 4
 export const COLS = 6
@@ -13,21 +12,26 @@ export const NIGHT_COUNT = 3
 export const NIGHT_SECONDS = 75
 
 /**
- * The 24 windows of dormitory #17.
- *
- * Layout is 4 floors x 6 rooms, row 0 is the ground floor. The room number is
- * the floor times one hundred plus the column plus one, so index 0 -> 101,
- * index 23 -> 406. Everything else (art, narrative, commissions, heatmap)
- * keys off this one table.
- *
+ * Build window metadata for any rows x cols grid.
+ * @param {number} rows
+ * @param {number} cols
+ * @returns {Array<{ idx: number, roomId: number, row: number, col: number, floor: number }>}
+ */
+export function buildWindowIds(rows = ROWS, cols = COLS) {
+  const total = rows * cols
+  return Array.from({ length: total }, (_, idx) => {
+    const row = Math.floor(idx / cols)
+    const col = idx % cols
+    return { idx, roomId: (row + 1) * 100 + (col + 1), row, col, floor: row + 1 }
+  })
+}
+
+/**
+ * The 24 windows of dormitory #17 (default university grid, kept for compatibility).
  * @typedef {{ idx: number, roomId: number, row: number, col: number, floor: number }} WindowId
  * @type {WindowId[]}
  */
-export const WINDOW_IDS = Array.from({ length: WINDOW_COUNT }, (_, idx) => {
-  const row = Math.floor(idx / COLS)
-  const col = idx % COLS
-  return { idx, roomId: (row + 1) * 100 + (col + 1), row, col, floor: row + 1 }
-})
+export const WINDOW_IDS = buildWindowIds(ROWS, COLS)
 
 /** @type {Record<number, number>} roomId -> idx */
 export const ROOM_TO_INDEX = Object.fromEntries(WINDOW_IDS.map(w => [w.roomId, w.idx]))
@@ -37,7 +41,7 @@ export const INDEX_TO_ROOM = WINDOW_IDS.map(w => w.roomId)
 
 /**
  * @param {number} idx
- * @returns {number} room number such as 304
+ * @returns {number}
  */
 export function roomIdForIndex(idx) {
   const w = WINDOW_IDS[idx]
@@ -46,7 +50,7 @@ export function roomIdForIndex(idx) {
 
 /**
  * @param {number} roomId
- * @returns {number} window index, or -1 when the room does not exist
+ * @returns {number}
  */
 export function indexForRoomId(roomId) {
   const idx = ROOM_TO_INDEX[Number(roomId)]
@@ -54,129 +58,260 @@ export function indexForRoomId(roomId) {
 }
 
 /**
- * Every room on one floor, in left-to-right order.
- * @param {number} floor 1..4
+ * @param {number} floor
+ * @param {number} [cols]
  * @returns {number[]}
  */
-export function roomsOnFloor(floor) {
-  return WINDOW_IDS.filter(w => w.floor === floor).map(w => w.roomId)
+export function roomsOnFloor(floor, cols = COLS) {
+  return Array.from({ length: cols }, (_, c) => floor * 100 + c + 1)
 }
 
-// ---------------------------------------------------------------- residents
+// ---------------------------------------------------------------- v4.0 Dormitories
 
 /**
- * The six residents with a continuous three-night arc. These rooms are also
- * the only ones allowed to host a STORY_BEACON.
- * @type {number[]}
+ * @typedef {{
+ *   id: 'highschool'|'university'|'grad'|'staff',
+ *   name: string,
+ *   shortName: string,
+ *   subtitle: string,
+ *   rows: number,
+ *   cols: number,
+ *   windowCount: number,
+ *   modelUrl: string,
+ *   difficultyLabel: string,
+ *   coreRooms: number[],
+ *   flyOffset: [number, number, number],
+ *   badgeColor: string
+ * }} DormDef
+ *
+ * @type {DormDef[]}
  */
+export const DORM_TYPES = [
+  {
+    id: 'staff',
+    name: '教职工宿舍 · 桂花院',
+    shortName: '员工宿舍',
+    subtitle: '3层12宽窗 · 木梁爬山虎 · 烟火庭院',
+    rows: 3,
+    cols: 4,
+    windowCount: 12,
+    modelUrl: './models/dorm_staff.glb',
+    difficultyLabel: '轻松入门',
+    coreRooms: [102, 202, 203, 301, 303, 304],
+    flyOffset: [-340, 20, -40],
+    badgeColor: '#7ec88b'
+  },
+  {
+    id: 'highschool',
+    name: '高中宿舍 · 晨光楼',
+    shortName: '高中宿舍',
+    subtitle: '3层18窗 · 红砖瓦顶 · 黑板报单车棚',
+    rows: 3,
+    cols: 6,
+    windowCount: 18,
+    modelUrl: './models/dorm_highschool.glb',
+    difficultyLabel: '标准节奏',
+    coreRooms: [102, 105, 203, 205, 301, 306],
+    flyOffset: [-180, 10, 20],
+    badgeColor: '#e88b72'
+  },
+  {
+    id: 'university',
+    name: '大学宿舍 · 17号楼',
+    shortName: '大学宿舍',
+    subtitle: '4层24窗 · 开放外廊 · 阳台猫窝水塔',
+    rows: 4,
+    cols: 6,
+    windowCount: 24,
+    modelUrl: './models/dorm_university.glb',
+    difficultyLabel: '经典均衡',
+    coreRooms: [102, 203, 205, 301, 304, 406],
+    flyOffset: [0, 0, 0],
+    badgeColor: '#ffd27a'
+  },
+  {
+    id: 'grad',
+    name: '研究生宿舍 · 研思楼',
+    shortName: '研究生宿舍',
+    subtitle: '5层30窗 · 玻璃阳台 · 楼顶温室花房',
+    rows: 5,
+    cols: 6,
+    windowCount: 30,
+    modelUrl: './models/dorm_grad.glb',
+    difficultyLabel: '高阶挑战',
+    coreRooms: [102, 204, 304, 402, 503, 506],
+    flyOffset: [210, 25, -30],
+    badgeColor: '#98c4ff'
+  }
+]
+
+/** @type {Record<string, DormDef>} */
+export const DORM_BY_ID = Object.fromEntries(DORM_TYPES.map(d => [d.id, d]))
+
+/** @type {string[]} */
+export const DORM_IDS = DORM_TYPES.map(d => d.id)
+
+/**
+ * @param {string} id
+ * @returns {DormDef}
+ */
+export function dormDef(id) {
+  return DORM_BY_ID[id] || DORM_BY_ID.university
+}
+
+// ---------------------------------------------------------------- v4.0 Seasons & Weathers
+
+export const SEASONS = [
+  { id: 'spring', name: '春 · 樱吹雪', leafMain: 0xf4a8c4, leafAccent: 0x76b87c, skyTint: 0x1b2348, particle: 'petal' },
+  { id: 'summer', name: '夏 · 萤火夜', leafMain: 0x2d6d43, leafAccent: 0x4b9358, skyTint: 0x0b1533, particle: 'firefly' },
+  { id: 'autumn', name: '秋 · 银杏季', leafMain: 0xd99038, leafAccent: 0xc85838, skyTint: 0x1c1732, particle: 'leaf' },
+  { id: 'winter', name: '冬 · 瑞雪夜', leafMain: 0x45586d, leafAccent: 0x788da4, skyTint: 0x0d1936, particle: 'frost' }
+]
+
+/** @type {string[]} */
+export const SEASON_IDS = SEASONS.map(s => s.id)
+
+/** @param {string} id */
+export function seasonDef(id) {
+  return SEASONS.find(s => s.id === id) || SEASONS[2]
+}
+
+export const WEATHER_CATALOG = [
+  { id: 'clear', name: '晴夜星月', hint: '树影清晰，适合远眺星空' },
+  { id: 'light_rain', name: '细雨石阶', hint: '地面水洼泛起微光涟漪' },
+  { id: 'fog', name: '浓雾缭绕', hint: '流动夜雾漫过草坪与路灯' },
+  { id: 'wind', name: '晚风吹拂', hint: '树梢晾衣绳随风大幅摇曳' },
+  { id: 'snow', name: '落雪纷纷', hint: '屋檐窗台覆雪，温暖灯火更亮' }
+]
+
+/** @type {string[]} */
+export const WEATHERS = ['clear', 'light_rain', 'fog', 'wind', 'snow']
+/** @type {string[]} */
+export const PALETTES = ['rainy_amber', 'warm_blue', 'foggy_lilac', 'clear_peach']
+/** @type {string[]} */
+export const TEMPOS = ['slow', 'normal', 'brisk']
+
+// ---------------------------------------------------------------- v4.0 Camera Views
+
+export const CAMERA_VIEWS = [
+  { id: 'front', name: '正面全景' },
+  { id: 'stardew', name: '星露谷45°' },
+  { id: 'street', name: '林荫仰望' },
+  { id: 'rooftop', name: '天台巡礼' }
+]
+
+export const CAMERA_VIEW_IDS = CAMERA_VIEWS.map(v => v.id)
+
+// ---------------------------------------------------------------- v4.0 Minigames
+
+export const GAME_MODES = [
+  {
+    id: 'memory_sequence',
+    name: '记忆熄灯 · 依次顺序',
+    shortName: '依次记忆',
+    tag: '益智闯关',
+    desc: '窗户按顺序依次亮起并熄灭，记住顺序依次点亮，考核顺序与准确率。'
+  },
+  {
+    id: 'memory_snapshot',
+    name: '记忆熄灯 · 一起亮起',
+    shortName: '全景快照',
+    tag: '瞬时记忆',
+    desc: '多扇窗户同时亮起数秒后全灭，找出所有亮过的房间，考核空间准确率。'
+  },
+  {
+    id: 'patrol_reflex',
+    name: '查寝夜猫子',
+    shortName: '查寝反应',
+    tag: '反应辨别',
+    desc: '熄灭熬夜闪屏窗、守护合规暖台灯、点亮晚归门灯，协助宿管快速巡楼。'
+  },
+  {
+    id: 'lights_out_puzzle',
+    name: '全楼归眠 · 熄灯棋盘',
+    shortName: '熄灯解谜',
+    tag: '逻辑策略',
+    desc: '点一扇窗会同步翻转上下左右四邻灯态，用最少步数让整栋楼安睡！'
+  },
+  {
+    id: 'star_sweep',
+    name: '星轨一笔画 · 暖光连线',
+    shortName: '一笔画连光',
+    tag: '治愈解压',
+    desc: '按住划过微光窗连成光链，体验 17 号楼六位住户三晚分支故事与六结局。'
+  }
+]
+
+export const GAME_MODE_IDS = GAME_MODES.map(m => m.id)
+
+export function gameModeDef(id) {
+  return GAME_MODES.find(m => m.id === id) || GAME_MODES[0]
+}
+
+// ---------------------------------------------------------------- residents & window states
+
 export const CORE_RESIDENT_ROOMS = [102, 203, 205, 301, 304, 406]
-
-/** @type {number[]} */
 export const CORE_RESIDENT_INDEXES = CORE_RESIDENT_ROOMS.map(indexForRoomId)
-
-// ------------------------------------------------------------ window states
 
 export const WINDOW_STATES = {
   DARK: 'dark',
   GLIMMER: 'glimmer',
   LIT: 'lit',
   STORY_BEACON: 'story_beacon',
-  RESONANCE_PAIR: 'resonance_pair'
+  RESONANCE_PAIR: 'resonance_pair',
+  // v4 minigame states
+  TARGET_HINT: 'target_hint',     // bright golden cue during memory observe phase
+  DECOY_BLUE: 'decoy_blue',       // blue-violet RGB gaming night-owl window or decoy flash
+  SAFE_WARM: 'safe_warm',         // compliant study lamp (do not turn off in patrol_reflex)
+  CORRECT_GREEN: 'correct_green', // confirmed accurate memory pick
+  WRONG_AMBER: 'wrong_amber'      // gentle amber wobble when mistapped
 }
 
-/** States the player can act on with a tap or a swipe. */
 export const ACTIONABLE_STATES = [
   WINDOW_STATES.GLIMMER,
   WINDOW_STATES.STORY_BEACON,
-  WINDOW_STATES.RESONANCE_PAIR
+  WINDOW_STATES.RESONANCE_PAIR,
+  WINDOW_STATES.DECOY_BLUE
 ]
 
-/**
- * @param {string} state
- * @returns {boolean}
- */
+/** @param {string} state */
 export function isActionable(state) {
   return ACTIONABLE_STATES.includes(state)
 }
 
-// ------------------------------------------------------------------- tempo
+// ---------------------------------------------------------------- tempo
 
-/**
- * Rhythm parameters that drive the glimmer scheduler. The AI only ever picks
- * one of three names; these numbers are what the player actually feels.
- *
- * @typedef {{
- *   initialGlimmer: number,
- *   maxGlimmer: number,
- *   spawnIntervalMs: number,
- *   glimmerDurationMs: number,
- *   comboWindowMs: number
- * }} TempoConfig
- *
- * @type {Record<'slow'|'normal'|'brisk', TempoConfig>}
- */
+/** @typedef {{ initialGlimmer: number, maxGlimmer: number, spawnIntervalMs: number, glimmerDurationMs: number, comboWindowMs: number }} TempoConfig */
+/** @type {Record<'slow'|'normal'|'brisk', TempoConfig>} */
 export const TEMPO_CONFIG = {
   slow: { initialGlimmer: 3, maxGlimmer: 5, spawnIntervalMs: 1100, glimmerDurationMs: 3800, comboWindowMs: 2400 },
   normal: { initialGlimmer: 4, maxGlimmer: 6, spawnIntervalMs: 850, glimmerDurationMs: 3200, comboWindowMs: 2100 },
   brisk: { initialGlimmer: 5, maxGlimmer: 8, spawnIntervalMs: 650, glimmerDurationMs: 2700, comboWindowMs: 1900 }
 }
 
-/**
- * @param {string} tempo
- * @returns {TempoConfig}
- */
+/** @param {string} tempo */
 export function tempoConfig(tempo) {
   return TEMPO_CONFIG[/** @type {'slow'|'normal'|'brisk'} */ (tempo)] || TEMPO_CONFIG.normal
 }
 
-/** When fewer than this many windows are actionable, top the field up. */
 export const MIN_ACTIONABLE_GLIMMER = 2
-/** …and do it within this budget. */
 export const GLIMMER_REFILL_MS = 200
 
-// ------------------------------------------------------------- mood tokens
+// ---------------------------------------------------------------- mood tokens
 
-/**
- * @typedef {{ id: string, name: string, hint: string, icon: string, tempo: string, palette: string }} MoodToken
- * @type {MoodToken[]}
- */
 export const MOOD_TOKENS = [
   { id: 'umbrella', name: '听雨的伞', hint: '偏安静，慢一点也没关系', icon: '☂', tempo: 'slow', palette: 'rainy_amber' },
   { id: 'earphones', name: '吹风的耳机', hint: '偏律动，喜欢连成一片', icon: '🎧', tempo: 'brisk', palette: 'warm_blue' },
   { id: 'quilt', name: '晒月亮的被子', hint: '偏温暖，晴夜的月光', icon: '🛏', tempo: 'normal', palette: 'clear_peach' },
   { id: 'lamp', name: '亮着的台灯', hint: '偏故事，想多看看窗后', icon: '💡', tempo: 'normal', palette: 'foggy_lilac' }
 ]
-
-/** @type {string[]} */
 export const MOOD_TOKEN_IDS = MOOD_TOKENS.map(m => m.id)
-
-/**
- * @param {string} id
- * @returns {MoodToken}
- */
 export function moodToken(id) {
   return MOOD_TOKENS.find(m => m.id === id) || MOOD_TOKENS[3]
 }
 
 // ---------------------------------------------------------------- endings
 
-/**
- * @typedef {{
- *   id: string,
- *   name: string,
- *   type: string,
- *   badge: string,
- *   title: string,
- *   palette: string,
- *   letterFromRoom: number,
- *   clue: string
- * }} EndingMeta
- *
- * Order matters: resolveEnding() walks this list top to bottom, so the most
- * specific IF lines must come before the general ones.
- *
- * @type {EndingMeta[]}
- */
 export const ENDINGS = [
   {
     id: 'ENDING_C_STARGAZER',
@@ -239,88 +374,45 @@ export const ENDINGS = [
     clue: '其余所有夜晚的保底收束，没有失败，也不需要赶。'
   }
 ]
-
-/** @type {Record<string, EndingMeta>} */
 export const ENDING_BY_ID = Object.fromEntries(ENDINGS.map(e => [e.id, e]))
-
-/** @type {string[]} */
 export const ENDING_IDS = ENDINGS.map(e => e.id)
-
-/**
- * @param {string} id
- * @returns {EndingMeta}
- */
 export function endingMeta(id) {
   return ENDING_BY_ID[id] || ENDING_BY_ID.ENDING_F_DRIFT
 }
 
-// -------------------------------------------------------------- scoring
+// ---------------------------------------------------------------- scoring & schedules
 
-/** Warmth added when the 24th window of a night turns lit. */
 export const ALL_LIT_BONUS = 25
-/** Windows flipped back to GLIMMER for the encore round. */
 export const ENCORE_RESET_COUNT = 8
-/** If more than this much time is left, the encore round starts. */
 export const ENCORE_MIN_TIME_LEFT_S = 8
-/** Delay between "the whole building is lit" and the encore round. */
 export const ENCORE_DELAY_MS = 1800
-/** Bonus warmth for one completed commission. */
 export const COMMISSION_BONUS = 12
-/** How long the combo timer is frozen while a choice card is open. */
 export const COMBO_FREEZE_MS = 5000
-/** Auto-resolve a choice card after this long. */
 export const CHOICE_AUTO_RESOLVE_MS = 6000
-/** Warmth for a story beacon tap. */
 export const STORY_BEACON_GAIN = 8
-/** Warmth for a successful resonance link. */
 export const RESONANCE_GAIN = 15
-/** Extra combo granted by a resonance link. */
 export const RESONANCE_COMBO_BONUS = 3
-/** Warmth for re-tapping an already lit window (keeps the combo alive). */
 export const LIT_RETAP_GAIN = 2
-/** Warmth for tapping a dark window (never punishing). */
 export const DARK_TAP_GAIN = 1
-/** Chance a dark tap wakes the window into GLIMMER. */
 export const DARK_TAP_WAKE_CHANCE = 0.35
 
-// ------------------------------------------------------------- schedules
-
-/** Seconds into the night when a story beacon is guaranteed, per night. */
 export const STORY_BEACON_SCHEDULE = {
   0: [20, 48],
   1: [18, 42, 60],
   2: [15, 38, 58]
 }
-/** Guarantee a beacon after this many windows lit if none has fired yet. */
 export const STORY_BEACON_LIT_FALLBACK = 7
-/** Seconds into the night when a resonance pair appears, per night. */
 export const RESONANCE_SCHEDULE = {
   0: [35],
   1: [25, 52],
   2: [22, 48]
 }
-/** Seconds into night 1 when ResonanceWeaver is asked to rewrite nights 2-3. */
 export const EVOLVE_AT_S = 45
 
-// ----------------------------------------------------------- commissions
-
-/** Commission kinds the evaluator understands. */
 export const COMMISSION_TYPES = [
-  'lit_count',
-  'max_combo',
-  'drag_chain',
-  'resonance',
-  'story_choice',
-  'row_lit',
-  'all_lit',
-  'bond_rooms'
+  'lit_count', 'max_combo', 'drag_chain', 'resonance', 'story_choice', 'row_lit', 'all_lit', 'bond_rooms'
 ]
 
-/**
- * The three written-by-hand commissions shown if the director does not send
- * usable ones. Kept here so both the UI and the tests share one table.
- * @type {Array<{ id: string, type: string, target: number, label: string, floor?: number }>[]}
- */
 export const DEFAULT_COMMISSIONS = [
   [
     { id: 'lit_14', type: 'lit_count', target: 14, label: '点亮至少 14 扇窗' },
@@ -339,11 +431,39 @@ export const DEFAULT_COMMISSIONS = [
   ]
 ]
 
-// --------------------------------------------------------------- weather
+// ---------------------------------------------------------------- v4.0 Random Campus Nicknames
 
-/** @type {string[]} */
-export const WEATHERS = ['light_rain', 'fog', 'wind', 'clear']
-/** @type {string[]} */
-export const PALETTES = ['rainy_amber', 'warm_blue', 'foggy_lilac', 'clear_peach']
-/** @type {string[]} */
-export const TEMPOS = ['slow', 'normal', 'brisk']
+const NICK_PREFIX = [
+  '三楼熬夜的', '天台数星的', '值班室喝茶', '路灯下走过', '走廊留灯的',
+  '抱橘猫看云', '雨夜借伞的', '凌晨写代码', '窗台养绿萝', '刚抢到泡面',
+  '听老电台的', '图书馆闭馆'
+]
+const NICK_SUFFIX = [
+  '猫', '学弟', '学姐', '小星', '夜巡员', '橘橘', '旅人', '守灯人', '同学', '影子', '书虫', '风铃'
+]
+
+/**
+ * Generate a fun campus nickname (<= 8 chars) when the player skips naming.
+ * @param {() => number} [rng]
+ * @returns {string}
+ */
+export function generateCampusNickname(rng = Math.random) {
+  const p = NICK_PREFIX[Math.floor(rng() * NICK_PREFIX.length)]
+  const s = NICK_SUFFIX[Math.floor(rng() * NICK_SUFFIX.length)]
+  const combined = p + s
+  return combined.slice(0, 8)
+}
+
+/**
+ * Determine NPC outfit key from current weather & season.
+ * @param {string} weather
+ * @param {string} season
+ * @returns {'rain_gear'|'winter_puffer'|'fog_coat'|'autumn_knit'|'sunny_light'}
+ */
+export function outfitForEnv(weather, season) {
+  if (weather === 'light_rain' || weather === 'rain') return 'rain_gear'
+  if (weather === 'snow' || season === 'winter') return 'winter_puffer'
+  if (weather === 'fog') return 'fog_coat'
+  if (weather === 'wind' || season === 'autumn') return 'autumn_knit'
+  return 'sunny_light'
+}

@@ -1,12 +1,28 @@
-// All DOM overlays.
+// All DOM overlays for《今晚，亮一盏灯 · 3D校园夜巡物语》v4.0.
 //
 // Two rules keep the frame rate honest:
 //   1. tick() compares against the last written value before touching the DOM.
-//   2. the warmth bar animates with transform: scaleX(), never width.
+//   2. progress bars animate cleanly via transform: scaleX().
 
 import { paintIcons } from './icons.js'
-import { fetchLeaderboard } from './records.js'
-import { ENDINGS, MOOD_TOKENS, WINDOW_IDS, WINDOW_STATES } from '../shared/constants.js'
+import { fetchLeaderboardWithRank } from './records.js'
+import {
+  CAMERA_VIEWS,
+  DORM_TYPES,
+  ENDINGS,
+  GAME_MODES,
+  MOOD_TOKENS,
+  SEASONS,
+  WEATHER_CATALOG,
+  WINDOW_STATES,
+  buildWindowIds,
+  dormDef,
+  gameModeDef,
+  generateCampusNickname,
+  outfitForEnv,
+  seasonDef
+} from '../shared/constants.js'
+import { NPC_CATALOG, OUTFIT_LABELS, renderNpcPortraitSvg } from './npc-portraits.js'
 import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
 
 const qs = (root, sel) => root.querySelector(sel)
@@ -17,9 +33,7 @@ const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/
 const MOOD_ICONS = ['umbrella', 'headphones', 'quilt', 'bulb']
 
 export class UI {
-  /**
-   * @param {HTMLElement} root
-   */
+  /** @param {HTMLElement} root */
   constructor(root) {
     this.root = root
     this.el = document.createElement('div')
@@ -32,6 +46,7 @@ export class UI {
     this._onStart = null
     /** @type {any} */ this._choiceTimer = 0
     /** @type {any} */ this._toastTimer = 0
+    /** @type {any} */ this._dlgTimer = 0
   }
 
   _layer() {
@@ -43,15 +58,19 @@ export class UI {
   }
 
   hideAll() {
+    clearTimeout(this._dlgTimer)
     for (const n of qsa(this.el, '.screen')) n.remove()
     this.hideChoice()
     this.hidePause()
     this.hideCoach()
     this._cur = null
     this.el.innerHTML = ''
-    const hud = document.getElementById('hud')
-    if (hud) hud.remove()
+    for (const id of ['hud', 'hud-v4', 'hub', 'dialogue-box', 'hv4-bottom']) {
+      const node = document.getElementById(id)
+      if (node) node.remove()
+    }
     this.hudEl = null
+    this._hv4 = null
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
@@ -60,55 +79,519 @@ export class UI {
   showLoading(text) {
     this.hideAll()
     const s = this._layer()
-    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '灯，正在一盏盏亮起') + '</h2><p class="lede center">正在为今晚准备天气、小故事和明信片</p></div>'
+    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '校园灯影正在接电') + '</h2><p class="lede center">正在载入 3D 宿舍楼、四季天气与 AI 导演管线</p></div>'
     paintIcons(s)
   }
 
   // ---------------------------------------------------------------- title
 
   /**
-   * @param {{ records: any, whispers: any[], stats: any, keyStatus: any,
-   *   onStart: Function, onCollection: Function, onLeaderboard: Function,
-   *   onWhisperWall: Function, onKeyConfig: Function }} opts
+   * @param {{ records: any, whispers: any[], stats: any, keyStatus: any, nickname: string,
+   *   onEnterCampus?: Function, onStart: Function, onCollection: Function, onLeaderboard: Function,
+   *   onWhisperWall: Function, onKeyConfig: Function, onNpcGallery?: Function, onNicknameChange?: (name: string) => void }} opts
    */
-  showTitle({ records, whispers, stats, keyStatus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig }) {
+  showTitle({ records, whispers, stats, keyStatus, nickname, onEnterCampus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig, onNpcGallery, onNicknameChange }) {
     this.hideAll()
     this._onStart = onStart
     const unlocked = (records && records.unlockedEndings) ? records.unlockedEndings.length : 0
     const total = stats && stats.totalLit ? stats.totalLit.toLocaleString('zh-CN') : '0'
     const firstWhisper = whispers && whispers.length ? whispers[0] : null
+    const aiDirect = Boolean(keyStatus && keyStatus.enabled)
 
     const s = this._layer()
     s.classList.add('title-screen')
     s.innerHTML = '<div class="title-veil"></div>' +
       '<div class="title-wrap">' +
-        '<div class="kicker">A COZY CAMPUS NIGHT</div>' +
+        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V4.0</div>' +
         '<h1 class="title-h1">今晚，<span class="accent">亮一盏灯</span></h1>' +
-        '<p class="lede">一栋十七号宿舍楼，二十四扇窗。<br/>点亮正在发光的窗，或者按住不放，一笔把整排划亮。</p>' +
-        '<div class="pills"><span class="pill">只有一个动作：点亮</span><span class="pill">没有失败，也不会扣分</span><span class="pill">三晚，六个结局</span></div>' +
+        '<p class="lede">星露谷写意 3D 校园物语：四栋实时建模宿舍楼、四季晴雨雾雪、<br/>记忆熄灯闯关、查寝夜猫子、宿管故事与全校排行榜。</p>' +
+        '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">' +
+          '<div class="nick-inline">' +
+            '<span>夜巡代号</span>' +
+            '<input data-nick maxlength="8" value="' + esc(nickname || '三楼夜猫') + '" aria-label="玩家昵称" />' +
+            '<button class="nick-dice" type="button" data-act="randnick" title="随机起一个有趣的校园昵称">🎲 随机</button>' +
+          '</div>' +
+          '<span class="ai-radio-pill ' + (aiDirect ? '' : 'offline') + '">' +
+            '<i class="ai-radio-dot"></i>' +
+            (aiDirect ? 'DeepSeek AI 直连 · ' + esc(keyStatus.masked) : 'AI 导演电台就绪（云端/离线自适应）') +
+          '</span>' +
+        '</div>' +
+        '<div class="pills">' +
+          '<span class="pill">记忆顺序 · 快照亮灯</span>' +
+          '<span class="pill">查寝反应 · 熄灯解谜</span>' +
+          '<span class="pill">4栋宿舍 × 四季五天气</span>' +
+        '</div>' +
         '<div class="title-actions">' +
-          '<button class="btn primary" data-act="start">开始守夜</button>' +
+          '<button class="btn primary" data-act="enter">进入校园夜巡 ▸</button>' +
+          '<button class="btn ghost" data-act="start">快速直进三晚故事</button>' +
+          '<button class="btn ghost" data-act="board">全校排行榜</button>' +
+          '<button class="btn ghost" data-act="npcs">NPC 换装图鉴</button>' +
           '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
-          '<button class="btn ghost" data-act="board">今夜榜单</button>' +
-          '<button class="btn ghost icon" data-act="key" data-icon="key" title="AI 模式 / 评审 Key 设置"></button>' +
+          '<button class="btn ghost icon" data-act="key" data-icon="key" title="DeepSeek AI 直连 Key"></button>' +
         '</div>' +
         '<div class="title-foot">' +
-          '<span class="global">全服守夜人已点亮 <b>' + esc(total) + '</b> 扇窗</span>' +
+          '<span class="global">全校守夜人已点亮 <b>' + esc(total) + '</b> 扇窗</span>' +
           '<button class="linkish" data-act="whispers">' + (firstWhisper ? '流光留声机 · 「' + esc(firstWhisper.content) + '」' : '流光留声机') + '</button>' +
-          '<span class="key-state ' + (keyStatus && keyStatus.enabled ? 'on' : '') + '">' + (keyStatus && keyStatus.enabled ? '浏览器直连已启用 · ' + esc(keyStatus.masked) : '云端智能体模式') + '</span>' +
         '</div>' +
       '</div>'
     paintIcons(s)
+
+    const nickInput = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
+    nickInput.onchange = () => { if (onNicknameChange) onNicknameChange(nickInput.value) }
+    qs(s, '[data-act="randnick"]').onclick = () => {
+      const next = generateCampusNickname()
+      nickInput.value = next
+      if (onNicknameChange) onNicknameChange(next)
+    }
+
+    qs(s, '[data-act="enter"]').onclick = () => (onEnterCampus ? onEnterCampus() : onStart())
     qs(s, '[data-act="start"]').onclick = () => onStart()
     qs(s, '[data-act="collection"]').onclick = () => onCollection()
     qs(s, '[data-act="board"]').onclick = () => onLeaderboard()
     qs(s, '[data-act="whispers"]').onclick = () => onWhisperWall()
     qs(s, '[data-act="key"]').onclick = () => onKeyConfig()
+    if (onNpcGallery) qs(s, '[data-act="npcs"]').onclick = () => onNpcGallery()
   }
 
-  // ------------------------------------------------------------- prologue
+  // ------------------------------------------------------------- RPG dialogue cutscene
 
-  /** @param {{ records: any, onChoose: (mood: string) => void }} opts */
+  /**
+   * Show dual-portrait weather-outfit RPG dialogue for opening cutscene / dorm intro.
+   * @param {{
+   *   lines: Array<{ speakerId?: string, npcId?: string, speaker?: string, line: string, mood?: string }>,
+   *   dormType: string, season: string, weather: string, aiSource: string,
+   *   onSpeakerChange?: (npcId: string) => void,
+   *   onStepSound?: (i: number) => void,
+   *   onDone: Function
+   * }} opts
+   */
+  showDialogue({ lines, dormType, season, weather, aiSource, onSpeakerChange, onStepSound, onDone }) {
+    this.hideAll()
+    const list = Array.isArray(lines) && lines.length ? lines : [
+      { npcId: 'aunt_lin', speaker: '林阿姨', line: '熄灯铃响过喽，今晚的宿舍巡查就拜托你啦。' }
+    ]
+    const outfitKey = outfitForEnv(weather, season)
+    const outfitLabel = OUTFIT_LABELS[outfitKey] || '值班常服'
+    const dorm = dormDef(dormType)
+    const isAi = aiSource === 'ai' || aiSource === 'direct' || aiSource === 'cache'
+
+    const box = document.createElement('div')
+    box.id = 'dialogue-box'
+    box.innerHTML =
+      '<div class="npc-portrait-frame">' +
+        '<div class="npc-portrait-svg" data-portrait></div>' +
+        '<span class="outfit-badge" data-outfit>' + esc(outfitLabel) + '</span>' +
+      '</div>' +
+      '<div class="dlg-body">' +
+        '<div class="dlg-head">' +
+          '<div><span class="dlg-speaker" data-spk></span><span class="dlg-role" data-role></span></div>' +
+          '<span class="ai-radio-pill ' + (isAi ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + esc(dorm.shortName + ' · ' + (isAi ? 'AI 剧本导演' : '校园手写剧本')) + '</span>' +
+        '</div>' +
+        '<p class="dlg-text" data-text></p>' +
+        '<div class="dlg-actions">' +
+          '<span class="dlg-step" data-step></span>' +
+          '<button class="chip-sm" type="button" data-act="skip">跳过开场</button>' +
+          '<button class="btn primary" type="button" data-act="next" style="padding:8px 16px;font-size:12.5px;">下一句 ▸</button>' +
+        '</div>' +
+      '</div>'
+    this.el.appendChild(box)
+
+    const portraitEl = qs(box, '[data-portrait]')
+    const spkEl = qs(box, '[data-spk]')
+    const roleEl = qs(box, '[data-role]')
+    const textEl = qs(box, '[data-text]')
+    const stepEl = qs(box, '[data-step]')
+    const nextBtn = qs(box, '[data-act="next"]')
+
+    let idx = 0
+    let typing = false
+    let finished = false
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(this._dlgTimer)
+      box.remove()
+      onDone && onDone()
+    }
+
+    const renderLine = () => {
+      if (finished) return
+      if (idx >= list.length) { finish(); return }
+      const item = list[idx]
+      const spkId = item.speakerId || item.npcId || 'aunt_lin'
+      const npc = NPC_CATALOG[spkId] || NPC_CATALOG.aunt_lin
+      portraitEl.innerHTML = renderNpcPortraitSvg(npc.id, weather, season)
+      spkEl.textContent = item.speaker || npc.name
+      roleEl.textContent = npc.role
+      stepEl.textContent = `${idx + 1} / ${list.length}`
+      nextBtn.textContent = idx === list.length - 1 ? '开始选关巡楼 ▸' : '下一句 ▸'
+      if (onSpeakerChange) onSpeakerChange(npc.id)
+      if (onStepSound) onStepSound(idx)
+
+      const full = String(item.line || '')
+      let c = 0
+      typing = true
+      textEl.textContent = ''
+      const stepChar = () => {
+        if (finished) return
+        if (c <= full.length) {
+          textEl.textContent = full.slice(0, c)
+          c += 1
+          this._dlgTimer = setTimeout(stepChar, 28)
+        } else {
+          typing = false
+        }
+      }
+      stepChar()
+    }
+
+    const advance = () => {
+      if (finished) return
+      const item = list[idx]
+      if (typing && item) {
+        clearTimeout(this._dlgTimer)
+        typing = false
+        textEl.textContent = String(item.line || '')
+        return
+      }
+      idx += 1
+      renderLine()
+    }
+
+    qs(box, '[data-act="skip"]').onclick = e => { e.stopPropagation(); finish() }
+    nextBtn.onclick = e => { e.stopPropagation(); advance() }
+    box.onclick = e => {
+      const target = e.target
+      if (target instanceof HTMLElement && target.closest('button')) return
+      advance()
+    }
+    renderLine()
+  }
+
+  // ------------------------------------------------------------- Campus 3D Hub
+
+  /**
+   * Floating Campus Hub over live interactive 3D dormitory scene.
+   * @param {{
+   *   nickname: string, dormId: string, season: string, weather: string, viewId: string,
+   *   gameMode: string, aiSource: string, keyEnabled: boolean,
+   *   onDorm: (id: string) => void,
+   *   onSeason: (id: string) => void,
+   *   onWeather: (id: string) => void,
+   *   onView: (id: string) => void,
+   *   onSelectMode: (id: string) => void,
+   *   onLaunchMode: (id: string) => void,
+   *   onNicknameChange: (name: string) => void,
+   *   onReplayDialogue: Function,
+   *   onNpcGallery: Function,
+   *   onLeaderboard: Function,
+   *   onCollection: Function,
+   *   onKeyConfig: Function,
+   *   onTitle: Function
+   * }} opts
+   */
+  showCampusHub(opts) {
+    this.hideAll()
+    const dorm = dormDef(opts.dormId)
+    const season = seasonDef(opts.season)
+    const weatherMeta = WEATHER_CATALOG.find(w => w.id === opts.weather) || WEATHER_CATALOG[0]
+    const aiActive = opts.keyEnabled || opts.aiSource === 'ai' || opts.aiSource === 'direct' || opts.aiSource === 'cache'
+
+    const hub = document.createElement('div')
+    hub.id = 'hub'
+    hub.innerHTML =
+      '<div class="hub-topbar">' +
+        '<div class="hub-brand">' +
+          '<b>' + esc(dorm.name) + '</b>' +
+          '<span>' + esc(dorm.subtitle) + ' · ' + esc(season.name) + ' · ' + esc(weatherMeta.name) + '</span>' +
+        '</div>' +
+        '<div class="hub-top-actions">' +
+          '<div class="nick-inline">' +
+            '<span>代号</span>' +
+            '<input data-nick maxlength="8" value="' + esc(opts.nickname) + '" />' +
+            '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
+          '</div>' +
+          '<span class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI' : '本地剧本')) + '</span>' +
+          '<button class="chip-btn" data-act="board">🏆 排行榜</button>' +
+          '<button class="chip-btn" data-act="npcs">👘 NPC换装</button>' +
+          '<button class="chip-btn" data-act="dialogue">💬 宿管对话</button>' +
+          '<button class="chip-btn" data-act="collection">⭐ 结局图鉴</button>' +
+          '<button class="chip-btn" data-act="key">🔑 AI</button>' +
+          '<button class="chip-btn" data-act="title">标题</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="hub-mid">' +
+        '<div class="hub-panel">' +
+          '<div>' +
+            '<div class="hub-group-label">切换附近宿舍楼（3D 航拍漫游）</div>' +
+            '<div class="chip-row">' +
+              DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === opts.dormId ? 'on' : '') + '" data-dorm="' + esc(d.id) + '">' + esc(d.shortName) + '·' + d.windowCount + '窗</button>').join('') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div class="hub-group-label">校园季节 · 植被覆雪联动</div>' +
+            '<div class="chip-row">' +
+              SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div class="hub-group-label">夜间天气 · NPC 实时换装</div>' +
+            '<div class="chip-row">' +
+              WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div class="hub-group-label">看楼视角（支持拖拽缩放）</div>' +
+            '<div class="chip-row">' +
+              CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="hub-bottom">' +
+        '<div class="hub-orbit-hint">拖动画布可 3D 环绕查看宿舍楼 · 当前：' + esc(weatherMeta.hint) + '</div>' +
+        '<div class="hub-modes">' +
+          GAME_MODES.map(m =>
+            '<div class="mode-card ' + (m.id === opts.gameMode ? 'on' : '') + '" data-mode="' + esc(m.id) + '">' +
+              '<div class="mode-card-head"><b>' + esc(m.shortName) + '</b><span class="mode-tag">' + esc(m.tag) + '</span></div>' +
+              '<span class="mc-desc">' + esc(m.desc) + '</span>' +
+              '<button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始巡查 ▸</button>' +
+            '</div>'
+          ).join('') +
+        '</div>' +
+      '</div>'
+
+    this.el.appendChild(hub)
+
+    const nickInput = /** @type {HTMLInputElement} */ (qs(hub, 'input[data-nick]'))
+    nickInput.onchange = () => opts.onNicknameChange(nickInput.value)
+    qs(hub, '[data-act="randnick"]').onclick = () => {
+      const next = generateCampusNickname()
+      nickInput.value = next
+      opts.onNicknameChange(next)
+    }
+
+    qs(hub, '[data-act="board"]').onclick = () => opts.onLeaderboard()
+    qs(hub, '[data-act="npcs"]').onclick = () => opts.onNpcGallery()
+    qs(hub, '[data-act="dialogue"]').onclick = () => opts.onReplayDialogue()
+    qs(hub, '[data-act="collection"]').onclick = () => opts.onCollection()
+    qs(hub, '[data-act="key"]').onclick = () => opts.onKeyConfig()
+    qs(hub, '[data-act="title"]').onclick = () => opts.onTitle()
+
+    for (const b of qsa(hub, '[data-dorm]')) {
+      b.onclick = () => opts.onDorm(b.getAttribute('data-dorm') || 'university')
+    }
+    for (const b of qsa(hub, '[data-season]')) {
+      b.onclick = () => opts.onSeason(b.getAttribute('data-season') || 'autumn')
+    }
+    for (const b of qsa(hub, '[data-weather]')) {
+      b.onclick = () => opts.onWeather(b.getAttribute('data-weather') || 'clear')
+    }
+    for (const b of qsa(hub, '[data-view]')) {
+      b.onclick = () => opts.onView(b.getAttribute('data-view') || 'stardew')
+    }
+    for (const card of qsa(hub, '.mode-card')) {
+      card.onclick = () => opts.onSelectMode(card.getAttribute('data-mode') || 'memory_sequence')
+    }
+    for (const btn of qsa(hub, '[data-launch]')) {
+      btn.onclick = e => {
+        e.stopPropagation()
+        opts.onLaunchMode(btn.getAttribute('data-launch') || 'memory_sequence')
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- Minigame HUD (v4)
+
+  /**
+   * @param {{
+   *   modeMeta: any, dormMeta: any, aiPattern: string,
+   *   showHintBtn?: boolean, onHint?: Function, onMute: Function, onExit: Function, muted: boolean,
+   *   onViewCycle?: Function
+   * }} opts
+   */
+  startMinigameHud(opts) {
+    this.hideAll()
+    const bar = document.createElement('div')
+    bar.id = 'hud-v4'
+    bar.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<span class="hv4-phase" data-phase>准备中…</span>' +
+        '<span style="font-size:12px;color:#dbe4f8;">' + esc(opts.dormMeta.shortName) + ' · <b>' + esc(opts.modeMeta.shortName) + '</b></span>' +
+        '<span class="mode-tag" data-pattern>' + esc(opts.aiPattern || '夜巡模式') + '</span>' +
+      '</div>' +
+      '<div class="hv4-stats">' +
+        '<span>关卡<b data-stage>1</b></span>' +
+        '<span>正确数<b data-correct>0</b></span>' +
+        '<span>准确率<b data-acc>100%</b></span>' +
+        '<span>积分<b data-score>0</b></span>' +
+        '<span data-timewrap style="display:none;">倒计时<b data-time>45</b>s</span>' +
+        '<span>护盾<b data-shield>1</b></span>' +
+      '</div>' +
+      '<div class="hv4-actions">' +
+        (opts.showHintBtn ? '<button class="chip-sm on" data-act="hint">💡 林阿姨提示</button>' : '') +
+        (opts.onViewCycle ? '<button class="chip-sm" data-act="view">🎥 切换视角</button>' : '') +
+        '<button class="chip-sm" data-act="mute">' + (opts.muted ? '🔇' : '🔊') + '</button>' +
+        '<button class="chip-sm" data-act="exit">返回选楼</button>' +
+      '</div>'
+    this.el.appendChild(bar)
+
+    const bot = document.createElement('div')
+    bot.id = 'hv4-bottom'
+    bot.className = 'hv4-bottom-banner'
+    bot.textContent = opts.modeMeta.desc
+    this.el.appendChild(bot)
+
+    this._hv4 = {
+      phase: qs(bar, '[data-phase]'),
+      pattern: qs(bar, '[data-pattern]'),
+      stage: qs(bar, '[data-stage]'),
+      correct: qs(bar, '[data-correct]'),
+      acc: qs(bar, '[data-acc]'),
+      score: qs(bar, '[data-score]'),
+      timeWrap: qs(bar, '[data-timewrap]'),
+      time: qs(bar, '[data-time]'),
+      shield: qs(bar, '[data-shield]'),
+      bot
+    }
+
+    if (opts.showHintBtn && opts.onHint) qs(bar, '[data-act="hint"]').onclick = () => opts.onHint()
+    if (opts.onViewCycle) qs(bar, '[data-act="view"]').onclick = () => opts.onViewCycle()
+    const muteBtn = qs(bar, '[data-act="mute"]')
+    muteBtn.onclick = () => {
+      const m = opts.onMute()
+      muteBtn.textContent = m ? '🔇' : '🔊'
+    }
+    qs(bar, '[data-act="exit"]').onclick = () => opts.onExit()
+  }
+
+  /** @param {{ stage?: number, phaseText?: string, aiPattern?: string, score?: number, accuracyPct?: number, correctCount?: number, timeLeftSec?: number|null, shield?: number, bottomText?: string }} p */
+  updateMinigameHud(p) {
+    if (!this._hv4) return
+    const h = this._hv4
+    if (p.phaseText !== undefined) h.phase.textContent = p.phaseText
+    if (p.aiPattern !== undefined) h.pattern.textContent = p.aiPattern
+    if (p.stage !== undefined) h.stage.textContent = String(p.stage)
+    if (p.correctCount !== undefined) h.correct.textContent = String(p.correctCount)
+    if (p.accuracyPct !== undefined) h.acc.textContent = String(Math.round(p.accuracyPct)) + '%'
+    if (p.score !== undefined) h.score.textContent = String(p.score)
+    if (p.shield !== undefined) h.shield.textContent = String(p.shield)
+    if (p.timeLeftSec !== undefined) {
+      if (p.timeLeftSec === null) h.timeWrap.style.display = 'none'
+      else {
+        h.timeWrap.style.display = 'inline'
+        h.time.textContent = String(Math.max(0, Math.ceil(p.timeLeftSec)))
+      }
+    }
+    if (p.bottomText !== undefined && h.bot) h.bot.textContent = p.bottomText
+  }
+
+  /**
+   * Minigame completion card with AI Inspector Debrief, postcard, rank & quick replay.
+   * @param {{
+   *   modeMeta: any, dormMeta: any, summary: any, debrief: any, aiSource: string,
+   *   postcard: string, rank: number, myRank: any, nickname: string,
+   *   onReplay: Function, onLeaderboard: Function, onHub: Function, onNicknameChange: (name: string) => void
+   * }} opts
+   */
+  showMinigameResult(opts) {
+    this.hideAll()
+    const { modeMeta, dormMeta, summary, debrief, aiSource, postcard, rank, myRank } = opts
+    const s = this._layer()
+    s.classList.add('result-screen')
+    s.innerHTML = '<div class="result-scroll">' +
+      '<div class="panel glass result-panel">' +
+        '<div class="kicker">' + esc(dormMeta.name + ' · ' + modeMeta.name) + '</div>' +
+        '<h2 class="h2">' + esc(debrief?.rankTitle || debrief?.verdictTitle || '夜间巡查完成') + '</h2>' +
+        '<div class="statgrid">' +
+          '<div class="cell"><b>' + (summary.score || 0) + '</b><span>夜巡积分</span></div>' +
+          '<div class="cell"><b>' + (summary.accuracyPct ?? 100) + '%</b><span>准确率</span></div>' +
+          '<div class="cell"><b>第 ' + (summary.stageReached || 1) + ' 关</b><span>通关进度</span></div>' +
+          '<div class="cell"><b>' + (summary.correctCount || 0) + '</b><span>正确点亮</span></div>' +
+        '</div>' +
+        (rank || (myRank && myRank.rank)
+          ? '<div class="rank-line">当前榜单第 <b>#' + (myRank?.rank || rank) + '</b> 名' + (myRank ? ' · 领先 ' + myRank.percentile + '% 同学' : '') + '</div>'
+          : '') +
+        '<div class="letter">' +
+          '<div class="letter-from">AI 夜巡评语 · ' + esc(sourceLabel(aiSource)) + '</div>' +
+          '<p class="letter-body">' + esc(debrief?.auntComment || debrief?.comment || '') + '</p>' +
+          '<div class="letter-sign">' + esc(debrief?.deanComment || debrief?.deanNote || '') + '</div>' +
+          (debrief?.sleepTip ? '<div class="note" style="margin-top:8px;">🌙 助眠小贴士：' + esc(debrief.sleepTip) + '</div>' : '') +
+        '</div>' +
+        (postcard ? '<img class="postcard" alt="夜巡明信片" src="' + postcard + '"/>' : '') +
+        (postcard ? '<a class="btn ghost" download="light-patrol-' + Date.now() + '.png" href="' + postcard + '"><span data-icon="download"></span>保存纪念明信片</a>' : '') +
+        '<div class="result-actions">' +
+          '<button class="btn primary" data-act="replay"><span data-icon="replay"></span>再玩一局</button>' +
+          '<button class="btn ghost" data-act="board">🏆 查看我的排名</button>' +
+          '<button class="btn ghost" data-act="hub"><span data-icon="home"></span>更换宿舍/玩法</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>'
+    paintIcons(s)
+    qs(s, '[data-act="replay"]').onclick = () => opts.onReplay()
+    qs(s, '[data-act="board"]').onclick = () => opts.onLeaderboard()
+    qs(s, '[data-act="hub"]').onclick = () => opts.onHub()
+  }
+
+  // ------------------------------------------------------------- NPC Weather Cast Gallery
+
+  /**
+   * Browse all 8 campus NPCs & test weather/season outfits live.
+   * @param {{ season: string, weather: string, onSeason: (s: string) => void, onWeather: (w: string) => void, onClose: Function }} opts
+   */
+  showNpcGallery(opts) {
+    let curSeason = opts.season || 'autumn'
+    let curWeather = opts.weather || 'clear'
+    const s = this._layer()
+
+    const renderGrid = () => {
+      const outfitKey = outfitForEnv(curWeather, curSeason)
+      const label = OUTFIT_LABELS[outfitKey] || '值班常服'
+      const cards = Object.values(NPC_CATALOG).map(npc =>
+        '<div class="npc-card">' +
+          '<div class="npc-card-art">' + renderNpcPortraitSvg(npc.id, curWeather, curSeason) + '</div>' +
+          '<b>' + esc(npc.name) + '</b>' +
+          '<span>' + esc(npc.role) + ' · ' + esc(npc.propHint) + '</span>' +
+        '</div>'
+      ).join('')
+
+      s.innerHTML = '<div class="panel glass wide">' +
+        '<div class="kicker">CAMPUS NPC WEATHER OUTFITS</div>' +
+        '<h2 class="h2">全校人物换装图鉴 · ' + esc(label) + '</h2>' +
+        '<div class="filter-bar">' +
+          SEASONS.map(ss => '<button class="chip-sm ' + (ss.id === curSeason ? 'on' : '') + '" data-ns="' + esc(ss.id) + '">' + esc(ss.name) + '</button>').join('') +
+        '</div>' +
+        '<div class="filter-bar">' +
+          WEATHER_CATALOG.map(ww => '<button class="chip-sm ' + (ww.id === curWeather ? 'on' : '') + '" data-nw="' + esc(ww.id) + '">' + esc(ww.name) + '</button>').join('') +
+        '</div>' +
+        '<div class="npc-cast-grid">' + cards + '</div>' +
+        '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回校园</button>' +
+      '</div>'
+      paintIcons(s)
+      qs(s, '[data-act="back"]').onclick = () => opts.onClose()
+      for (const b of qsa(s, '[data-ns]')) {
+        b.onclick = () => {
+          curSeason = b.getAttribute('data-ns') || 'autumn'
+          opts.onSeason(curSeason)
+          renderGrid()
+        }
+      }
+      for (const b of qsa(s, '[data-nw]')) {
+        b.onclick = () => {
+          curWeather = b.getAttribute('data-nw') || 'clear'
+          opts.onWeather(curWeather)
+          renderGrid()
+        }
+      }
+    }
+    renderGrid()
+  }
+
+  // ------------------------------------------------------------- v3 Prologue & Intro (preserved)
+
   showPrologue({ onChoose }) {
     this.hideAll()
     const s = this._layer()
@@ -124,17 +607,9 @@ export class UI {
       '<div class="mood-grid">' + cards + '</div>' +
     '</div>'
     paintIcons(s)
-    for (const b of qsa(s, '.mood-card')) {
-      b.onclick = () => onChoose(b.getAttribute('data-mood'))
-    }
+    for (const b of qsa(s, '.mood-card')) b.onclick = () => onChoose(b.getAttribute('data-mood'))
   }
 
-  // ------------------------------------------------------------- cinematic
-
-  /**
-   * @param {string[]} lines
-   * @param {() => void} onDone
-   */
   intro(lines, onDone) {
     this.hideAll()
     const wrap = document.createElement('div')
@@ -146,9 +621,7 @@ export class UI {
     document.body.appendChild(wrap)
     requestAnimationFrame(() => wrap.classList.add('on'))
     const lineEl = qs(wrap, '#intro-line')
-    let idx = 0
-    let typing = false
-    let finished = false
+    let idx = 0, typing = false, finished = false
     /** @type {any} */ let timer = 0
 
     const finish = () => {
@@ -168,13 +641,9 @@ export class UI {
       const step = () => {
         if (finished) return
         if (i <= text.length) {
-          lineEl.textContent = text.slice(0, i)
-          i += 1
-          timer = setTimeout(step, 54)
+          lineEl.textContent = text.slice(0, i); i += 1; timer = setTimeout(step, 54)
         } else {
-          typing = false
-          idx += 1
-          timer = setTimeout(typeLine, 1050)
+          typing = false; idx += 1; timer = setTimeout(typeLine, 1050)
         }
       }
       step()
@@ -183,24 +652,16 @@ export class UI {
       const target = e.target
       if (target instanceof HTMLElement && target.id === 'intro-skip') return
       if (typing) {
-        clearTimeout(timer)
-        typing = false
-        lineEl.textContent = lines[idx]
-        idx += 1
-        timer = setTimeout(typeLine, 320)
+        clearTimeout(timer); typing = false; lineEl.textContent = lines[idx]; idx += 1; timer = setTimeout(typeLine, 320)
       } else finish()
     })
     qs(wrap, '#intro-skip').onclick = e => { e.stopPropagation(); finish() }
     typeLine()
   }
 
-  // ------------------------------------------------------------------ HUD
+  // ------------------------------------------------------------------ v3 Story HUD
 
-  /**
-   * @param {{ night: any, index: number, count: number, commissions: any[],
-   *   directorNote: string, muted: boolean, onPause: Function, onMute: Function }} opts
-   */
-  startNight({ night, index, count, commissions, directorNote, muted, onPause, onMute }) {
+  startNight({ night, index, count, commissions, directorNote, muted, totalWindows = 24, onPause, onMute }) {
     this.hideAll()
     const hud = document.createElement('div')
     hud.id = 'hud'
@@ -216,7 +677,7 @@ export class UI {
           '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
           '<div class="warmbar"><i data-warmbar></i></div>' +
           '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
-          '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/24</span></div>' +
+          '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/' + totalWindows + '</span></div>' +
           '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
@@ -251,7 +712,6 @@ export class UI {
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
-  /** @param {any} game */
   tick(game) {
     if (!this._timeEl || !game.night) return
     const sec = Math.ceil(game.night.timeLeft)
@@ -260,12 +720,9 @@ export class UI {
       this._timeEl.textContent = String(sec)
       this._timeEl.classList.toggle('urgent', sec <= 10)
     }
-    // Re-sync the counters here too: warmth can change from a commission or a
-    // surprise between taps, and the tick is the one place that always runs.
     this.setStats(game)
   }
 
-  /** @param {any} game */
   setStats(game) {
     if (!game.night) return
     const n = game.night
@@ -284,7 +741,6 @@ export class UI {
     }
   }
 
-  /** @param {any[]} items */
   updateCommissions(items) {
     if (!this._ledger) return
     for (const item of items || []) {
@@ -296,7 +752,6 @@ export class UI {
     }
   }
 
-  /** @param {string} id @param {string} label */
   stampCommission(id, label) {
     if (!this._ledger) return
     const row = this._ledger.querySelector('[data-cid="' + String(id).replace(/"/g, '') + '"]')
@@ -313,7 +768,6 @@ export class UI {
 
   // ------------------------------------------------------------- feedback
 
-  /** @param {number} n */
   combo(n) {
     let c = document.getElementById('combo')
     if (!c) {
@@ -327,7 +781,6 @@ export class UI {
     c.classList.add('show')
   }
 
-  /** @param {string} text @param {number} x @param {number} y @param {string} color @param {string} kind */
   floatText(text, x, y, color, kind) {
     if (!this.fx) return
     const d = document.createElement('div')
@@ -344,7 +797,6 @@ export class UI {
     anim.onfinish = () => d.remove()
   }
 
-  /** @param {number} x @param {number} y */
   shockwave(x, y) {
     if (!this.fx) return
     const d = document.createElement('div')
@@ -359,7 +811,6 @@ export class UI {
     anim.onfinish = () => d.remove()
   }
 
-  /** @param {string} text @param {string} gain */
   toast(text, gain) {
     const old = document.getElementById('toast')
     if (old) old.remove()
@@ -372,7 +823,6 @@ export class UI {
     this._toastTimer = setTimeout(() => d.remove(), 2400)
   }
 
-  /** @param {string} text @param {string} [sub] */
   banner(text, sub) {
     const d = document.createElement('div')
     d.className = 'lit-banner'
@@ -382,7 +832,6 @@ export class UI {
     setTimeout(() => { d.classList.remove('show'); setTimeout(() => d.remove(), 520) }, 1700)
   }
 
-  /** @param {string} kind */
   flash(kind) {
     if (!this.fx) return
     const d = document.createElement('div')
@@ -394,10 +843,6 @@ export class UI {
 
   // -------------------------------------------------------------- choices
 
-  /**
-   * @param {{ story: any, resident: any, whisper: any, onLike: Function,
-   *   onChoose: (c: any) => void, onTimeout: () => void }} opts
-   */
   showChoice({ story, resident, whisper, onLike, onChoose, onTimeout }) {
     this.hideChoice()
     const card = document.createElement('div')
@@ -438,10 +883,7 @@ export class UI {
         if (typeof n === 'number') qs(likeBtn, 'b').textContent = String(n)
       }
     }
-    this._choiceTimer = setTimeout(() => {
-      this.hideChoice()
-      onTimeout()
-    }, 6000)
+    this._choiceTimer = setTimeout(() => { this.hideChoice(); onTimeout() }, 6000)
     this._choiceEl = card
   }
 
@@ -452,9 +894,6 @@ export class UI {
     if (n) n.remove()
   }
 
-  /**
-   * @param {{ text: string, choiceLabel: string, outcome: string, auto: boolean, icon: string, item: string }} opts
-   */
   storyResult({ choiceLabel, outcome, auto, item }) {
     const d = document.createElement('div')
     d.className = 'story-flash'
@@ -466,9 +905,8 @@ export class UI {
     setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 480) }, 4200)
   }
 
-  // ------------------------------------------------------------- summaries
+  // ------------------------------------------------------------- summaries & v3 result
 
-  /** @param {any} sum @param {Function} onNext */
   nightSummary(sum, onNext) {
     this.hideAll()
     const titles = ['灯，安静地亮着', '风把灯吹得更暖了', '整栋楼都有了回声']
@@ -490,7 +928,6 @@ export class UI {
     qs(s, '[data-act="next"]').onclick = onNext
   }
 
-  /** @param {{ ending: any, run: any }} opts */
   showEnding({ ending }) {
     const script = endingScript(ending.id)
     const d = document.createElement('div')
@@ -507,22 +944,17 @@ export class UI {
     setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 700) }, 3600)
   }
 
-  // ---------------------------------------------------------------- result
-
-  /**
-   * @param {{ run: any, records: any, postcard: string, ending: any, letter: any,
-   *   rank: number, aiSource: string, suggestedWhisper: string,
-   *   onSealWhisper: Function, onLikeWhisper: Function,
-   *   onReplay: Function, onHome: Function }} opts
-   */
   showResult(opts) {
     this.hideAll()
     const { run, records, postcard, ending, letter, rank, aiSource, suggestedWhisper } = opts
+    const dorm = dormDef(run.dormType || 'university')
+    const gridWindows = buildWindowIds(dorm.rows, dorm.cols)
+
     const s = this._layer()
     s.classList.add('result-screen')
     s.innerHTML = '<div class="result-scroll">' +
       '<div class="panel glass result-panel">' +
-        '<div class="kicker">今晚的明信片</div>' +
+        '<div class="kicker">今晚的明信片 · ' + esc(dorm.shortName) + '</div>' +
         '<h2 class="h2">你点亮了 <span class="accent">' + run.litTotal + '</span> 扇窗</h2>' +
         '<div class="ending-chip"><span class="badge" data-icon="star"></span><span>' + esc(ending.name) + '</span><em>' + esc(run.archetype) + '</em></div>' +
         '<img class="postcard" alt="今晚的明信片" src="' + postcard + '"/>' +
@@ -533,7 +965,7 @@ export class UI {
           '<div class="cell"><b>' + run.resonanceCount + '</b><span>星轨共鸣</span></div>' +
           '<div class="cell"><b>' + run.stampsEarned + '</b><span>火漆章</span></div>' +
         '</div>' +
-        (rank ? '<div class="rank-line">今晚第 <b>' + rank + '</b> 名</div>' : '') +
+        (rank ? '<div class="rank-line">全校排行榜第 <b>#' + rank + '</b> 名</div>' : '') +
         '<div class="letter">' +
           '<div class="letter-from">' + esc(letter ? letter.fromRoom : '') + '</div>' +
           '<div class="letter-salutation">' + esc(letter ? letter.salutation : '') + '</div>' +
@@ -543,26 +975,26 @@ export class UI {
         '<div class="seal-block">' +
           '<div class="kicker">把一句微光封存进窗户</div>' +
           '<p class="lede small">它会留在服务端，被后来路过的人点亮时看见。</p>' +
-          '<div class="window-picker" data-picker></div>' +
+          '<div class="window-picker" data-picker style="grid-template-columns:repeat(' + dorm.cols + ',1fr)"></div>' +
           '<div class="seal-row"><input data-whisper maxlength="40" placeholder="' + esc(suggestedWhisper || '今晚的雨很轻，祝你也做个好梦。') + '"/><button class="btn primary" data-act="seal"><span data-icon="send"></span>封存</button></div>' +
           '<div class="seal-status" data-status></div>' +
         '</div>' +
         '<div class="result-actions">' +
           '<button class="btn primary" data-act="replay"><span data-icon="replay"></span>再来三晚</button>' +
+          (opts.onLeaderboard ? '<button class="btn ghost" data-act="board">🏆 查看排名</button>' : '') +
           '<button class="btn ghost" data-act="home"><span data-icon="home"></span>回到标题</button>' +
         '</div>' +
-        '<div class="note">AI 来源：' + esc(sourceLabel(aiSource)) + ' · 历史最佳 ' + (records.bestWarmth || 0) + ' · 明信片可长按保存</div>' +
+        '<div class="note">AI 来源：' + esc(sourceLabel(aiSource)) + ' · 历史最佳 ' + (records.bestWarmth || 0) + '</div>' +
       '</div>' +
     '</div>'
     paintIcons(s)
 
-    // window picker: 4 x 6 grid, matching the facade
     const picker = qs(s, '[data-picker]')
-    let picked = run.bondRoomId || 304
-    for (const win of WINDOW_IDS) {
+    let picked = run.bondRoomId || gridWindows[0].roomId
+    for (const win of gridWindows) {
       const b = document.createElement('button')
       b.className = 'wp' + (win.roomId === picked ? ' on' : '')
-      b.textContent = String(win.roomId).slice(1)
+      b.textContent = String(win.roomId)
       b.title = String(win.roomId) + ' 室'
       b.onclick = () => {
         picked = win.roomId
@@ -574,32 +1006,21 @@ export class UI {
 
     qs(s, '[data-act="replay"]').onclick = () => opts.onReplay()
     qs(s, '[data-act="home"]').onclick = () => opts.onHome()
+    if (opts.onLeaderboard) qs(s, '[data-act="board"]').onclick = () => opts.onLeaderboard()
     const input = qs(s, 'input[data-whisper]')
     const status = qs(s, '[data-status]')
     qs(s, '[data-act="seal"]').onclick = async () => {
       const content = (input.value || '').trim() || String(suggestedWhisper || '').trim()
-      if (content.length < 6) {
-        status.textContent = '再写长一点点吧'
-        status.className = 'seal-status bad'
-        return
-      }
-      status.textContent = '正在封存…'
-      status.className = 'seal-status'
+      if (content.length < 6) { status.textContent = '再写长一点点吧'; status.className = 'seal-status bad'; return }
+      status.textContent = '正在封存…'; status.className = 'seal-status'
       const out = await opts.onSealWhisper({ roomId: picked, content })
-      if (out) {
-        status.textContent = '已封存进 ' + picked + ' 室，等下一个路过的人'
-        status.className = 'seal-status good'
-        input.value = ''
-      } else {
-        status.textContent = '暂时封存不了，稍后再试'
-        status.className = 'seal-status bad'
-      }
+      if (out) { status.textContent = '已封存进 ' + picked + ' 室，等下一个路过的人'; status.className = 'seal-status good'; input.value = '' }
+      else { status.textContent = '暂时封存不了，稍后再试'; status.className = 'seal-status bad' }
     }
   }
 
-  // ------------------------------------------------------- collection etc.
+  // ------------------------------------------------------- collection & rank-aware leaderboard
 
-  /** @param {{ records: any, onClose: Function }} opts */
   showCollection({ records, onClose }) {
     const unlocked = new Set(records.unlockedEndings || [])
     const tiles = endingGallery().map(e => '<div class="ending-tile ' + (unlocked.has(e.id) ? 'on' : 'locked') + '">' +
@@ -633,31 +1054,121 @@ export class UI {
     qs(s, '[data-act="back"]').onclick = onClose
   }
 
-  /** @param {{ onClose: Function }} opts */
-  async showLeaderboard({ onClose }) {
+  /**
+   * Filterable, rank-aware leaderboard showing the player's own rank, percentile & gap.
+   * @param {{ uid?: string, nickname?: string, defaultMode?: string, defaultDorm?: string, onNicknameChange?: (name: string) => void, onClose: Function }} opts
+   */
+  async showLeaderboard({ uid = '', nickname = '', defaultMode = '', defaultDorm = '', onNicknameChange, onClose }) {
+    /** @type {'all'|'tonight'} */
+    let scope = 'all'
+    let mode = defaultMode
+    let dormType = defaultDorm
+    let curNick = nickname || generateCampusNickname()
+
     const s = this._layer()
-    s.innerHTML = '<div class="panel glass">' +
-      '<div class="kicker">TONIGHT\'S LIGHTS</div>' +
-      '<h2 class="h2">今夜守夜榜</h2>' +
-      '<div class="board" data-body><div class="empty">正在读取今晚的灯…</div></div>' +
+    s.innerHTML = '<div class="panel glass wide">' +
+      '<div class="kicker">CAMPUS NIGHT PATROL LEADERBOARD</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<h2 class="h2" style="margin:6px 0;">全校夜巡排行榜</h2>' +
+        '<div class="nick-inline">' +
+          '<span>我的代号</span>' +
+          '<input data-nick maxlength="8" value="' + esc(curNick) + '" />' +
+          '<button class="nick-dice" type="button" data-act="rand">🎲</button>' +
+        '</div>' +
+      '</div>' +
+      '<div data-myrank></div>' +
+      '<div class="filter-bar" data-scope>' +
+        '<button class="chip-sm on" data-val="all">全部记录</button>' +
+        '<button class="chip-sm" data-val="tonight">今晚</button>' +
+      '</div>' +
+      '<div class="filter-bar" data-modes>' +
+        '<button class="chip-sm ' + (!mode ? 'on' : '') + '" data-val="">全部小游戏</button>' +
+        GAME_MODES.map(m => '<button class="chip-sm ' + (m.id === mode ? 'on' : '') + '" data-val="' + esc(m.id) + '">' + esc(m.shortName) + '</button>').join('') +
+      '</div>' +
+      '<div class="filter-bar" data-dorms>' +
+        '<button class="chip-sm ' + (!dormType ? 'on' : '') + '" data-val="">全部宿舍楼</button>' +
+        DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === dormType ? 'on' : '') + '" data-val="' + esc(d.id) + '">' + esc(d.shortName) + '</button>').join('') +
+      '</div>' +
+      '<div class="board" data-body><div class="empty">正在读取排行榜…</div></div>' +
       '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
     '</div>'
     paintIcons(s)
     qs(s, '[data-act="back"]').onclick = onClose
-    const body = qs(s, '[data-body]')
-    const items = await fetchLeaderboard({ scope: 'all', limit: 20 })
-    if (!items.length) {
-      body.innerHTML = '<div class="empty">今晚还没有人上榜</div>'
-      return
+
+    const nickInput = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
+    nickInput.onchange = () => {
+      curNick = nickInput.value.trim().slice(0, 8) || generateCampusNickname()
+      nickInput.value = curNick
+      if (onNicknameChange) onNicknameChange(curNick)
     }
-    body.innerHTML = items.map((it, i) => '<div class="row ' + (i < 3 ? 'top' : '') + '">' +
-      '<span class="rk">' + (i + 1) + '</span>' +
-      '<span class="nm">' + esc(it.nickname) + '</span>' +
-      '<span class="sc"><b>' + Number(it.total_warmth) + '</b> 温暖<em>' + esc(it.archetype || '') + '</em></span>' +
-    '</div>').join('')
+    qs(s, '[data-act="rand"]').onclick = () => {
+      curNick = generateCampusNickname()
+      nickInput.value = curNick
+      if (onNicknameChange) onNicknameChange(curNick)
+    }
+
+    const myRankEl = qs(s, '[data-myrank]')
+    const body = qs(s, '[data-body]')
+
+    const loadBoard = async () => {
+      body.innerHTML = '<div class="empty">正在刷新排名…</div>'
+      const data = await fetchLeaderboardWithRank({ scope, limit: 20, mode, dormType, uid })
+      if (data.myRank) {
+        const mr = data.myRank
+        myRankEl.innerHTML = '<div class="my-rank-card">' +
+          '<div class="mrc-num">#' + mr.rank + '</div>' +
+          '<div class="mrc-meta">' +
+            '<b>📌 我的当前排名 · ' + esc(mr.nickname || curNick) + '（第 ' + mr.rank + ' / ' + mr.total + ' 名）</b>' +
+            '<span>最高分 ' + mr.bestScore + ' · 准确率 ' + mr.bestAccuracy + '% · 最高第 ' + mr.bestStage + ' 关 · 领先 ' + mr.percentile + '% 同学</span>' +
+          '</div>' +
+          '<div class="mrc-gap">' + (mr.rank === 1 ? '👑 当前榜首' : ('距 #' + (mr.rank - 1) + ' 差 ' + mr.nextGap + ' 分')) + '</div>' +
+        '</div>'
+      } else {
+        myRankEl.innerHTML = '<div class="my-rank-card">' +
+          '<div class="mrc-num">—</div>' +
+          '<div class="mrc-meta">' +
+            '<b>📌 我的当前排名 · ' + esc(curNick) + '（暂无此筛选成绩）</b>' +
+            '<span>完成一局当前玩法或切换筛选条件后，这里会立刻显示你的准确排名</span>' +
+          '</div>' +
+          '<div class="mrc-gap">共 ' + data.totalEntries + ' 条成绩</div>' +
+        '</div>'
+      }
+
+      if (!data.items.length) {
+        body.innerHTML = '<div class="empty">这个分榜还没有人挑战过，快去拿下第一名吧！</div>'
+        return
+      }
+      body.innerHTML = data.items.map((it, i) => {
+        const rk = it.rank || (i + 1)
+        const mName = gameModeDef(it.gameMode).shortName
+        const dName = dormDef(it.dormType).shortName
+        const isMe = it.rank && data.myRank && it.rank === data.myRank.rank && it.nickname === data.myRank.nickname
+        return '<div class="row ' + (rk <= 3 ? 'top' : '') + (isMe ? ' me' : '') + '">' +
+          '<span class="rk">#' + rk + '</span>' +
+          '<span class="nm">' + esc(it.nickname) + ' <em style="color:#8f9ebe;font-style:normal;font-size:11px;">[' + esc(mName) + ' · ' + esc(dName) + ']</em></span>' +
+          '<span class="sc"><b>' + Number(it.score || it.total_warmth) + '</b> 分<em>' + (it.accuracyPct ? (it.accuracyPct + '% · 第' + it.stageReached + '关') : esc(it.archetype || '')) + '</em></span>' +
+        '</div>'
+      }).join('')
+    }
+
+    const bindGroup = (sel, setter) => {
+      const container = qs(s, sel)
+      for (const b of qsa(container, '.chip-sm')) {
+        b.onclick = () => {
+          for (const o of qsa(container, '.chip-sm')) o.classList.remove('on')
+          b.classList.add('on')
+          setter(b.getAttribute('data-val') || '')
+          loadBoard()
+        }
+      }
+    }
+    bindGroup('[data-scope]', v => { scope = v || 'all' })
+    bindGroup('[data-modes]', v => { mode = v })
+    bindGroup('[data-dorms]', v => { dormType = v })
+
+    await loadBoard()
   }
 
-  /** @param {{ whispers: any[], onLike: Function, onClose: Function }} opts */
   showWhisperWall({ whispers, onLike, onClose }) {
     const rows = (whispers || []).length
       ? whispers.map(w => '<div class="wall-row">' +
@@ -683,12 +1194,11 @@ export class UI {
     }
   }
 
-  /** @param {{ status: any, onVerify: Function, onClose: Function }} opts */
   showKeyDialog({ status, onVerify, onClose }) {
     const s = this._layer()
     s.innerHTML = '<div class="panel glass small">' +
       '<div class="kicker">AI 模式</div>' +
-      '<h2 class="h2">评审 / 自带 Key</h2>' +
+      '<h2 class="h2">评审 / 自带 DeepSeek Key</h2>' +
       '<p class="lede small">填一个 DeepSeek Key，浏览器会直接连 api.deepseek.com。Key 只存在这一页的内存里，不写本地存储，也不发到本服。</p>' +
       '<div class="key-state ' + (status && status.enabled ? 'on' : '') + '" data-state>' + (status && status.enabled ? '✓ 已启用浏览器直连模式（Key 仅驻留内存）' : '当前为云端智能体模式') + '</div>' +
       '<input data-key type="password" spellcheck="false" placeholder="sk-..." autocomplete="off"/>' +
@@ -701,8 +1211,7 @@ export class UI {
     const input = qs(s, 'input[data-key]')
     const msg = qs(s, '[data-msg]')
     qs(s, '[data-act="verify"]').onclick = async () => {
-      msg.textContent = '正在用最小请求验证…'
-      msg.className = 'seal-status'
+      msg.textContent = '正在用最小请求验证…'; msg.className = 'seal-status'
       const res = await onVerify(input.value, undefined)
       msg.textContent = res.message
       msg.className = 'seal-status ' + (res.ok ? 'good' : 'bad')
@@ -717,7 +1226,6 @@ export class UI {
 
   // ---------------------------------------------------------------- chrome
 
-  /** @param {string} text @param {number} x @param {number} y */
   coach(text, x, y) {
     if (!this._coachEl) {
       this._coachEl = document.createElement('div')
@@ -734,7 +1242,6 @@ export class UI {
     if (this._coachEl) { this._coachEl.remove(); this._coachEl = null }
   }
 
-  /** @param {{ onResume: Function, onHome: Function }} opts */
   pause({ onResume, onHome }) {
     this.hidePause()
     const s = this._layer()
@@ -756,7 +1263,6 @@ export class UI {
     if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null }
   }
 
-  /** @param {boolean} muted */
   setMuted(muted) {
     const btn = document.querySelector('#hud [data-act="mute"]')
     if (!btn) return
@@ -774,22 +1280,17 @@ const RESIDENT_ORDER = {
   406: '406 · 星野（天文社）'
 }
 
-const WEATHER_LABEL = { light_rain: '细雨', fog: '薄雾', wind: '晚风', clear: '晴夜' }
+const WEATHER_LABEL = { light_rain: '细雨', fog: '浓雾', wind: '晚风', clear: '晴夜', snow: '落雪' }
 const TEMPO_LABEL = { slow: '慢一点', normal: '刚刚好', brisk: '快一些' }
 
-function weatherLabel(weather) {
-  return WEATHER_LABEL[weather] || '夜'
-}
-
-function tempoLabel(tempo) {
-  return TEMPO_LABEL[tempo] || '刚刚好'
-}
+function weatherLabel(weather) { return WEATHER_LABEL[weather] || '晴夜' }
+function tempoLabel(tempo) { return TEMPO_LABEL[tempo] || '刚刚好' }
 
 function sourceLabel(source) {
-  if (source === 'ai') return '本次天气与故事由 AI 实时生成'
-  if (source === 'direct') return '由你的 Key 直连 DeepSeek 生成'
+  if (source === 'ai') return 'DeepSeek AI 云端智能体'
+  if (source === 'direct') return '你的 Key 直连 DeepSeek'
   if (source === 'cache') return 'AI 缓存复用'
-  return '本地手写剧本（离线可用）'
+  return '本地校园剧本（离线可用）'
 }
 
 export { ENDINGS, WINDOW_STATES, esc }

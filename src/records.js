@@ -4,6 +4,8 @@
 // server copy is the one that follows the player between devices, keyed by an
 // anonymous uid plus a six-character recovery code.
 
+import { generateCampusNickname } from '../shared/constants.js'
+
 const KEY = 'law.records.v3'
 const NICK_KEY = 'law.nick'
 
@@ -23,7 +25,11 @@ function emptyRecords() {
     unlockedEndings: [],
     residentBonds: {},
     titles: ['夜巡新人'],
-    lastEnding: ''
+    lastEnding: '',
+    preferredDorm: 'university',
+    preferredSeason: 'autumn',
+    preferredWeather: 'clear',
+    preferredMode: 'memory_sequence'
   }
 }
 
@@ -59,6 +65,18 @@ export function saveRecords(r) {
 /** @returns {string} */
 export function loadNickname() {
   try { return localStorage.getItem(NICK_KEY) || '' } catch { return '' }
+}
+
+/**
+ * Return existing custom nickname, or auto-assign and persist a random campus nickname.
+ * @returns {string}
+ */
+export function ensureNickname() {
+  const existing = loadNickname()
+  if (existing && existing.trim()) return existing.trim().slice(0, 8)
+  const generated = generateCampusNickname()
+  saveNickname(generated)
+  return generated
 }
 
 /** @param {string} name */
@@ -194,20 +212,29 @@ export async function syncRun(run, identity = {}) {
   const data = await postJson('/api/score', {
     uid: identity.uid || '',
     nickname: identity.nickname || '',
-    endingId: run.endingId,
-    archetype: run.archetype,
-    litWindows: run.litTotal,
-    maxCombo: run.maxCombo,
-    totalWarmth: run.totalWarmth,
-    resonances: run.resonanceCount,
-    stamps: run.stampsEarned,
-    items: run.items,
-    unlockedEndings: run.unlockedEndings,
-    residentBonds: run.residentBonds,
-    titles: run.titles,
-    litRoomIds: run.litRoomIds,
-    nightsSummary: run.nightsSummary,
-    letter: run.letter
+    endingId: run.endingId || 'ENDING_F_DRIFT',
+    archetype: run.archetype || '',
+    litWindows: run.litTotal || 0,
+    maxCombo: run.maxCombo || 0,
+    totalWarmth: run.totalWarmth || run.score || 0,
+    resonances: run.resonanceCount || 0,
+    stamps: run.stampsEarned || 0,
+    items: run.items || [],
+    unlockedEndings: run.unlockedEndings || [],
+    residentBonds: run.residentBonds || {},
+    titles: run.titles || [],
+    litRoomIds: run.litRoomIds || [],
+    nightsSummary: run.nightsSummary || [],
+    letter: run.letter || {},
+    // v4 fields
+    gameMode: run.gameMode || 'star_sweep',
+    dormType: run.dormType || 'university',
+    season: run.season || 'autumn',
+    weather: run.weather || 'clear',
+    stageReached: run.stageReached || 1,
+    correctCount: run.correctCount || run.litTotal || 0,
+    accuracyPct: run.accuracyPct || 0,
+    score: run.score || run.totalWarmth || 0
   })
   if (!data || !data.ok) return null
   return { rank: data.rank, player: data.player }
@@ -252,12 +279,35 @@ export async function fetchWhispers({ roomId, limit = 12 } = {}) {
 }
 
 /**
- * @param {{ scope?: 'all'|'tonight', limit?: number }} [opts]
+ * @param {{ scope?: 'all'|'tonight', limit?: number, mode?: string, dormType?: string }} [opts]
  * @returns {Promise<any[]>}
  */
-export async function fetchLeaderboard({ scope = 'all', limit = 20 } = {}) {
-  const data = await getJson('/api/leaderboard?scope=' + scope + '&limit=' + limit)
+export async function fetchLeaderboard({ scope = 'all', limit = 20, mode = '', dormType = '' } = {}) {
+  const q = new URLSearchParams({ scope, limit: String(limit) })
+  if (mode) q.set('mode', mode)
+  if (dormType) q.set('dormType', dormType)
+  const data = await getJson('/api/leaderboard?' + q.toString())
   return data && data.ok ? data.items : []
+}
+
+/**
+ * Fetch leaderboard items along with the player's own rank summary (`myRank`).
+ * @param {{ scope?: 'all'|'tonight', limit?: number, mode?: string, dormType?: string, uid?: string }} [opts]
+ * @returns {Promise<{ items: any[], myRank: any, totalEntries: number, totalPlayers: number }>}
+ */
+export async function fetchLeaderboardWithRank({ scope = 'all', limit = 20, mode = '', dormType = '', uid = '' } = {}) {
+  const q = new URLSearchParams({ scope, limit: String(limit) })
+  if (mode) q.set('mode', mode)
+  if (dormType) q.set('dormType', dormType)
+  if (uid) q.set('uid', uid)
+  const data = await getJson('/api/leaderboard?' + q.toString())
+  if (!data || !data.ok) return { items: [], myRank: null, totalEntries: 0, totalPlayers: 0 }
+  return {
+    items: Array.isArray(data.items) ? data.items : [],
+    myRank: data.myRank || null,
+    totalEntries: Number(data.totalEntries) || 0,
+    totalPlayers: Number(data.totalPlayers) || 0
+  }
 }
 
 /** @returns {Promise<{ totalLit: number } | null>} */

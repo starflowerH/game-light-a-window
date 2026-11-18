@@ -9,9 +9,17 @@ import { pathToFileURL } from 'node:url'
 import { openDatabase } from './db.js'
 import { createAgentHub } from './agents.js'
 import { sanitizeWhisper, sanitizeText } from '../shared/ai-schema.js'
-import { ENDING_IDS, INDEX_TO_ROOM, MOOD_TOKEN_IDS } from '../shared/constants.js'
+import {
+  DORM_IDS,
+  ENDING_IDS,
+  GAME_MODE_IDS,
+  INDEX_TO_ROOM,
+  MOOD_TOKEN_IDS,
+  SEASON_IDS,
+  WEATHERS
+} from '../shared/constants.js'
 
-const VERSION = '3.0.0'
+const VERSION = '4.0.0'
 
 /**
  * Sliding-window limiter with a sweeper so the map cannot grow without bound.
@@ -227,6 +235,44 @@ export function buildApp(opts = {}) {
     return { ok: true, source: result.source, payload: result.payload }
   })
 
+  app.post('/api/agent/dialogue', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runDialogueAgent({
+      dormType: String(body.dormType || 'university'),
+      season: String(body.season || 'autumn'),
+      weather: String(body.weather || 'clear'),
+      playerNick: String(body.playerNick || '')
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  app.post('/api/agent/puzzle', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runPuzzleAgent({
+      dormType: String(body.dormType || 'university'),
+      count: clampNumber(body.count, 2, 24, 4),
+      level: clampNumber(body.level, 1, 20, 1),
+      mode: String(body.mode || 'memory_sequence')
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
+  app.post('/api/agent/debrief', async (req, reply) => {
+    if (!guard(req, reply, aiLimiter)) return
+    const body = /** @type {any} */ (req.body || {})
+    const result = await hub.runDebriefAgent({
+      gameMode: String(body.gameMode || 'memory_sequence'),
+      dormType: String(body.dormType || 'university'),
+      stageReached: clampNumber(body.stageReached, 1, 99, 1),
+      accuracyPct: clampNumber(body.accuracyPct, 0, 100, 0),
+      score: clampNumber(body.score, 0, 999999, 0),
+      playerNick: String(body.playerNick || '')
+    })
+    return { ok: true, source: result.source, payload: result.payload }
+  })
+
   // v2 compatibility: /api/generate used to return { nights }.
   app.post('/api/generate', async (req, reply) => {
     if (!guard(req, reply, aiLimiter)) return
@@ -264,14 +310,24 @@ export function buildApp(opts = {}) {
       titles: Array.isArray(body.titles) ? body.titles : [],
       litRoomIds,
       nightsSummary: body.nightsSummary,
-      letter: body.letter
+      letter: body.letter,
+      gameMode: GAME_MODE_IDS.includes(String(body.gameMode)) ? String(body.gameMode) : 'star_sweep',
+      dormType: DORM_IDS.includes(String(body.dormType)) ? String(body.dormType) : 'university',
+      season: SEASON_IDS.includes(String(body.season)) ? String(body.season) : 'autumn',
+      weather: WEATHERS.includes(String(body.weather)) ? String(body.weather) : 'clear',
+      stageReached: clampNumber(body.stageReached, 1, 99, 1),
+      correctCount: clampNumber(body.correctCount, 0, 9999, 0),
+      accuracyPct: clampNumber(body.accuracyPct, 0, 100, 0),
+      score: clampNumber(body.score, 0, 999999, 0)
     })
 
     if (!result.ok) return reply.code(500).send({ ok: false, msg: '保存失败' })
     db.recordTelemetry('run_end', {
       endingId,
       totalWarmth: clampNumber(body.totalWarmth, 0, 99999),
-      litWindows: clampNumber(body.litWindows, 0, 72)
+      litWindows: clampNumber(body.litWindows, 0, 72),
+      gameMode: String(body.gameMode || 'star_sweep'),
+      dormType: String(body.dormType || 'university')
     })
     return { ok: true, rank: result.rank, player: result.player }
   })
@@ -281,8 +337,21 @@ export function buildApp(opts = {}) {
     const query = /** @type {any} */ (req.query || {})
     const limit = clampNumber(query.limit, 1, 50, 20)
     const scope = query.scope === 'tonight' ? 'tonight' : 'all'
+    const mode = GAME_MODE_IDS.includes(String(query.mode)) ? String(query.mode) : ''
+    const dormType = DORM_IDS.includes(String(query.dormType)) ? String(query.dormType) : ''
+    const uid = query.uid ? String(query.uid).slice(0, 64) : ''
     const stats = db.getGlobalStats()
-    return { ok: true, items: db.getLeaderboard(limit, scope), totalPlayers: stats.totalPlayers, scope }
+    const page = db.getLeaderboardPage({ scope, limit, mode, dormType, uid })
+    return {
+      ok: true,
+      items: page.items,
+      myRank: page.myRank,
+      totalEntries: page.totalEntries,
+      totalPlayers: stats.totalPlayers,
+      scope,
+      mode,
+      dormType
+    }
   })
 
   // ---------------------------------------------------------------- whispers

@@ -34,6 +34,7 @@ const WEATHER = {
   light_rain: { pinkFreq: 850, pinkQ: 0.8, pinkGain: 0.24, brownFreq: 240, brownQ: 0.7, brownGain: 0.12, windDepth: 0, gust: 0.018 },
   wind: { pinkFreq: 450, pinkQ: 1.5, pinkGain: 0.2, brownFreq: 170, brownQ: 0.8, brownGain: 0.13, windDepth: 230, gust: 0.05 },
   fog: { pinkFreq: 620, pinkQ: 2.6, pinkGain: 0.03, brownFreq: 88, brownQ: 1.0, brownGain: 0.08, windDepth: 40, gust: 0.02 },
+  snow: { pinkFreq: 960, pinkQ: 3.2, pinkGain: 0.018, brownFreq: 95, brownQ: 1.2, brownGain: 0.028, windDepth: 65, gust: 0.012 },
   clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0.014, brownFreq: 120, brownQ: 0.8, brownGain: 0.003, windDepth: 0, gust: 0.006 }
 }
 
@@ -150,7 +151,7 @@ export class AudioEngine {
   }
 
   setLitCount(n) {
-    this._litCount = clamp(Math.floor(finite(n, 0)), 0, 24)
+    this._litCount = clamp(Math.floor(finite(n, 0)), 0, 30)
     this._applyLit()
   }
 
@@ -177,6 +178,61 @@ export class AudioEngine {
       this._marimba(freq, t0 + i * 0.045, 0.13, pan)
     }
     this._chainStep = (this._chainStep + n + 2) % (SCALE.length * 3)
+  }
+
+  /** Play clear glass chime cue when memory sequence flashes a window. */
+  cue(step = 0) {
+    if (!this.ready || this._muted) return
+    const i = Math.max(0, Math.floor(finite(step, 0)))
+    const freq = SCALE[i % SCALE.length] * 1.5
+    this._marimba(freq, this.ctx.currentTime + 0.01, 0.14, ((i % 5) - 2) * 0.14)
+  }
+
+  /** Rising chime when player nails a memory / reflex / puzzle window. */
+  correct(step = 0) {
+    if (!this.ready || this._muted) return
+    const i = Math.max(0, Math.floor(finite(step, 0)))
+    const t = this.ctx.currentTime + 0.01
+    const f1 = SCALE[i % SCALE.length]
+    this._marimba(f1, t, 0.16, 0)
+    this._marimba(f1 * 1.25, t + 0.055, 0.11, 0.18)
+  }
+
+  /** Soft muffled wooden thud on miss / wrong tap (never harsh). */
+  wrong() {
+    if (!this.ready || this._muted) return
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const t = ctx.currentTime + 0.01
+    const o = ctx.createOscillator()
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(196, t)
+    o.frequency.exponentialRampToValueAtTime(132, t + 0.16)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.11, t + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20)
+    o.connect(g)
+    g.connect(this.sfx)
+    o.start(t)
+    o.stop(t + 0.22)
+    o.onended = () => this._releaseVoice()
+  }
+
+  /** Celebratory chord arpeggio on stage / puzzle clear. */
+  victory() {
+    if (!this.ready || this._muted) return
+    const t = this.ctx.currentTime + 0.02
+    ;[523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      this._marimba(f, t + i * 0.075, 0.16, -0.24 + i * 0.16)
+    })
+  }
+
+  /** Subtle warm wooden typewriter pip for NPC dialogue progression. */
+  npcChat(pitchOffset = 0) {
+    if (!this.ready || this._muted) return
+    const idx = Math.max(0, Math.min(SCALE.length - 1, Math.floor(finite(pitchOffset, 0))))
+    this._softTone(SCALE[idx] * 0.75, this.ctx.currentTime + 0.01, 0.04, 0.09, 'triangle', 0.01)
   }
 
   lit(roomId) {

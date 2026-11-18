@@ -8,7 +8,15 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, randomBytes } from 'node:crypto'
-import { INDEX_TO_ROOM, WINDOW_COUNT } from '../shared/constants.js'
+import {
+  DORM_IDS,
+  GAME_MODE_IDS,
+  INDEX_TO_ROOM,
+  SEASON_IDS,
+  WEATHERS,
+  WINDOW_COUNT,
+  generateCampusNickname
+} from '../shared/constants.js'
 
 const PASS_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
 
@@ -188,6 +196,24 @@ export function openDatabase(dataDir) {
     );
   `)
 
+  // v4.0 idempotent schema upgrade for existing SQLite files
+  const v4Columns = [
+    "ALTER TABLE runs ADD COLUMN game_mode TEXT NOT NULL DEFAULT 'star_sweep'",
+    "ALTER TABLE runs ADD COLUMN dorm_type TEXT NOT NULL DEFAULT 'university'",
+    "ALTER TABLE runs ADD COLUMN season TEXT NOT NULL DEFAULT 'autumn'",
+    "ALTER TABLE runs ADD COLUMN weather TEXT NOT NULL DEFAULT 'clear'",
+    'ALTER TABLE runs ADD COLUMN stage_reached INTEGER NOT NULL DEFAULT 1',
+    'ALTER TABLE runs ADD COLUMN correct_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE runs ADD COLUMN accuracy_pct REAL NOT NULL DEFAULT 0',
+    'ALTER TABLE runs ADD COLUMN score INTEGER NOT NULL DEFAULT 0'
+  ]
+  for (const ddl of v4Columns) {
+    try { db.exec(ddl) } catch { /* column already exists */ }
+  }
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_runs_mode_dorm ON runs(game_mode, dorm_type, score DESC, total_warmth DESC);')
+  } catch { /* index already exists */ }
+
   return buildRepository(db)
 }
 
@@ -213,17 +239,20 @@ function buildRepository(db) {
     `),
     insertRun: db.prepare(`
       INSERT INTO runs (player_uid, nickname, ending_id, archetype, lit_windows, max_combo,
-        total_warmth, resonances, stamps, nights_summary_json, letter_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        total_warmth, resonances, stamps, nights_summary_json, letter_json, created_at,
+        game_mode, dorm_type, season, weather, stage_reached, correct_count, accuracy_pct, score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
-    rankOf: db.prepare('SELECT COUNT(*) + 1 AS rank FROM runs WHERE total_warmth > ?'),
+    rankOf: db.prepare('SELECT COUNT(*) + 1 AS rank FROM runs WHERE CASE WHEN score > total_warmth THEN score ELSE total_warmth END > ?'),
     leaderboardAll: db.prepare(`
-      SELECT nickname, ending_id, archetype, lit_windows, max_combo, total_warmth, created_at
-      FROM runs ORDER BY total_warmth DESC, max_combo DESC LIMIT ?
+      SELECT nickname, ending_id, archetype, lit_windows, max_combo, total_warmth, created_at,
+        game_mode, dorm_type, season, weather, stage_reached, correct_count, accuracy_pct, score
+      FROM runs ORDER BY CASE WHEN score > total_warmth THEN score ELSE total_warmth END DESC, accuracy_pct DESC, max_combo DESC LIMIT ?
     `),
     leaderboardTonight: db.prepare(`
-      SELECT nickname, ending_id, archetype, lit_windows, max_combo, total_warmth, created_at
-      FROM runs WHERE created_at >= ? ORDER BY total_warmth DESC, max_combo DESC LIMIT ?
+      SELECT nickname, ending_id, archetype, lit_windows, max_combo, total_warmth, created_at,
+        game_mode, dorm_type, season, weather, stage_reached, correct_count, accuracy_pct, score
+      FROM runs WHERE created_at >= ? ORDER BY CASE WHEN score > total_warmth THEN score ELSE total_warmth END DESC, accuracy_pct DESC, max_combo DESC LIMIT ?
     `),
     countPlayers: db.prepare('SELECT COUNT(DISTINCT player_uid) AS n FROM runs'),
     totalRuns: db.prepare('SELECT COUNT(*) AS n FROM runs'),
@@ -279,7 +308,8 @@ function buildRepository(db) {
         stmt.insertRun.run(
           'legacy', String(r.nickname || '今晚的某某'), 'ENDING_F_DRIFT', '夜色漫步者',
           num(r.lit_windows), num(r.max_combo), num(r.total_warmth), 0, 0, '[]', '{}',
-          String(r.created_at || nowIso())
+          String(r.created_at || nowIso()),
+          'star_sweep', 'university', 'autumn', 'clear', 1, num(r.lit_windows), 0, num(r.total_warmth)
         )
       }
     } catch {
@@ -359,12 +389,20 @@ function buildRepository(db) {
       const player = (uid && this.getPlayer(uid)) || this.getOrCreatePlayer({ uid, nickname: input.nickname })
       if (!player) return { ok: false, rank: 0, player: null }
 
-      const nickname = String(input.nickname || player.nickname || '今晚的某某').slice(0, 8)
+      const nickname = String(input.nickname || player.nickname || generateCampusNickname()).slice(0, 8)
       const totalWarmth = Math.max(0, Math.min(99999, num(input.totalWarmth)))
       const maxCombo = Math.max(0, Math.min(999, num(input.maxCombo)))
       const litWindows = Math.max(0, Math.min(24 * 3 * 4, num(input.litWindows)))
       const resonances = Math.max(0, Math.min(999, num(input.resonances)))
       const stamps = Math.max(0, Math.min(9, num(input.stamps)))
+      const gameMode = GAME_MODE_IDS.includes(String(input.gameMode)) ? String(input.gameMode) : 'star_sweep'
+      const dormType = DORM_IDS.includes(String(input.dormType)) ? String(input.dormType) : 'university'
+      const season = SEASON_IDS.includes(String(input.season)) ? String(input.season) : 'autumn'
+      const weather = WEATHERS.includes(String(input.weather)) ? String(input.weather) : 'clear'
+      const stageReached = Math.max(1, Math.min(99, num(input.stageReached) || 1))
+      const correctCount = Math.max(0, Math.min(9999, num(input.correctCount || litWindows)))
+      const accuracyPct = Math.max(0, Math.min(100, Math.round(Number(input.accuracyPct) || 0)))
+      const score = Math.max(totalWarmth, Math.min(999999, num(input.score)))
 
       const unlockedEndings = Array.from(new Set([...player.unlockedEndings, ...(Array.isArray(input.unlockedEndings) ? input.unlockedEndings.map(String) : [])]))
       const unlockedItems = Array.from(new Set([...player.unlockedItems, ...(Array.isArray(input.items) ? input.items.map(String) : [])])).slice(0, 60)
@@ -402,7 +440,15 @@ function buildRepository(db) {
         stamps,
         JSON.stringify(Array.isArray(input.nightsSummary) ? input.nightsSummary : []),
         JSON.stringify(input.letter && typeof input.letter === 'object' ? input.letter : {}),
-        ts
+        ts,
+        gameMode,
+        dormType,
+        season,
+        weather,
+        stageReached,
+        correctCount,
+        accuracyPct,
+        score
       )
 
       const litRooms = numArray(input.litRoomIds)
@@ -411,7 +457,7 @@ function buildRepository(db) {
         stmt.upsertHeat.run(roomId, 1, ts)
       }
 
-      const rank = num(stmt.rankOf.get(totalWarmth)?.rank) || 1
+      const rank = num(stmt.rankOf.get(Math.max(score, totalWarmth))?.rank) || 1
       return { ok: true, rank, player: this.getPlayer(player.uid) }
     },
 
@@ -427,6 +473,72 @@ function buildRepository(db) {
         return stmt.leaderboardTonight.all(start.toISOString(), n).map(rowToBoardEntry)
       }
       return stmt.leaderboardAll.all(n).map(rowToBoardEntry)
+    },
+
+    /**
+     * Filtered per-player best-score leaderboard with exact personal rank calculation.
+     * @param {{ scope?: 'all'|'tonight', limit?: number, mode?: string, dormType?: string, uid?: string }} [opts]
+     */
+    getLeaderboardPage({ scope = 'all', limit = 20, mode = '', dormType = '', uid = '' } = {}) {
+      const n = Math.max(1, Math.min(50, Number(limit) || 20))
+      const conds = []
+      const params = []
+      if (scope === 'tonight') {
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        conds.push('created_at >= ?')
+        params.push(start.toISOString())
+      }
+      if (mode && GAME_MODE_IDS.includes(mode)) {
+        conds.push('game_mode = ?')
+        params.push(mode)
+      }
+      if (dormType && DORM_IDS.includes(dormType)) {
+        conds.push('dorm_type = ?')
+        params.push(dormType)
+      }
+      const whereSql = conds.length ? 'WHERE ' + conds.join(' AND ') : ''
+      const cte = `
+        WITH best AS (
+          SELECT *,
+            CASE WHEN score > total_warmth THEN score ELSE total_warmth END AS eff_score,
+            ROW_NUMBER() OVER (
+              PARTITION BY player_uid
+              ORDER BY CASE WHEN score > total_warmth THEN score ELSE total_warmth END DESC, accuracy_pct DESC, stage_reached DESC, max_combo DESC, id DESC
+            ) AS rn
+          FROM runs ${whereSql}
+        ),
+        ranked AS (
+          SELECT *, ROW_NUMBER() OVER (ORDER BY eff_score DESC, accuracy_pct DESC, stage_reached DESC, max_combo DESC, id ASC) AS rank
+          FROM best WHERE rn = 1
+        )
+      `
+      const items = db.prepare(`${cte} SELECT * FROM ranked ORDER BY rank ASC LIMIT ?`).all(...params, n).map(rowToBoardEntry)
+      const totalEntries = num(db.prepare(`${cte} SELECT COUNT(*) AS c FROM ranked`).get(...params)?.c)
+
+      let myRank = null
+      if (uid) {
+        const mine = db.prepare(`${cte} SELECT * FROM ranked WHERE player_uid = ?`).get(...params, String(uid))
+        if (mine) {
+          const r = num(mine.rank) || 1
+          const above = r > 1 ? db.prepare(`${cte} SELECT nickname, eff_score FROM ranked WHERE rank = ?`).get(...params, r - 1) : null
+          const total = Math.max(1, totalEntries)
+          myRank = {
+            rank: r,
+            total,
+            percentile: Math.max(1, Math.min(100, Math.round(((total - r + 1) / total) * 100))),
+            bestScore: num(mine.eff_score),
+            bestAccuracy: Number(mine.accuracy_pct) || 0,
+            bestStage: num(mine.stage_reached) || 1,
+            nickname: String(mine.nickname || ''),
+            gameMode: String(mine.game_mode || 'star_sweep'),
+            dormType: String(mine.dorm_type || 'university'),
+            nextGap: above ? Math.max(1, num(above.eff_score) - num(mine.eff_score)) : 0,
+            nextNickname: above ? String(above.nickname || '') : ''
+          }
+        }
+      }
+      return { items, myRank, totalEntries }
     },
 
     /** @param {{ roomId?: number, limit?: number }} [opts] */
@@ -575,10 +687,20 @@ function hydratePlayer(row) {
  * @param {any} row
  */
 function rowToBoardEntry(row) {
+  const scoreVal = num(row.eff_score ?? row.score) || num(row.total_warmth)
   return {
+    rank: num(row.rank) || 0,
     nickname: String(row.nickname),
     endingId: String(row.ending_id || ''),
     archetype: String(row.archetype || ''),
+    gameMode: String(row.game_mode || 'star_sweep'),
+    dormType: String(row.dorm_type || 'university'),
+    season: String(row.season || 'autumn'),
+    weather: String(row.weather || 'clear'),
+    stageReached: num(row.stage_reached) || 1,
+    correctCount: num(row.correct_count),
+    accuracyPct: Number(row.accuracy_pct) || 0,
+    score: scoreVal,
     lit_windows: num(row.lit_windows),
     max_combo: num(row.max_combo),
     total_warmth: num(row.total_warmth),

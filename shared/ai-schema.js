@@ -465,4 +465,107 @@ export function telemetryBucket(telemetry = {}) {
   return [tier, flow, rooms.join('.')].join('|')
 }
 
+// ---------------------------------------------------------------------------
+// v4 · DialogueDirector, PuzzleArchitect, InspectorCommentator schemas
+// ---------------------------------------------------------------------------
+
+const VALID_SPEAKERS = new Set(['aunt_lin', 'dean_zhou', 'uncle_wang', 'xiaohe', 'ache', 'aman', 'zhixia', 'xingye'])
+const VALID_BUFFS = new Set(['extra_shield', 'score_boost', 'extra_time', 'sequence_mode'])
+
+/**
+ * Normalise AI-generated NPC opening dialogue.
+ * @param {any} raw
+ * @returns {{ lines: Array<{ speakerId: string, line: string }>, choices: Array<{ label: string, buffType: string, buffLabel: string }> } | null}
+ */
+export function normalizeDialoguePayload(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  if (containsBannedWord(JSON.stringify(raw))) return null
+
+  const rawLines = Array.isArray(raw.lines) ? raw.lines.slice(0, 4) : []
+  const lines = []
+  for (const item of rawLines) {
+    if (!item || typeof item !== 'object') continue
+    const speakerId = VALID_SPEAKERS.has(String(item.speakerId)) ? String(item.speakerId) : 'aunt_lin'
+    const line = sanitizeText(item.line, 64)
+    if (line.length >= 6) lines.push({ speakerId, line })
+  }
+  if (!lines.length) return null
+
+  const rawChoices = Array.isArray(raw.choices) ? raw.choices.slice(0, 2) : []
+  const choices = []
+  const defaults = [
+    { label: '我记性好，先查依次亮灯', buffType: 'extra_shield', buffLabel: '护盾 +1 容错' },
+    { label: '直接巡楼，看看大家情况', buffType: 'score_boost', buffLabel: '首关得分 +25%' }
+  ]
+  for (let i = 0; i < 2; i++) {
+    const c = rawChoices[i] || {}
+    const fb = defaults[i]
+    const label = sanitizeText(c.label, 16)
+    const buffType = VALID_BUFFS.has(String(c.buffType)) ? String(c.buffType) : fb.buffType
+    const buffLabel = sanitizeText(c.buffLabel, 18)
+    choices.push({
+      label: label.length >= 3 ? label : fb.label,
+      buffType,
+      buffLabel: buffLabel.length >= 3 ? buffLabel : fb.buffLabel
+    })
+  }
+  return { lines, choices }
+}
+
+/**
+ * Normalise AI puzzle pattern targets into valid grid indices.
+ * @param {any} raw
+ * @param {number} totalWindows
+ * @param {number} wantedCount
+ * @returns {{ patternName: string, flavorHint: string, targets: number[] } | null}
+ */
+export function normalizePuzzlePayload(raw, totalWindows = 24, wantedCount = 4) {
+  if (!raw || typeof raw !== 'object') return null
+  if (containsBannedWord(JSON.stringify(raw))) return null
+
+  const maxIdx = Math.max(1, Math.floor(Number(totalWindows) || 24)) - 1
+  const want = Math.max(2, Math.min(maxIdx + 1, Math.floor(Number(wantedCount) || 4)))
+  const rawTargets = Array.isArray(raw.targets) ? raw.targets : []
+  /** @type {number[]} */
+  const targets = []
+  const seen = new Set()
+  for (const t of rawTargets) {
+    const idx = Math.round(Number(t))
+    if (!Number.isFinite(idx) || idx < 0 || idx > maxIdx || seen.has(idx)) continue
+    seen.add(idx)
+    targets.push(idx)
+    if (targets.length >= want) break
+  }
+  if (targets.length < 2) return null
+
+  const patternName = sanitizeText(raw.patternName, 12) || '校园夜巡阵型'
+  const flavorHint = sanitizeText(raw.flavorHint, 42) || '顺着窗户亮起的光路，把没关灯的屋子记下来。'
+  return { patternName, flavorHint, targets }
+}
+
+/**
+ * Normalise AI inspector debrief commentary.
+ * @param {any} raw
+ * @returns {{ rankTitle: string, auntComment: string, deanComment: string, sleepTip: string, whisperSuggestion: string } | null}
+ */
+export function normalizeDebriefPayload(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  if (containsBannedWord(JSON.stringify(raw))) return null
+
+  const rankTitle = sanitizeText(raw.rankTitle, 12) || '靠谱夜巡员'
+  const auntComment = sanitizeText(raw.auntComment, 72)
+  const deanComment = sanitizeText(raw.deanComment, 72)
+  if (auntComment.length < 8 && deanComment.length < 8) return null
+  const sleepTip = sanitizeText(raw.sleepTip, 44) || '把桌边小灯关剩一盏暖光，喝半杯温水再休息。'
+  const whisperSuggestion = sanitizeText(raw.whisperSuggestion, 40) || '今晚这栋楼的灯都温柔地暗下来了，好梦。'
+
+  return {
+    rankTitle,
+    auntComment: auntComment.length >= 8 ? auntComment : '辛苦跑这一趟啦，值班室的姜茶随时给你温着呢。',
+    deanComment: deanComment.length >= 8 ? deanComment : '巡楼记性相当稳，同学们今晚能少熬一会夜了。',
+    sleepTip,
+    whisperSuggestion
+  }
+}
+
 export { asString }

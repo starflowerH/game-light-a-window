@@ -3,7 +3,7 @@
 // The window grid is a REAL map of what the player lit this run, not random
 // dots: each room remembers how many of the three nights it was on.
 
-import { WINDOW_IDS } from '../shared/constants.js'
+import { buildWindowIds, dormDef, gameModeDef, seasonDef } from '../shared/constants.js'
 
 const PALETTE = {
   starry_gold: { sky: ['#0b1030', '#2a2a6a', '#6a5aa0'], accent: '#ffd98a', ink: '#f4ecd8' },
@@ -136,8 +136,12 @@ export function drawPostcard({ run, nights, records, ending }) {
 
     // --- the building ----------------------------------------------------
     const map = litMap(run)
-    const cols = 6
-    const rows = 4
+    const dorm = dormDef(run.dormType || 'university')
+    const season = seasonDef(run.season || 'autumn')
+    const mode = gameModeDef(run.gameMode || 'star_sweep')
+    const gridWindows = buildWindowIds(dorm.rows, dorm.cols)
+    const cols = dorm.cols
+    const rows = dorm.rows
     const gridW = W - 300
     const gapX = gridW / cols
     const gapY = (skyH - 150) / rows
@@ -155,26 +159,28 @@ export function drawPostcard({ run, nights, records, ending }) {
     g.fillStyle = refl
     g.fillRect(84, by + gapY * rows, W - 168, 150)
 
-    for (const win of WINDOW_IDS) {
-      const x = bx + win.col * gapX
+    const cellW = Math.min(34, Math.floor(gapX * 0.62))
+    const cellH = Math.min(34, Math.floor(gapY * 0.62))
+    for (const win of gridWindows) {
+      const x = bx + win.col * gapX + (gapX - cellW) * 0.35
       const y = by + (rows - 1 - win.row) * gapY
       const hits = map.get(win.roomId) || 0
       if (hits > 0) {
         const strength = 0.45 + 0.55 * Math.min(1, hits / 3)
-        const lg = g.createRadialGradient(x + 17, y + 17, 2, x + 17, y + 17, 44)
+        const lg = g.createRadialGradient(x + cellW / 2, y + cellH / 2, 2, x + cellW / 2, y + cellH / 2, 42)
         lg.addColorStop(0, 'rgba(255,247,214,' + strength + ')')
         lg.addColorStop(0.45, 'rgba(255,190,110,' + (strength * 0.7).toFixed(2) + ')')
         lg.addColorStop(1, 'rgba(255,190,110,0)')
         g.fillStyle = lg
-        g.fillRect(x - 26, y - 26, 90, 90)
+        g.fillRect(x - 26, y - 26, cellW + 52, cellH + 52)
         g.fillStyle = pal.accent
         g.globalAlpha = strength
-        roundRect(g, x, y, 34, 34, 5)
+        roundRect(g, x, y, cellW, cellH, 5)
         g.fill()
         g.globalAlpha = 1
       } else {
         g.fillStyle = 'rgba(18,26,50,0.86)'
-        roundRect(g, x, y, 34, 34, 5)
+        roundRect(g, x, y, cellW, cellH, 5)
         g.fill()
         g.strokeStyle = 'rgba(150,180,230,0.22)'
         g.lineWidth = 1.2
@@ -186,7 +192,15 @@ export function drawPostcard({ run, nights, records, ending }) {
     g.textAlign = 'left'
     g.fillStyle = '#8a5a25'
     g.font = '600 21px "PingFang SC","Noto Sans SC",sans-serif'
-    g.fillText('LIGHT A WINDOW · 今晚的明信片', 88, 104)
+    g.fillText(`LIGHT A WINDOW · ${dorm.shortName} · ${season.name} · ${mode.shortName}`, 88, 104)
+
+    if (run.rank) {
+      g.textAlign = 'right'
+      g.fillStyle = '#9c5221'
+      g.font = '700 22px "PingFang SC","Noto Sans SC",sans-serif'
+      g.fillText(`全校排行榜 #${run.rank}`, W - 88, 104)
+      g.textAlign = 'left'
+    }
 
     g.fillStyle = '#2e2216'
     g.font = '900 58px "Songti SC","Noto Serif SC",serif'
@@ -199,12 +213,19 @@ export function drawPostcard({ run, nights, records, ending }) {
     }
 
     // --- stat row --------------------------------------------------------
-    const stats = [
-      ['温暖值', run.totalWarmth || 0],
-      ['最高连击', run.maxCombo || 0],
-      ['点亮窗', run.litTotal || 0],
-      ['火漆章', run.stampsEarned || 0]
-    ]
+    const stats = run.accuracyPct != null && run.gameMode && run.gameMode !== 'star_sweep'
+      ? [
+          ['夜巡积分', run.score || run.totalWarmth || 0],
+          ['准确率', (run.accuracyPct || 0) + '%'],
+          ['通关关卡', '第 ' + (run.stageReached || 1) + ' 关'],
+          ['精准数', run.correctCount || run.litTotal || 0]
+        ]
+      : [
+          ['温暖值', run.totalWarmth || 0],
+          ['最高连击', run.maxCombo || 0],
+          ['点亮窗', run.litTotal || 0],
+          ['火漆章', run.stampsEarned || 0]
+        ]
     stats.forEach(([k, v], i) => {
       const x = 96 + i * 232
       g.fillStyle = '#b07a3a'
