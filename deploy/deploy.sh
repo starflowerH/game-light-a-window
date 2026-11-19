@@ -13,7 +13,7 @@
 #   database  /opt/light-a-window/data       never deleted, never overwritten, never chowned
 set -euo pipefail
 
-DOMAIN='https://hynu.site'
+DOMAIN="${DOMAIN:-https://game.xiaoxin.email}"
 DEFAULT_HOST='root@hynu.site'
 WEB_ROOT='/var/www/light-a-window'
 APP_ROOT='/opt/light-a-window'
@@ -152,7 +152,7 @@ remote() {
   fi
   info "$label"
   # shellcheck disable=SC2086  # the assignments must split into separate words
-  ssh "${SSH_OPTS[*]}" "$HOST" "$envs bash -s"
+  ssh "${SSH_OPTS[@]}" "$HOST" "$envs bash -s"
 }
 
 # --------------------------------------------------------------------- preflight
@@ -167,7 +167,7 @@ preflight() {
     command -v npm >/dev/null 2>&1 || die 'npm not found'
   fi
   if [ "$DRY_RUN" -eq 0 ]; then
-    ssh "${SSH_OPTS[*]}" "$HOST" 'echo ok' >/dev/null \
+    ssh "${SSH_OPTS[@]}" "$HOST" 'echo ok' >/dev/null \
       || die "cannot reach $HOST over ssh"
   fi
 }
@@ -190,7 +190,10 @@ check_dist() {
   [ "$missing" -eq 0 ] || die 'dist/ is inconsistent — rebuild before deploying'
   count=$(find dist/assets -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ' || true)
   [ "$count" -gt 0 ] || die 'dist/assets/ is empty'
-  ok "dist integrity OK ($count asset files)"
+  for glb in campus_grounds.glb dorm_staff.glb dorm_highschool.glb dorm_university.glb dorm_grad.glb; do
+    [ -f "dist/models/$glb" ] || die "dist/models/$glb is missing"
+  done
+  ok "dist integrity OK ($count asset files, 5 campus GLBs)"
 }
 
 # ---------------------------------------------------------------- health polling
@@ -268,6 +271,11 @@ if [ -n "$latest_app" ]; then
     install -d -m 0755 "$APP/shared"
     find "$APP/shared" -mindepth 1 -delete
     cp -a "$latest_app/shared/." "$APP/shared/"
+  fi
+  if [ -d "$latest_app/src" ]; then
+    install -d -m 0755 "$APP/src"
+    find "$APP/src" -mindepth 1 -delete
+    cp -a "$latest_app/src/." "$APP/src/"
   fi
   if [ -f "$latest_app/package.json" ]; then
     cp -a "$latest_app/package.json" "$APP/package.json"
@@ -410,7 +418,7 @@ cp -a "$WEB/dist" "$WEB/dist.bak-$TS"
 echo "frontend backup: $WEB/dist.bak-$TS"
 
 install -d -m 0755 "$APP/backup/$TS"
-for item in server shared package.json package-lock.json; do
+for item in server shared src package.json package-lock.json; do
   if [ -e "$APP/$item" ]; then
     cp -a "$APP/$item" "$APP/backup/$TS/"
   fi
@@ -463,7 +471,7 @@ case "$APP" in
   /opt/light-a-window) ;;
   *) echo "unexpected app root: $APP" >&2; exit 1 ;;
 esac
-install -d -m 0755 "$APP" "$APP/server" "$APP/shared"
+install -d -m 0755 "$APP" "$APP/server" "$APP/shared" "$APP/src"
 # The SQLite directory is created once and then never touched again.
 if [ ! -d "$APP/data" ]; then
   install -d -m 0750 -o www-data -g www-data "$APP/data" 2>/dev/null \
@@ -474,9 +482,10 @@ REMOTE
 
 run rsync -az --delete -e "ssh ${SSH_OPTS[*]}" server/ "$HOST:$APP_ROOT/server/"
 run rsync -az --delete -e "ssh ${SSH_OPTS[*]}" shared/ "$HOST:$APP_ROOT/shared/"
-# server/agents.js imports src/narrative-graph.js as its offline fallback, so the
-# backend needs that one file even though the rest of src/ is browser-only.
+# server/agents.js imports src/narrative-graph.js and src/npc-portraits.js as
+# its offline fallbacks, so keep those server-imported src modules synced cleanly.
 run rsync -az -e "ssh ${SSH_OPTS[*]}" src/narrative-graph.js "$HOST:$APP_ROOT/src/narrative-graph.js"
+run rsync -az -e "ssh ${SSH_OPTS[*]}" src/npc-portraits.js "$HOST:$APP_ROOT/src/npc-portraits.js"
 run rsync -az -e "ssh ${SSH_OPTS[*]}" package.json "$HOST:$APP_ROOT/package.json"
 if [ -f package-lock.json ]; then
   run rsync -az -e "ssh ${SSH_OPTS[*]}" package-lock.json "$HOST:$APP_ROOT/package-lock.json"

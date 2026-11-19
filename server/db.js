@@ -5,7 +5,7 @@
 // both the leaderboard and the cross-player whisper wall comfortably.
 
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, randomBytes } from 'node:crypto'
 import {
@@ -214,13 +214,14 @@ export function openDatabase(dataDir) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_runs_mode_dorm ON runs(game_mode, dorm_type, score DESC, total_warmth DESC);')
   } catch { /* index already exists */ }
 
-  return buildRepository(db)
+  return buildRepository(db, dataDir)
 }
 
 /**
  * @param {DatabaseSync} db
+ * @param {string} dataDir
  */
-function buildRepository(db) {
+function buildRepository(db, dataDir) {
   // ---------------------------------------------------------------- prepared
   const stmt = {
     playerByUid: db.prepare('SELECT * FROM players WHERE uid = ?'),
@@ -296,14 +297,10 @@ function buildRepository(db) {
   }
 
   // ---------------------------------------------------------------- migration
-  // v2 stored a bare "scores" table. Lift it into "runs" once, without losing
-  // the historical leaderboard, and only when runs is still empty.
-  if (stmt.hasTable.get('scores') && num(stmt.runsEmpty.get()?.n) === 0) {
-    try {
-      // Prepared lazily: preparing against a missing table throws, and every
-      // brand-new install has no legacy table at all.
-      const legacy = db.prepare('SELECT nickname, lit_windows, max_combo, total_warmth, created_at FROM scores')
-      const rows = legacy.all()
+  // v2 stored a bare "scores" table (inside the DB or in a legacy scores.sqlite).
+  // Lift it into "runs" once without losing historical leaderboard records.
+  if (num(stmt.runsEmpty.get()?.n) === 0) {
+    const insertLegacyRows = rows => {
       for (const r of rows) {
         stmt.insertRun.run(
           'legacy', String(r.nickname || '今晚的某某'), 'ENDING_F_DRIFT', '夜色漫步者',
@@ -312,8 +309,25 @@ function buildRepository(db) {
           'star_sweep', 'university', 'autumn', 'clear', 1, num(r.lit_windows), 0, num(r.total_warmth)
         )
       }
-    } catch {
-      // A malformed legacy table must never block startup.
+    }
+    if (stmt.hasTable.get('scores')) {
+      try {
+        const legacy = db.prepare('SELECT nickname, lit_windows, max_combo, total_warmth, created_at FROM scores')
+        insertLegacyRows(legacy.all())
+      } catch { /* ignore malformed table */ }
+    } else if (dataDir) {
+      const legacyFile = join(dataDir, 'scores.sqlite')
+      if (existsSync(legacyFile)) {
+        try {
+          const legacyDb = new DatabaseSync(legacyFile, { readOnly: true })
+          try {
+            const rows = legacyDb.prepare('SELECT nickname, lit_windows, max_combo, total_warmth, created_at FROM scores').all()
+            insertLegacyRows(rows)
+          } finally {
+            legacyDb.close()
+          }
+        } catch { /* ignore unreadable external legacy db */ }
+      }
     }
   }
 
