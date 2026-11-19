@@ -431,7 +431,8 @@ export class Scene {
     document.addEventListener('visibilitychange', this._onVis)
 
     const el = this.renderer.domElement
-    el.addEventListener('pointerdown', e => this._onDown(e))
+    // Register pointerdown in CAPTURE phase so our window-hit & orbit-lock guard runs BEFORE OrbitControls
+    el.addEventListener('pointerdown', e => this._onDown(e), { capture: true })
     el.addEventListener('pointermove', e => this._onMove(e))
     addEventListener('pointerup', e => this._onUp(e))
     addEventListener('pointercancel', e => this._onUp(e))
@@ -1295,10 +1296,42 @@ export class Scene {
     this._flyover = Boolean(enabled)
   }
 
-  /** Lock OrbitControls during precision minigames or release for inspection. */
+  /**
+   * Lock left-drag / single-finger orbit during gameplay so window swiping never spins the building.
+   * Right-click drag, scroll-wheel zoom, and two-finger touch remain smoothly available.
+   */
   setOrbitLocked(locked) {
     this._orbitLocked = Boolean(locked)
-    if (this.controls) this.controls.enabled = !this._orbitLocked && !this._pointerOverWindow
+    this._applyOrbitMode()
+  }
+
+  _applyOrbitMode() {
+    if (!this.controls) return
+    if (this._orbitLocked) {
+      // Fixed building mode: left-drag / 1-finger draws ribbons & connects windows; right-drag / 2-finger can still inspect
+      this.controls.enabled = true
+      this.controls.mouseButtons = {
+        LEFT: /** @type {any} */ (null),
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE
+      }
+      this.controls.touches = {
+        ONE: /** @type {any} */ (null),
+        TWO: THREE.TOUCH.DOLLY_ROTATE
+      }
+    } else {
+      // Free preview mode: left-drag / 1-finger rotates unless directly pressing on a window
+      this.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE
+      }
+      this.controls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_ROTATE
+      }
+      this.controls.enabled = !this._pointerOverWindow
+    }
   }
 
   /** Play crisp 2.2s opening campus arrival fly-in cutscene. */
@@ -1510,10 +1543,11 @@ export class Scene {
       let best = null
       let bestD = Infinity
       for (const w of this.windows) {
-        const p = this.windowScreenPos(w)
+        const p = this.windowScreenRect(w)
         if (!p) continue
+        const hitR = Math.max(slack, Math.max(p.w, p.h) * 0.58)
         const d = Math.hypot(p.x - x, p.y - y)
-        if (d < bestD && d <= slack) { bestD = d; best = w }
+        if (d < bestD && d <= hitR) { bestD = d; best = w }
       }
       return best
     }
@@ -1531,6 +1565,19 @@ export class Scene {
     return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top }
   }
 
+  /** Projected center + approximate screen width/height of a window glass mesh. @param {WindowRecord} w */
+  windowScreenRect(w) {
+    const center = this.windowScreenPos(w)
+    if (!center || !w.glass) return null
+    const box = new THREE.Box3().setFromObject(w.glass)
+    const min = box.min.clone().project(this.camera)
+    const max = box.max.clone().project(this.camera)
+    const r = this.renderer.domElement.getBoundingClientRect()
+    const pw = Math.max(28, Math.abs(max.x - min.x) * 0.5 * r.width)
+    const ph = Math.max(32, Math.abs(max.y - min.y) * 0.5 * r.height)
+    return { x: center.x, y: center.y, w: pw, h: ph }
+  }
+
   magnetPoints() {
     const out = []
     for (const w of this.actionableWindows()) {
@@ -1541,13 +1588,15 @@ export class Scene {
   }
 
   _onDown(e) {
+    // Only treat primary button / touch as window interaction; let right-click / middle-click go straight to OrbitControls
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     this._pointer.dragging = true
     this._pointer.x = e.clientX
     this._pointer.y = e.clientY
-    const w = this.windowAt(e.clientX, e.clientY, 10)
-    // Suppress OrbitControls drag if user is interacting directly with a dorm window
+    const w = this.windowAt(e.clientX, e.clientY, 16)
+    // In free-preview mode, suppress OrbitControls only when directly pressing on a window; in locked mode, OrbitControls LEFT/ONE is already disabled
     this._pointerOverWindow = Boolean(w)
-    if (this.controls) this.controls.enabled = !this._orbitLocked && !this._pointerOverWindow
+    this._applyOrbitMode()
     if (w && this.onWindowTap) this.onWindowTap(w, e.clientX, e.clientY)
     if (this.onPointerDown) this.onPointerDown(e.clientX, e.clientY)
   }
@@ -1564,7 +1613,7 @@ export class Scene {
     const was = this._pointer.dragging
     this._pointer.dragging = false
     this._pointerOverWindow = false
-    if (this.controls) this.controls.enabled = !this._orbitLocked
+    this._applyOrbitMode()
     if (was && this.onPointerUp) this.onPointerUp(e.clientX ?? this._pointer.x, e.clientY ?? this._pointer.y)
   }
 

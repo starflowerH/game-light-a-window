@@ -91,7 +91,9 @@ export class Game {
     this._mgTimers = new Set()
 
     this._raf = 0
+    this._coachRaf = 0
     this._pausedAt = 0
+    this.orbitLocked = false
     this._choiceOpen = false
     this._choicePausedAt = 0
     this._choiceTimer = 0
@@ -133,7 +135,25 @@ export class Game {
     for (const id of this._mgTimers) clearTimeout(id)
     this._mgTimers.clear()
     cancelAnimationFrame(this._raf)
+    cancelAnimationFrame(this._coachRaf)
     this.mg = null
+  }
+
+  toggleOrbitLock() {
+    this.orbitLocked = !this.orbitLocked
+    this.scene.setOrbitLocked(this.orbitLocked)
+    if (this.ui && this.ui.updateOrbitBadge) this.ui.updateOrbitBadge(this.orbitLocked)
+    this.ui.toast(
+      this.orbitLocked ? '🔒 视角已固定（专注点/划连窗）' : '🔄 自由转看模式（可拖拽旋转楼体）',
+      this.orbitLocked ? '右键拖拽或双指仍可微调视角' : '点击顶部按钮可随时重新固定'
+    )
+    return this.orbitLocked
+  }
+
+  resetFrontView() {
+    this.viewId = 'front'
+    this.scene.setCameraView('front', false)
+    this.ui.toast('↺ 已回正正面最佳连窗视角', '')
   }
 
   _setNickname(raw) {
@@ -313,6 +333,7 @@ export class Game {
     this.state = 'hub'
     if (this.audio) this.audio.setSceneContext('hub')
     this.scene.setFlyover(false)
+    this.orbitLocked = false
     this.scene.setOrbitLocked(false)
     this.scene.setPaused(false)
     this.scene.resetWindows()
@@ -443,7 +464,8 @@ export class Game {
     this.state = 'minigame'
     this.scene.setFlyover(false)
     this.scene.setCameraView('front', false)
-    this.scene.setOrbitLocked(false)
+    this.orbitLocked = true
+    this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
 
     const dorm = dormDef(this.dormId)
@@ -474,6 +496,9 @@ export class Game {
       aiPattern: 'AI 构图中…',
       bgmState: this.getBgmState(),
       onCycleBgm: () => this.cycleBgmTrack(),
+      orbitLocked: this.orbitLocked,
+      onToggleOrbit: () => this.toggleOrbitLock(),
+      onResetView: () => this.resetFrontView(),
       muted: this.audio ? this.audio.muted : false,
       onMute: () => this.toggleMute(),
       onViewCycle: () => this._cycleCameraView(),
@@ -683,7 +708,8 @@ export class Game {
     this.state = 'minigame'
     this.scene.setFlyover(false)
     this.scene.setCameraView('front', false)
-    this.scene.setOrbitLocked(false)
+    this.orbitLocked = true
+    this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
 
     const dorm = dormDef(this.dormId)
@@ -709,6 +735,9 @@ export class Game {
       aiPattern: '夜猫子查寝中',
       bgmState: this.getBgmState(),
       onCycleBgm: () => this.cycleBgmTrack(),
+      orbitLocked: this.orbitLocked,
+      onToggleOrbit: () => this.toggleOrbitLock(),
+      onResetView: () => this.resetFrontView(),
       muted: this.audio ? this.audio.muted : false,
       onMute: () => this.toggleMute(),
       onViewCycle: () => this._cycleCameraView(),
@@ -808,7 +837,8 @@ export class Game {
     this.state = 'minigame'
     this.scene.setFlyover(false)
     this.scene.setCameraView('front', false)
-    this.scene.setOrbitLocked(false)
+    this.orbitLocked = true
+    this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
 
     const dorm = dormDef(this.dormId)
@@ -835,6 +865,9 @@ export class Game {
       aiPattern: 'GF(2) 熄灯棋盘',
       bgmState: this.getBgmState(),
       onCycleBgm: () => this.cycleBgmTrack(),
+      orbitLocked: this.orbitLocked,
+      onToggleOrbit: () => this.toggleOrbitLock(),
+      onResetView: () => this.resetFrontView(),
       showHintBtn: true,
       onHint: () => this._hintLightsOut(),
       muted: this.audio ? this.audio.muted : false,
@@ -1104,6 +1137,8 @@ export class Game {
 
     this.scene.resetWindows()
     this.scene.setCameraView('front', false)
+    this.orbitLocked = true
+    this.scene.setOrbitLocked(true)
     this.scene.setPaused(false)
     const palette = PALETTES[data.palette] ? data.palette : 'warm_blue'
     this.scene.applyTheme(palette)
@@ -1141,6 +1176,9 @@ export class Game {
       dormMeta: dormDef(this.dormId),
       bgmState: this.getBgmState(),
       onCycleBgm: () => this.cycleBgmTrack(),
+      orbitLocked: this.orbitLocked,
+      onToggleOrbit: () => this.toggleOrbitLock(),
+      onResetView: () => this.resetFrontView(),
       onAdvanceNight: () => this.advanceNightEarly(),
       onPause: () => this.togglePause(), onMute: () => this.toggleMute(),
       muted: this.audio ? this.audio.muted : false
@@ -1151,17 +1189,29 @@ export class Game {
   }
 
   _showCoachIfNeeded() {
+    cancelAnimationFrame(this._coachRaf)
     if (this.nightIndex !== 0) return
-    const place = () => {
-      if (this.state !== 'night' || this.nightIndex !== 0) return
+    const startedAt = performance.now()
+    const track = () => {
+      if (this.state !== 'night' || this.nightIndex !== 0 || !this.night) {
+        this.ui.hideCoach()
+        return
+      }
+      if (this.night.litCount > 0 || performance.now() - startedAt > 9000) {
+        this.ui.hideCoach()
+        return
+      }
       const w = this.scene.actionableWindows()[0]
-      if (!w) return
-      const p = this.scene.windowScreenPos(w)
-      if (p) this.ui.coach('点亮这扇正在发光的窗', p.x, p.y - 58)
+      if (w) {
+        const rect = this.scene.windowScreenRect(w)
+        if (rect) {
+          const diam = Math.round(Math.max(54, Math.max(rect.w, rect.h) + 18))
+          this.ui.coach('点亮或按住拖过发光窗', rect.x, rect.y, diam)
+        }
+      }
+      this._coachRaf = requestAnimationFrame(track)
     }
-    place()
-    const timer = setInterval(place, 450)
-    setTimeout(() => { clearInterval(timer); this.ui.hideCoach() }, 7000)
+    this._coachRaf = requestAnimationFrame(track)
   }
 
   _wakeRandom(respectCap = true) {
@@ -1285,9 +1335,21 @@ export class Game {
     }
 
     if (w.state === WINDOW_STATES.RESONANCE_PAIR) {
-      this._pendingRes = { room: w.roomId, x, y }
-      n.chain.active = true; n.chain.ids = new Set([w.idx]); n.chain.count = 0; n.chain.startRoom = w.roomId
-      this.ui.toast('顺着星轨拖到另一扇窗', '')
+      const pair = this.scene.resonancePair
+      if (this._pendingRes && pair) {
+        const partner = pair.a === this._pendingRes.room ? pair.b : pair.a
+        if (w.roomId === partner) {
+          this._pendingRes = null
+          this._completeResonance(pair, x, y)
+          return
+        }
+      }
+      const otherRoom = pair ? (pair.a === w.roomId ? pair.b : pair.a) : 0
+      this._pendingRes = { room: w.roomId, idx: w.idx, x, y, armedAt: now }
+      n.chain.active = true; n.chain.ids = new Set([w.idx]); n.chain.count = 1; n.chain.startRoom = w.roomId
+      this.scene.burstAt(w, 0x8ef2ff)
+      this.ui.shockwave(x, y)
+      this.ui.toast(`已锁定 ${w.roomId} 室星轨！拖到或直接点击 ${otherRoom || '另一扇'} 室连桥`, '')
       return
     }
 
@@ -1347,7 +1409,7 @@ export class Game {
     const n = this.night
     n.chain.active = true
     if (!n.chain.ids.size) {
-      const w = this.scene.windowAt(x, y, 18)
+      const w = this.scene.windowAt(x, y, 28)
       if (w) { n.chain.ids = new Set([w.idx]); n.chain.count = 1; n.chain.startRoom = w.roomId }
     }
     if (this.ribbon) { this.ribbon.start(x, y); this.ribbon.setMagnets(this.scene.magnetPoints()) }
@@ -1364,7 +1426,10 @@ export class Game {
     const n = this.night
     const total = this.scene.windows.length || 24
     if (!n) return
-    if (this._pendingRes) this._resolvePendingResonanceTap()
+    // Keep _pendingRes armed for 6s so players can EITHER hold-drag OR tap window A then tap window B!
+    if (this._pendingRes && performance.now() - (this._pendingRes.armedAt || 0) > 6000) {
+      this._resolvePendingResonanceTap()
+    }
     if (n.chain.count >= 3 && this.state === 'night') {
       this.ui.banner('一笔连光 ×' + n.chain.count, '整面墙都在回应你')
       if (this.audio) this.audio.chain(n.chain.count)
@@ -1402,21 +1467,24 @@ export class Game {
 
   _dragPass(x, y) {
     const n = this.night
-    const w = this.scene.windowAt(x, y, 18)
+    const w = this.scene.windowAt(x, y, 28)
     if (!w || n.chain.ids.has(w.idx)) return
-    if (this._pendingRes) {
-      const pair = this.scene.resonancePair
-      const partner = pair ? (pair.a === this._pendingRes.room ? pair.b : pair.a) : 0
-      if (partner && w.roomId === partner) {
-        this._pendingRes = null; n.chain.ids.add(w.idx); this._completeResonance(pair, x, y); return
-      }
-    }
     const pair = this.scene.resonancePair
-    if (pair && (pair.a === n.chain.startRoom || pair.b === n.chain.startRoom)) {
-      const partner = pair.a === n.chain.startRoom ? pair.b : pair.a
-      if (w.roomId === partner) { this._completeResonance(pair, x, y); n.chain.ids.add(w.idx); return }
+    if (pair && w.state === WINDOW_STATES.RESONANCE_PAIR) {
+      if (this._pendingRes) {
+        const partner = pair.a === this._pendingRes.room ? pair.b : pair.a
+        if (w.roomId === partner) {
+          this._pendingRes = null; n.chain.ids.add(w.idx); this._completeResonance(pair, x, y); return
+        }
+      }
+      // Arm mid-chain so sweeping across pair.a -> pair.b ALWAYS completes resonance
+      this._pendingRes = { room: w.roomId, idx: w.idx, x, y, armedAt: performance.now() }
+      n.chain.ids.add(w.idx)
+      this.scene.burstAt(w, 0x8ef2ff)
+      this.ui.shockwave(x, y)
+      return
     }
-    if (w.state !== WINDOW_STATES.GLIMMER && w.state !== WINDOW_STATES.STORY_BEACON && w.state !== WINDOW_STATES.RESONANCE_PAIR) return
+    if (w.state !== WINDOW_STATES.GLIMMER && w.state !== WINDOW_STATES.STORY_BEACON) return
 
     n.chain.count += 1; n.chain.ids.add(w.idx); n.bestChain = Math.max(n.bestChain, n.chain.count)
     const wasBeacon = w.state === WINDOW_STATES.STORY_BEACON
@@ -1425,6 +1493,7 @@ export class Game {
     n.warmth += gain
     this._lightWindow(w, gain, x, y)
     this.ui.combo(n.combo); this.ui.shockwave(x, y)
+    if (n.chain.count === 2) this.ui.floatText('连光 2/3 · 再划 1 扇!', x, y - 24, '#ffd48a')
     if (this.ribbon) this.ribbon.pulse(x, y)
     if (this.audio) this.audio.tap(n.combo)
     if (wasBeacon) this._openChoice(w.roomId)

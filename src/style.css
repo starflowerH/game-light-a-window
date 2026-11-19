@@ -366,23 +366,30 @@ b.urgent { color: #ff9a7a; }
 .sf-body { margin-top: 6px; font-family: var(--serif); font-size: 13.5px; line-height: 1.75; }
 .sf-item { margin-top: 6px; font-size: 10.5px; color: #9a7a52; }
 
-/* coach */
+/* coach (ring strictly centered at projected window x, y) */
 #coach {
-  position: fixed; left: 0; top: 0; z-index: 20; pointer-events: none; opacity: 0;
-  transition: opacity 0.3s ease;
+  position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 20; pointer-events: none; opacity: 0;
+  transition: opacity 0.25s ease; will-change: transform;
 }
 #coach.on { opacity: 1; }
 #coach .ct {
-  transform: translateY(-34px); white-space: nowrap; font-size: 12px; letter-spacing: 0.08em;
-  color: #ffe7bf; text-shadow: 0 2px 14px rgba(0,0,0,0.85);
+  position: absolute; left: 0; top: -46px; transform: translate(-50%, -100%);
+  white-space: nowrap; font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(14, 20, 38, 0.88); border: 1px solid rgba(255, 214, 150, 0.55);
+  color: #ffe7bf; text-shadow: 0 2px 10px rgba(0,0,0,0.85);
 }
 #coach .ring {
-  width: 60px; height: 60px; margin: -18px 0 0 -30px; border-radius: 50%;
-  border: 1.4px dashed rgba(255,214,150,0.75);
-  animation: coachSpin 6s linear infinite, coachPulse 1.8s ease-in-out infinite;
+  position: absolute; left: 0; top: 0; width: 64px; height: 64px; border-radius: 50%;
+  border: 2px dashed rgba(255, 218, 130, 0.92);
+  box-shadow: 0 0 18px rgba(255, 200, 100, 0.45), inset 0 0 10px rgba(255, 200, 100, 0.25);
+  animation: coachSpin 6s linear infinite, coachPulse 1.6s ease-in-out infinite;
 }
-@keyframes coachSpin { to { transform: rotate(360deg); } }
-@keyframes coachPulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes coachSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes coachPulse { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
 
 /* summaries */
 .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); gap: 10px; margin: 18px 0 16px; }
@@ -686,6 +693,31 @@ b.urgent { color: #ff9a7a; }
 }
 .bgm-lab { font-size: 11.5px; color: #ffe0a3; font-weight: 700; margin-right: 2px; }
 .bgm-upload { cursor: pointer; display: inline-flex; align-items: center; }
+
+.hub-more-wrap { position: relative; }
+.hub-more-menu {
+  display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  min-width: 176px; padding: 8px; border-radius: 14px;
+  background: rgba(14, 19, 36, 0.94); backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 214, 150, 0.34);
+  box-shadow: 0 18px 42px rgba(2, 4, 14, 0.72);
+  flex-direction: column; gap: 5px;
+}
+.hub-more-menu.open { display: flex; }
+.hub-more-menu .chip-sm { text-align: left; width: 100%; border-radius: 10px; padding: 6px 10px; }
+
+.hub-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 4px; }
+.hub-tab-btn {
+  padding: 5px 4px; border-radius: 10px; font-size: 10.5px; font-weight: 600;
+  background: rgba(255, 245, 225, 0.05); border: 1px solid rgba(255, 214, 150, 0.16);
+  color: #b5c1dc; cursor: pointer; font-family: inherit;
+}
+.hub-tab-btn.on {
+  background: rgba(255, 206, 126, 0.24); border-color: #ffd08a; color: #ffe6ae; font-weight: 700;
+}
+.hub-tab-pane { display: none; }
+.hub-tab-pane.on { display: block; }
+.mode-card.hero-mode { border-color: rgba(255, 196, 108, 0.55); }
 
 .hub-mid {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin: 8px 0;

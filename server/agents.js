@@ -151,7 +151,7 @@ export function createAgentHub({
           }
         : null
 
-      const cacheKey = 'plan_v5|' + fnv1a([mood, playCount % 4, unlocked.join(','), memory ? memory.roomId : 0].join('|'))
+      const cacheKey = 'plan_v6|' + fnv1a([mood, playCount % 4, unlocked.join(','), memory ? memory.roomId : 0].join('|'))
 
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
@@ -219,7 +219,7 @@ export function createAgentHub({
           : []
       }
       const firstNight = Math.max(2, Math.min(3, Number(input.firstNight) || 2))
-      const cacheKey = 'evolve_v5|' + fnv1a([mood, firstNight, telemetryBucket(telemetry)].join('|'))
+      const cacheKey = 'evolve_v6|' + fnv1a([mood, firstNight, telemetryBucket(telemetry)].join('|'))
 
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
@@ -275,7 +275,7 @@ export function createAgentHub({
       const bondRoomId = Number(input.bondRoomId) || 0
       const totalWarmth = Math.max(0, Number(input.totalWarmth) || 0)
       const path = input.path === 'B' ? 'B' : 'A'
-      const cacheKey = 'epilogue|' + fnv1a([endingId, bondRoomId, Math.floor(totalWarmth / 60), path].join('|'))
+      const cacheKey = 'epilogue_v6|' + fnv1a([endingId, bondRoomId, Math.floor(totalWarmth / 60), path].join('|'))
 
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
@@ -329,7 +329,7 @@ export function createAgentHub({
       const season = sanitizeText(input.season, 16) || 'autumn'
       const weather = sanitizeText(input.weather, 16) || 'clear'
       const dorm = dormDef(dormType)
-      const cacheKey = 'dialogue_v5|' + fnv1a([dormType, season, weather].join('|'))
+      const cacheKey = 'dialogue_v6|' + fnv1a([dormType, season, weather].join('|'))
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
         const normalised = normalizeDialoguePayload(cached)
@@ -400,16 +400,16 @@ export function createAgentHub({
       const offline = () => ({
         source: 'offline',
         payload: {
-          rankTitle: acc >= 92 ? '精准夜巡官' : acc >= 75 ? '细心守灯人' : '温柔见习生',
-          auntComment: `${dorm.shortName}今晚的第 ${stage} 关巡查记录妥当，准确率 ${acc}%，宿管室的热茶给你留着。`,
-          deanComment: acc >= 85 ? '周副校长在巡查本旁记了一句“路线熟悉，值得表扬”。' : '周副校长点点头：记住先看楼层参考窗，下次会更稳。',
-          sleepTip: '把桌边小灯关剩一盏暖光，喝半杯温水再休息。',
-          whisperSuggestion: `今晚在${dorm.shortName}巡完夜灯，愿大家做个好梦。`
+          rankTitle: acc >= 92 ? '17号楼夜巡特种兵' : acc >= 75 ? '秋裤战神副队长' : '宿管室摸鱼见习生',
+          auntComment: `${dorm.shortName}第 ${stage} 关被你巡得明明白白，准确率 ${acc}%，宿管室没收的红糖糍粑分你两块！`,
+          deanComment: acc >= 85 ? '周副校长在保温杯旁记了一笔：“眼神比我找招财猫还准，通报嘉奖！”' : '周副校长背着手清了清嗓子：“下次先盯准角上那扇偷吃泡面的窗，稳得很。”',
+          sleepTip: '巡完这趟快把手机扣桌上，趁热泡面味散了抓紧钻被窝！',
+          whisperSuggestion: `今晚在${dorm.shortName}抓完偷亮灯，祝整栋楼好梦不秃头。`
         }
       })
       if (!configured) return offline()
 
-      const cacheKey = 'debrief|' + fnv1a([modeId, dormType, stage, Math.floor(acc / 10)].join('|'))
+      const cacheKey = 'debrief_v6|' + fnv1a([modeId, dormType, stage, Math.floor(acc / 10)].join('|'))
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
         const normalised = normalizeDebriefPayload(cached)

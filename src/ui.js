@@ -193,6 +193,13 @@ export class UI {
     }
   }
 
+  updateOrbitBadge(locked) {
+    for (const el of document.querySelectorAll('[data-orbitbadge]')) {
+      el.textContent = locked ? '🔒 固定连窗' : '🔄 自由转看'
+      el.classList.toggle('on', Boolean(locked))
+    }
+  }
+
   // ------------------------------------------------------------- RPG dialogue cutscene
 
   /**
@@ -340,6 +347,7 @@ export class UI {
     const aiActive = opts.keyEnabled || opts.aiSource === 'ai' || opts.aiSource === 'direct' || opts.aiSource === 'cache'
     const bgmMode = opts.bgmState ? opts.bgmState.mode : 'auto'
     const bgmMeta = bgmTrackDef(bgmMode)
+    const activeTab = this._hubTab || 'dorm'
 
     const hub = document.createElement('div')
     hub.id = 'hub'
@@ -355,47 +363,53 @@ export class UI {
             '<input data-nick maxlength="8" value="' + esc(opts.nickname) + '" />' +
             '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
           '</div>' +
-          '<span class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI' : '本地剧本')) + '</span>' +
-          '<button class="chip-btn" data-act="panel-toggle">🎛 换楼/环境</button>' +
+          '<button class="chip-btn" data-act="panel-toggle">🎛 控制台</button>' +
           '<button class="chip-btn" data-act="bgm-cycle" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' +
           '<button class="chip-btn" data-act="mute">' + (opts.bgmState && opts.bgmState.muted ? '🔇' : '🔊') + '</button>' +
           '<button class="chip-btn" data-act="board">🏆 排行榜</button>' +
-          '<button class="chip-btn" data-act="npcs">👘 换装</button>' +
-          '<button class="chip-btn" data-act="dialogue">💬 剧情开场</button>' +
-          '<button class="chip-btn" data-act="collection">⭐ 图鉴</button>' +
-          '<button class="chip-btn" data-act="key">🔑 AI</button>' +
-          '<button class="chip-btn" data-act="title">标题</button>' +
+          '<div class="hub-more-wrap">' +
+            '<button class="chip-btn" data-act="more-toggle">⋯ 更多 ▾</button>' +
+            '<div class="hub-more-menu" data-moremenu>' +
+              '<div class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '" style="margin-bottom:4px;"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI 导演' : '本地喜剧剧本')) + '</div>' +
+              '<button class="chip-sm" data-act="dialogue">💬 重看开场剧情</button>' +
+              '<button class="chip-sm" data-act="npcs">👘 NPC 换装图鉴</button>' +
+              '<button class="chip-sm" data-act="collection">⭐ 结局与线索图鉴</button>' +
+              '<button class="chip-sm" data-act="key">🔑 AI Key 设置</button>' +
+              '<button class="chip-sm" data-act="title">🏠 返回标题页</button>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
 
       '<div class="hub-mid" data-hubmid>' +
         '<div class="hub-panel">' +
-          '<div>' +
+          '<div class="hub-tabs">' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'dorm' ? 'on' : '') + '" data-tab="dorm">🏢 换楼栋</button>' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'env' ? 'on' : '') + '" data-tab="env">🌦 天气季节</button>' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'av' ? 'on' : '') + '" data-tab="av">🎥 视角配乐</button>' +
+          '</div>' +
+          '<div class="hub-tab-pane ' + (activeTab === 'dorm' ? 'on' : '') + '" data-pane="dorm">' +
             '<div class="hub-group-label">切换附近宿舍楼（3D 航拍漫游）</div>' +
             '<div class="chip-row">' +
               DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === opts.dormId ? 'on' : '') + '" data-dorm="' + esc(d.id) + '">' + esc(d.shortName) + '·' + d.windowCount + '窗</button>').join('') +
             '</div>' +
           '</div>' +
-          '<div>' +
+          '<div class="hub-tab-pane ' + (activeTab === 'env' ? 'on' : '') + '" data-pane="env">' +
             '<div class="hub-group-label">校园季节 · 植被覆雪联动</div>' +
             '<div class="chip-row">' +
               SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') +
             '</div>' +
-          '</div>' +
-          '<div>' +
-            '<div class="hub-group-label">夜间天气 · NPC 实时换装</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">夜间天气 · NPC 实时换装</div>' +
             '<div class="chip-row">' +
               WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') +
             '</div>' +
           '</div>' +
-          '<div>' +
-            '<div class="hub-group-label">看楼视角（支持拖拽缩放）</div>' +
+          '<div class="hub-tab-pane ' + (activeTab === 'av' ? 'on' : '') + '" data-pane="av">' +
+            '<div class="hub-group-label">看楼视角（自由拖拽旋转）</div>' +
             '<div class="chip-row">' +
               CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') +
             '</div>' +
-          '</div>' +
-          '<div>' +
-            '<div class="hub-group-label">配乐风格（黄昏之时/医龙/My Soul）</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">配乐风格（黄昏之时/医龙/My Soul）</div>' +
             '<div class="chip-row">' +
               BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') +
               '<label class="chip-sm bgm-upload">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
@@ -418,10 +432,10 @@ export class UI {
             '<div class="chip-row">' + BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') + '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
           '</div>' +
         '</div>' +
-        '<div class="hub-orbit-hint">拖动画布可 3D 环绕查看宿舍楼 · 当前：' + esc(weatherMeta.hint) + '</div>' +
+        '<div class="hub-orbit-hint">大厅可自由拖转看楼 · 进入玩法后默认锁定防误转（可随时切换）</div>' +
         '<div class="hub-modes">' +
           GAME_MODES.map(m =>
-            '<div class="mode-card ' + (m.id === opts.gameMode ? 'on' : '') + '" data-mode="' + esc(m.id) + '">' +
+            '<div class="mode-card ' + (m.id === opts.gameMode ? 'on' : '') + (m.id === 'star_sweep' ? ' hero-mode' : '') + '" data-mode="' + esc(m.id) + '">' +
               '<div class="mode-card-head"><b>' + esc(m.shortName) + '</b><span class="mode-tag">' + esc(m.tag) + '</span></div>' +
               '<span class="mc-desc">' + esc(m.desc) + '</span>' +
               '<button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始巡查 ▸</button>' +
@@ -437,7 +451,26 @@ export class UI {
     if (panelBtn && hubMid) {
       panelBtn.onclick = () => {
         const hidden = hubMid.classList.toggle('collapsed')
-        panelBtn.textContent = hidden ? '🎛 展开换楼/环境' : '🎛 隐藏面板'
+        panelBtn.textContent = hidden ? '🎛 展开控制台' : '🎛 隐藏控制台'
+      }
+    }
+
+    const moreBtn = qs(hub, '[data-act="more-toggle"]')
+    const moreMenu = qs(hub, '[data-moremenu]')
+    if (moreBtn && moreMenu) {
+      moreBtn.onclick = e => {
+        e.stopPropagation()
+        moreMenu.classList.toggle('open')
+      }
+      hub.addEventListener('click', () => moreMenu.classList.remove('open'))
+    }
+
+    for (const tb of qsa(hub, '[data-tab]')) {
+      tb.onclick = () => {
+        const t = tb.getAttribute('data-tab') || 'dorm'
+        this._hubTab = t
+        for (const b of qsa(hub, '[data-tab]')) b.classList.toggle('on', b.getAttribute('data-tab') === t)
+        for (const p of qsa(hub, '[data-pane]')) p.classList.toggle('on', p.getAttribute('data-pane') === t)
       }
     }
 
@@ -519,6 +552,7 @@ export class UI {
    * @param {{
    *   modeMeta: any, dormMeta: any, aiPattern: string,
    *   bgmState?: any, onCycleBgm?: Function,
+   *   orbitLocked?: boolean, onToggleOrbit?: Function, onResetView?: Function,
    *   showHintBtn?: boolean, onHint?: Function, onMute: Function, onExit: Function, muted: boolean,
    *   onViewCycle?: Function
    * }} opts
@@ -526,6 +560,7 @@ export class UI {
   startMinigameHud(opts) {
     this.hideAll()
     const bgmMeta = bgmTrackDef(opts.bgmState?.mode || 'auto')
+    const locked = opts.orbitLocked !== false
     const bar = document.createElement('div')
     bar.id = 'hud-v4'
     bar.innerHTML =
@@ -543,11 +578,12 @@ export class UI {
         '<span>护盾<b data-shield>1</b></span>' +
       '</div>' +
       '<div class="hv4-actions">' +
-        (opts.showHintBtn ? '<button class="chip-sm on" data-act="hint">💡 林阿姨提示</button>' : '') +
+        (opts.showHintBtn ? '<button class="chip-sm on" data-act="hint">💡 提示</button>' : '') +
+        (opts.onToggleOrbit ? '<button class="chip-sm ' + (locked ? 'on' : '') + '" data-act="orbit" data-orbitbadge>' + (locked ? '🔒 固定连窗' : '🔄 自由转看') + '</button>' : '') +
+        (opts.onResetView ? '<button class="chip-sm" data-act="reset-view" title="回正正面视角">↺ 回正</button>' : '') +
         (opts.onCycleBgm ? '<button class="chip-sm" data-act="bgm" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
-        (opts.onViewCycle ? '<button class="chip-sm" data-act="view">🎥 切换视角</button>' : '') +
         '<button class="chip-sm" data-act="mute">' + (opts.muted ? '🔇' : '🔊') + '</button>' +
-        '<button class="chip-sm" data-act="exit">返回选楼</button>' +
+        '<button class="chip-sm" data-act="exit">返回</button>' +
       '</div>'
     this.el.appendChild(bar)
 
@@ -571,8 +607,9 @@ export class UI {
     }
 
     if (opts.showHintBtn && opts.onHint) qs(bar, '[data-act="hint"]').onclick = () => opts.onHint()
+    if (opts.onToggleOrbit) qs(bar, '[data-act="orbit"]').onclick = () => opts.onToggleOrbit()
+    if (opts.onResetView) qs(bar, '[data-act="reset-view"]').onclick = () => opts.onResetView()
     if (opts.onCycleBgm) qs(bar, '[data-act="bgm"]').onclick = () => opts.onCycleBgm()
-    if (opts.onViewCycle) qs(bar, '[data-act="view"]').onclick = () => opts.onViewCycle()
     const muteBtn = qs(bar, '[data-act="mute"]')
     muteBtn.onclick = () => {
       const m = opts.onMute()
@@ -801,9 +838,9 @@ export class UI {
         '<p class="cr-std"><b>过关要求：</b>在 75s 内达成以下任意 <b>1</b> 项目标即算过关（全达成得火漆金章并可随时提前进下一夜）：</p>' +
         '<ul class="cr-goals">' + goalsHtml + '</ul>' +
         '<div class="cr-legend">' +
-          '<span>✨ <b>微光窗</b>：点击或按住连划点亮</span>' +
-          '<span>🏮 <b>红金信标</b>：点击触发悬疑抉择（计时暂停）</span>' +
-          '<span>🌟 <b>青金星轨</b>：从一扇拖向另一扇连桥</span>' +
+          '<span>✨ <b>微光窗</b>：点一下或按住连划（默认已固定视角不误转）</span>' +
+          '<span>🏮 <b>红金信标</b>：点击触发狗血吃瓜抉择（计时自动暂停）</span>' +
+          '<span>🌟 <b>青金星轨</b>：按住拖连，或先后点击两扇星轨窗都能连桥！</span>' +
         '</div>' +
       '</div>' +
       '<div class="dialog-actions" style="margin-top:14px;">' +
@@ -817,7 +854,7 @@ export class UI {
     if (onBack) qs(s, '[data-act="back"]').onclick = () => onBack()
   }
 
-  startNight({ night, index, count, commissions, directorNote, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, onAdvanceNight, onPause, onMute }) {
+  startNight({ night, index, count, commissions, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, orbitLocked = true, onToggleOrbit, onResetView, onAdvanceNight, onPause, onMute }) {
     this.hideAll()
     const bgmMeta = bgmTrackDef(bgmState?.mode || 'auto')
     const hud = document.createElement('div')
@@ -841,8 +878,10 @@ export class UI {
           '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
+          (onToggleOrbit ? '<button class="chip-sm ' + (orbitLocked ? 'on' : '') + '" type="button" data-act="orbit" data-orbitbadge title="固定连窗 / 自由转看楼栋">' + (orbitLocked ? '🔒 固定连窗' : '🔄 自由转看') + '</button>' : '') +
+          (onResetView ? '<button class="chip-sm" type="button" data-act="reset-view" title="回正视角">↺</button>' : '') +
           (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge title="切换背景音乐">🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
-          '<button class="chip-sm" type="button" data-act="rules" title="查看玩法说明">? 规则</button>' +
+          '<button class="chip-sm" type="button" data-act="rules" title="查看玩法说明">?</button>' +
           '<button class="iconbtn" data-act="mute" data-icon="' + (muted ? 'mute' : 'sound') + '" title="声音"></button>' +
           '<button class="iconbtn" data-act="pause" data-icon="pause" title="暂停"></button>' +
         '</div>' +
@@ -857,7 +896,7 @@ export class UI {
         '</div>' +
         '<div class="ledger-body" data-lbody>' +
           '<div class="ledger-grid">' + ledger + '</div>' +
-          '<div class="ledger-legend">✨ 微光窗：点或划亮  ·  🏮 信标：触剧情抉择  ·  🌟 星轨：两窗连拖' + (directorNote ? '  ｜  ' + esc(directorNote) : '') + '</div>' +
+          '<div class="ledger-legend">✨ 微光窗：点/划亮 · 🏮 信标：触发剧情 · 🌟 星轨：拖连或先后点两窗</div>' +
         '</div>' +
       '</div>'
 
@@ -865,6 +904,8 @@ export class UI {
     paintIcons(hud)
     requestAnimationFrame(() => hud.classList.add('on'))
     qs(hud, '[data-act="pause"]').onclick = onPause
+    if (onToggleOrbit) qs(hud, '[data-act="orbit"]').onclick = () => onToggleOrbit()
+    if (onResetView) qs(hud, '[data-act="reset-view"]').onclick = () => onResetView()
     if (onCycleBgm) qs(hud, '[data-act="bgm"]').onclick = () => onCycleBgm()
     qs(hud, '[data-act="mute"]').onclick = () => {
       const m = onMute()
@@ -890,7 +931,7 @@ export class UI {
     const rulesBtn = qs(hud, '[data-act="rules"]')
     if (rulesBtn) {
       rulesBtn.onclick = () => {
-        this.toast('过关标准：点/划亮微光窗，75s 内完成 ≥1 项底部目标即可！', '点红色信标窗停表读剧情 · 拖过青金星轨连双窗')
+        this.toast('默认「🔒固定连窗」不误转楼！点/划亮微光窗完成底部任意 1 项即过关', '星轨支持拖连或先后点击两窗 · 点「🔄自由转看」可转楼欣赏')
       }
     }
 
@@ -1128,7 +1169,7 @@ export class UI {
 
   nightSummary(sum, onNext) {
     this.hideAll()
-    const titles = ['23:17 副线暂稳，但天台红灯亮了', '停电三分钟背后的旧秘密浮出水面', '黎明前，整栋楼一起回响']
+    const titles = ['螺蛳粉危机暂歇，更大的瓜要炸了', '广播忘关大社死！全楼吃瓜停不下来', '换电表前最后一夜，全楼笑完安稳睡']
     const s = this._layer()
     s.innerHTML = '<div class="panel glass center">' +
       '<div class="kicker">第 ' + sum.night + ' 晚 · ' + (sum.minPassed ? '✓ 过关达成' : '手记收尾') + '</div>' +
@@ -1446,15 +1487,21 @@ export class UI {
 
   // ---------------------------------------------------------------- chrome
 
-  coach(text, x, y) {
+  coach(text, x, y, diam = 64) {
     if (!this._coachEl) {
       this._coachEl = document.createElement('div')
       this._coachEl.id = 'coach'
-      this._coachEl.innerHTML = '<div class="ct"></div><div class="ring"></div>'
+      this._coachEl.innerHTML = '<div class="ring"></div><div class="ct"></div>'
       document.body.appendChild(this._coachEl)
     }
-    qs(this._coachEl, '.ct').textContent = text
-    this._coachEl.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px) translate(-50%,-50%)'
+    const r = Math.max(48, Math.round(diam || 64))
+    const ring = qs(this._coachEl, '.ring')
+    const ct = qs(this._coachEl, '.ct')
+    ring.style.width = r + 'px'
+    ring.style.height = r + 'px'
+    ct.textContent = text
+    ct.style.top = -(Math.round(r / 2) + 12) + 'px'
+    this._coachEl.style.transform = 'translate3d(' + Math.round(x) + 'px,' + Math.round(y) + 'px,0)'
     this._coachEl.classList.add('on')
   }
 
