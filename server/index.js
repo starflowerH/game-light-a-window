@@ -117,7 +117,7 @@ export function buildApp(opts = {}) {
     aiBase,
     aiModel,
     fetchImpl: opts.fetchImpl,
-    timeoutMs: opts.aiTimeoutMs || 12000
+    timeoutMs: opts.aiTimeoutMs || Number(process.env.AI_TIMEOUT_MS) || 26000
   })
 
   const aiLimiter = createLimiter(opts.rateLimits?.ai ?? 12, 60_000)

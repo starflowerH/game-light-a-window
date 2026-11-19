@@ -171,7 +171,7 @@ export function createAgentHub({
       })
 
       try {
-        const raw = await callModel(PLAN_SYSTEM_PROMPT, user, 2200)
+        const raw = await callModel(PLAN_SYSTEM_PROMPT, user, 3200)
         const payload = normalizePlanPayload(raw)
         if (!payload) throw new Error('schema rejected')
         db.setCachedAiPayload({ key: cacheKey, agentType: 'plan', payload })
