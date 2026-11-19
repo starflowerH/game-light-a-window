@@ -227,23 +227,23 @@ function normalizeStory(raw, pass) {
     ? direct
     : CORE_RESIDENT_ROOMS[pass % CORE_RESIDENT_ROOMS.length]
 
-  const text = sanitizeText(raw.text, 26)
+  const text = sanitizeText(raw.text, 130)
   const picked = text.length >= 8 ? raw : { ...raw, text: FALLBACK_STORIES.find(s => s.roomId === roomId)?.text || '' }
-  const finalText = sanitizeText(picked.text, 26)
+  const finalText = sanitizeText(picked.text, 130)
   if (finalText.length < 8) return null
 
   const base = FALLBACK_STORIES.find(s => s.roomId === roomId)
-  const item = sanitizeText(raw.item, 6) || base?.item || '小物件'
+  const item = sanitizeText(raw.item, 10) || base?.item || '小物件'
   const icon = sanitizeIcon(raw.icon || base?.icon)
-  const resident = sanitizeText(raw.resident, 14) || base?.resident || ''
+  const resident = sanitizeText(raw.resident, 18) || base?.resident || ''
 
   const fallbackChoices = FALLBACK_CHOICES[roomId] || FALLBACK_CHOICES[304]
   const given = Array.isArray(raw.choices) ? raw.choices : []
   const choices = []
   for (let i = 0; i < 2; i++) {
     const c = given[i]
-    const label = sanitizeText(c?.label, 9)
-    const outcome = sanitizeText(c?.outcome, 22)
+    const label = sanitizeText(c?.label, 18)
+    const outcome = sanitizeText(c?.outcome, 110)
     const fb = fallbackChoices[i]
     choices.push({
       id: i === 0 ? 'A' : 'B',
@@ -281,12 +281,12 @@ function normalizeNight(raw, nightNumber, index) {
     if (!c || typeof c !== 'object') continue
     const type = String(c.type || '').toLowerCase()
     if (!COMMISSION_TYPES.includes(type)) continue
-    const label = sanitizeText(c.label, 18)
+    const label = sanitizeText(c.label, 24)
     if (label.length < 4) continue
     const target = clampInt(c.target, 1, 24, 1)
     /** @type {{ id: string, type: string, target: number, label: string, floor?: number }} */
     const item = { id: sanitizeText(c.id, 16) || type + '_' + target, type, target, label }
-    if (type === 'row_lit') item.floor = clampInt(c.floor, 1, 4, 3)
+    if (type === 'row_lit') item.floor = clampInt(c.floor, 1, 5, 3)
     commissions.push(item)
   }
   if (commissions.length < 2) commissions = defaults.map(d => ({ ...d }))
@@ -301,7 +301,7 @@ function normalizeNight(raw, nightNumber, index) {
     const b = Number(rawRooms[1])
     const valid = INDEX_TO_ROOM.includes(a) && INDEX_TO_ROOM.includes(b) && a !== b
     if (valid) {
-      const line = sanitizeText(rawPair?.line, 26)
+      const line = sanitizeText(rawPair?.line, 68)
       pair = { rooms: [a, b], line: line.length >= 8 ? line : (FALLBACK_RESONANCE[index] || FALLBACK_RESONANCE[0]).line }
     }
   }
@@ -332,7 +332,7 @@ function normalizeNight(raw, nightNumber, index) {
   }
 
   // --- postcard ---------------------------------------------------------
-  let postcard = sanitizeText(n.postcard, 36)
+  let postcard = sanitizeText(n.postcard, 72)
   if (postcard.length < 10) postcard = FALLBACK_POSTCARDS[index] || FALLBACK_POSTCARDS[0]
 
   return {
@@ -364,8 +364,8 @@ export function normalizePlanPayload(raw) {
   for (const n of raw.nights) if (!n || typeof n !== 'object') return null
   if (containsBannedWord(JSON.stringify(raw))) return null
 
-  let directorNote = sanitizeText(raw.directorNote, 40)
-  if (directorNote.length < 6) directorNote = '今夜从微雨开始，慢一点也没关系。'
+  let directorNote = sanitizeText(raw.directorNote, 120)
+  if (directorNote.length < 6) directorNote = '23:17 副线电压异常，十一年前那晚的值班钥匙又响了。'
 
   const nights = raw.nights.map((n, i) => normalizeNight(n, i + 1, i))
   return { directorNote, nights }
@@ -481,12 +481,12 @@ export function normalizeDialoguePayload(raw) {
   if (!raw || typeof raw !== 'object') return null
   if (containsBannedWord(JSON.stringify(raw))) return null
 
-  const rawLines = Array.isArray(raw.lines) ? raw.lines.slice(0, 4) : []
+  const rawLines = Array.isArray(raw.lines) ? raw.lines.slice(0, 5) : []
   const lines = []
   for (const item of rawLines) {
     if (!item || typeof item !== 'object') continue
     const speakerId = VALID_SPEAKERS.has(String(item.speakerId)) ? String(item.speakerId) : 'aunt_lin'
-    const line = sanitizeText(item.line, 64)
+    const line = sanitizeText(item.line, 120)
     if (line.length >= 6) lines.push({ speakerId, line })
   }
   if (!lines.length) return null

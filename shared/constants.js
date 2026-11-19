@@ -235,12 +235,25 @@ export const GAME_MODES = [
   },
   {
     id: 'star_sweep',
-    name: '星轨一笔画 · 暖光连线',
-    shortName: '一笔画连光',
-    tag: '治愈解压',
-    desc: '按住划过微光窗连成光链，体验 17 号楼六位住户三晚分支故事与六结局。'
+    name: '剧情夜巡 · 17号楼的秘密回路',
+    shortName: '剧情夜巡',
+    tag: '悬疑物语 · 闯关',
+    desc: '三夜小说式宿管剧情：点亮微光窗连光、接住信标触发线人抉择、连起跨窗星轨，完成当夜手账目标即可揭晓下一夜反转。'
   }
 ]
+
+export const BGM_TRACKS = [
+  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '按开场/剧情/闯关自动切换三套配乐' },
+  { id: 'kataware', name: '黄昏之时 · 暮色星辰', shortName: '黄昏之时风', desc: '日系暮色钢琴弦乐 · 温柔悬念与怀旧感' },
+  { id: 'bluedragon', name: '医龙 · 苍蓝脉搏', shortName: '医龙风', desc: '燃系弦乐律动与鼓点 · 高潮对峙与查寝张力' },
+  { id: 'mysoul', name: 'My Soul · 子夜琴诗', shortName: 'My Soul风', desc: '标志性循环钢琴旋律与碎拍 · 深夜独行沉浸感' },
+  { id: 'ambient', name: '微雨校庭 · 助眠白噪音', shortName: '纯白噪音', desc: '仅保留细雨晚风与轻柔底噪' }
+]
+export const BGM_TRACK_IDS = BGM_TRACKS.map(t => t.id)
+
+export function bgmTrackDef(id) {
+  return BGM_TRACKS.find(t => t.id === id) || BGM_TRACKS[0]
+}
 
 export const GAME_MODE_IDS = GAME_MODES.map(m => m.id)
 
@@ -388,7 +401,7 @@ export const ENCORE_MIN_TIME_LEFT_S = 8
 export const ENCORE_DELAY_MS = 1800
 export const COMMISSION_BONUS = 12
 export const COMBO_FREEZE_MS = 5000
-export const CHOICE_AUTO_RESOLVE_MS = 6000
+export const CHOICE_AUTO_RESOLVE_MS = 20000
 export const STORY_BEACON_GAIN = 8
 export const RESONANCE_GAIN = 15
 export const RESONANCE_COMBO_BONUS = 3
@@ -397,15 +410,15 @@ export const DARK_TAP_GAIN = 1
 export const DARK_TAP_WAKE_CHANCE = 0.35
 
 export const STORY_BEACON_SCHEDULE = {
-  0: [20, 48],
-  1: [18, 42, 60],
-  2: [15, 38, 58]
+  0: [5, 34],
+  1: [4, 24, 46],
+  2: [4, 22, 44]
 }
 export const STORY_BEACON_LIT_FALLBACK = 7
 export const RESONANCE_SCHEDULE = {
-  0: [35],
-  1: [25, 52],
-  2: [22, 48]
+  0: [14, 38],
+  1: [12, 34],
+  2: [10, 32]
 }
 export const EVOLVE_AT_S = 45
 
@@ -452,6 +465,60 @@ export function generateCampusNickname(rng = Math.random) {
   const s = NICK_SUFFIX[Math.floor(rng() * NICK_SUFFIX.length)]
   const combined = p + s
   return combined.slice(0, 8)
+}
+
+/**
+ * Adapt nightly commissions so every dorm (12 / 18 / 24 / 30 windows, 3-5 floors, 4-6 cols)
+ * has 100% reachable win targets.
+ * @param {Array<{ id: string, type: string, target: number, label: string, floor?: number }>} commissions
+ * @param {string} dormId
+ */
+export function adaptCommissionsForDorm(commissions, dormId = 'university') {
+  const dorm = dormDef(dormId)
+  return (commissions || []).map(c => {
+    const item = { ...c }
+    if (item.type === 'lit_count' || item.type === 'all_lit') {
+      const cap = Math.min(Math.max(1, Number(item.target) || 10), dorm.windowCount)
+      if (item.target >= 20 || item.type === 'all_lit') {
+        item.target = dorm.windowCount
+        item.label = `让整栋 ${dorm.windowCount} 扇窗全亮`
+      } else {
+        item.target = Math.max(4, Math.min(cap, Math.round((item.target / 24) * dorm.windowCount)))
+        item.label = `点亮至少 ${item.target} 扇窗`
+      }
+    } else if (item.type === 'row_lit') {
+      const fl = Math.min(dorm.rows, Math.max(1, Number(item.floor) || 3))
+      item.floor = fl
+      item.target = dorm.cols
+      item.label = `把整排${fl}楼(${dorm.cols}扇窗)都点亮`
+    } else if (item.type === 'bond_rooms') {
+      item.target = Math.min(3, Math.max(1, Number(item.target) || 3), dorm.coreRooms.length)
+      item.label = `倾听并回应 ${item.target} 位住户`
+    }
+    return item
+  })
+}
+
+/**
+ * Guarantee both ends of a cross-window star resonance pair exist in the active dorm grid.
+ * @param {{ rooms: number[], line: string }} pair
+ * @param {string} dormId
+ * @returns {{ rooms: [number, number], line: string }}
+ */
+export function adaptResonancePairForDorm(pair, dormId = 'university') {
+  const dorm = dormDef(dormId)
+  const validRooms = new Set(buildWindowIds(dorm.rows, dorm.cols).map(w => w.roomId))
+  const rooms = Array.isArray(pair?.rooms) ? pair.rooms.map(Number) : []
+  if (rooms.length === 2 && rooms[0] !== rooms[1] && validRooms.has(rooms[0]) && validRooms.has(rooms[1])) {
+    return { rooms: [rooms[0], rooms[1]], line: String(pair.line || '') }
+  }
+  const core = dorm.coreRooms.filter(r => validRooms.has(r))
+  const a = core[0] || 102
+  const b = core[core.length - 1] || (dorm.rows * 100 + dorm.cols)
+  return {
+    rooms: [a, b === a ? 101 : b],
+    line: String(pair?.line || `${a}室的微光顺着晚风接进了${b}室的窗台。`)
+  }
 }
 
 /**

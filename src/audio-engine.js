@@ -10,10 +10,12 @@
 // The context is created lazily on the first unlock() (which must run inside a
 // user gesture). Every public method is a safe no-op before that point.
 
-const MASTER_LEVEL = 0.55
-const MAX_VOICES = 48
-const LOOKAHEAD = 0.18
+const MASTER_LEVEL = 0.62
+const MAX_VOICES = 64
+const LOOKAHEAD = 0.20
 const CHORD_BEATS = 16
+
+const midiHz = m => 440 * Math.pow(2, (m - 69) / 12)
 
 // C5 D5 E5 G5 A5 C6 D6 E6, one octave of the C major pentatonic scale.
 const SCALE = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51]
@@ -26,16 +28,87 @@ const CHORDS = [
   [220.0, 261.63, 392.0, 493.88]
 ]
 
-// Beats per minute for each tempo label. A chord lasts CHORD_BEATS beats.
-const TEMPO = { slow: 62, normal: 76, brisk: 96 }
+// Beats per minute for each tempo label.
+const TEMPO = { slow: 66, normal: 80, brisk: 102 }
 
-// L1 presets. pink/brown are the bandpass centres of the two noise beds.
+// L1 presets tuned softly so rain & wind support rather than bury the piano/strings.
 const WEATHER = {
-  light_rain: { pinkFreq: 850, pinkQ: 0.8, pinkGain: 0.24, brownFreq: 240, brownQ: 0.7, brownGain: 0.12, windDepth: 0, gust: 0.018 },
-  wind: { pinkFreq: 450, pinkQ: 1.5, pinkGain: 0.2, brownFreq: 170, brownQ: 0.8, brownGain: 0.13, windDepth: 230, gust: 0.05 },
-  fog: { pinkFreq: 620, pinkQ: 2.6, pinkGain: 0.03, brownFreq: 88, brownQ: 1.0, brownGain: 0.08, windDepth: 40, gust: 0.02 },
-  snow: { pinkFreq: 960, pinkQ: 3.2, pinkGain: 0.018, brownFreq: 95, brownQ: 1.2, brownGain: 0.028, windDepth: 65, gust: 0.012 },
-  clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0.014, brownFreq: 120, brownQ: 0.8, brownGain: 0.003, windDepth: 0, gust: 0.006 }
+  light_rain: { pinkFreq: 850, pinkQ: 0.9, pinkGain: 0.085, brownFreq: 220, brownQ: 0.7, brownGain: 0.055, windDepth: 0, gust: 0.008 },
+  wind: { pinkFreq: 450, pinkQ: 1.5, pinkGain: 0.08, brownFreq: 170, brownQ: 0.8, brownGain: 0.06, windDepth: 200, gust: 0.022 },
+  fog: { pinkFreq: 620, pinkQ: 2.6, pinkGain: 0.018, brownFreq: 88, brownQ: 1.0, brownGain: 0.036, windDepth: 35, gust: 0.008 },
+  snow: { pinkFreq: 960, pinkQ: 3.2, pinkGain: 0.012, brownFreq: 95, brownQ: 1.2, brownGain: 0.016, windDepth: 55, gust: 0.006 },
+  clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0.008, brownFreq: 120, brownQ: 0.8, brownGain: 0.002, windDepth: 0, gust: 0.003 }
+}
+
+const SCENE_AUTO_TRACK = {
+  title: 'kataware',
+  hub: 'kataware',
+  story1: 'kataware',
+  story2: 'bluedragon',
+  story3: 'bluedragon',
+  patrol_reflex: 'bluedragon',
+  memory_sequence: 'mysoul',
+  memory_snapshot: 'mysoul',
+  lights_out_puzzle: 'mysoul'
+}
+
+// ---------------------------------------------------------------- Musical Scores (16-step bars, 8 bars = 128 steps)
+
+// ① 黄昏之时风格 (Kataware-doki inspired): A major / F# minor lyrical twilight piano + strings, 78 BPM
+const SCORE_KATAWARE = {
+  bpm: 78,
+  bars: [
+    // Bar 1: F#m7 | Bar 2: Dmaj7 | Bar 3: Aadd9 | Bar 4: E
+    { bass: 42, arp: [54, 61, 64, 66, 69, 66, 64, 61], pad: [54, 61, 64, 69], mel: { 0: 73, 4: 76, 6: 78, 10: 76, 14: 73 }, cel: { 0: 85, 6: 90 } },
+    { bass: 38, arp: [50, 57, 61, 62, 66, 62, 61, 57], pad: [50, 57, 61, 66], mel: { 0: 71, 4: 73, 6: 76, 12: 71 }, cel: { 6: 88 } },
+    { bass: 45, arp: [45, 52, 57, 59, 61, 59, 57, 52], pad: [57, 61, 64, 71], mel: { 0: 69, 4: 71, 6: 73, 10: 76, 14: 74 }, cel: { 0: 81 } },
+    { bass: 40, arp: [40, 47, 52, 56, 59, 64, 59, 56], pad: [52, 56, 59, 64], mel: { 0: 71, 6: 73, 10: 71, 12: 68 }, cel: { 12: 80 } },
+    // Bar 5: F#m7 | Bar 6: Dmaj7 | Bar 7: Bm7 -> E7sus4 | Bar 8: Aadd9 resolve
+    { bass: 42, arp: [54, 61, 64, 69, 73, 69, 64, 61], pad: [54, 61, 64, 69], mel: { 0: 81, 4: 80, 6: 78, 10: 76, 14: 78 }, cel: { 0: 93, 6: 90 } },
+    { bass: 38, arp: [50, 57, 61, 66, 69, 66, 62, 57], pad: [50, 57, 61, 66], mel: { 0: 76, 4: 78, 6: 81, 10: 80, 14: 76 }, cel: { 6: 93 } },
+    { bass: 47, arp: [47, 54, 57, 62, 52, 59, 64, 68], pad: [59, 62, 66, 68], mel: { 0: 74, 4: 73, 8: 71, 12: 76 }, cel: { 8: 83 } },
+    { bass: 45, arp: [45, 52, 57, 59, 61, 64, 69, 64], pad: [57, 61, 64, 73], mel: { 0: 73, 8: 69 }, cel: { 0: 85, 8: 93 } }
+  ]
+}
+
+// ② 医龙 Blue Dragon 风格 (Sawano epic drama): D minor driving strings, timpani/kick & soaring theme, 114 BPM
+const SCORE_BLUEDRAGON = {
+  bpm: 114,
+  ostinato: true,
+  bars: [
+    // Dm | Bb | C | Am | Gm | Dm/F | Bbmaj7 | A7
+    { bass: 38, arp: [50, 50, 57, 50, 53, 50, 57, 50], pad: [50, 57, 62, 65], mel: { 0: 69, 3: 74, 6: 76, 8: 77, 12: 76, 14: 74 }, kick: [0, 6, 8], snare: [4, 12], timp: [0] },
+    { bass: 34, arp: [46, 46, 53, 46, 50, 46, 53, 46], pad: [46, 53, 58, 62], mel: { 0: 74, 4: 72, 6: 70, 8: 69, 12: 72 }, kick: [0, 6, 8], snare: [4, 12], timp: [] },
+    { bass: 36, arp: [48, 48, 55, 48, 52, 48, 55, 48], pad: [48, 55, 60, 64], mel: { 0: 72, 3: 76, 6: 79, 8: 77, 12: 76, 14: 72 }, kick: [0, 6, 8, 10], snare: [4, 12], timp: [0] },
+    { bass: 45, arp: [45, 45, 52, 45, 48, 45, 52, 45], pad: [45, 52, 57, 64], mel: { 0: 76, 6: 74, 8: 72, 12: 69 }, kick: [0, 6, 8], snare: [4, 12, 14, 15], timp: [12] },
+    { bass: 43, arp: [43, 50, 55, 58, 55, 50, 43, 50], pad: [55, 58, 62, 65], mel: { 0: 79, 4: 77, 6: 79, 8: 81, 12: 82, 14: 81 }, kick: [0, 6, 8], snare: [4, 12], timp: [0] },
+    { bass: 41, arp: [41, 50, 53, 57, 53, 50, 41, 50], pad: [53, 57, 62, 69], mel: { 0: 81, 4: 77, 6: 74, 8: 76, 12: 77 }, kick: [0, 6, 8], snare: [4, 12], timp: [] },
+    { bass: 34, arp: [46, 53, 58, 62, 58, 53, 46, 53], pad: [46, 53, 58, 69], mel: { 0: 77, 3: 79, 6: 81, 8: 84, 12: 81, 14: 79 }, kick: [0, 6, 8, 10], snare: [4, 12], timp: [0, 8] },
+    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [45, 52, 57, 61], mel: { 0: 76, 4: 74, 8: 73, 12: 76 }, kick: [0, 6, 8], snare: [4, 12, 14, 15], timp: [0, 12] }
+  ]
+}
+
+// ③ My Soul 风格 (July New-Age Piano Hip-Hop): F# minor flowing broken piano + lo-fi rimshot groove, 88 BPM
+const SCORE_MYSOUL = {
+  bpm: 88,
+  bars: [
+    // F#m -> D -> A -> E (phrase 1)
+    { bass: 42, arp: [54, 61, 66, 69, 66, 61, 54, 61], pad: [54, 61, 64, 69], mel: { 0: 73, 2: 74, 4: 76, 6: 73, 8: 71, 10: 69, 12: 71 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 38, arp: [50, 57, 62, 66, 62, 57, 50, 57], pad: [50, 57, 62, 66], mel: { 0: 69, 2: 71, 4: 73, 6: 78, 8: 76, 10: 73, 12: 71 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [57, 61, 64, 69], mel: { 0: 73, 2: 76, 4: 81, 6: 80, 8: 78, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 40, arp: [52, 59, 64, 68, 64, 59, 52, 59], pad: [52, 56, 59, 64], mel: { 0: 71, 4: 73, 6: 71, 8: 68, 12: 64 }, kick: [0, 6, 8], snare: [4, 12, 15] },
+    // F#m -> D -> A -> E (high expressive cascade phrase 2)
+    { bass: 42, arp: [54, 61, 66, 69, 73, 69, 66, 61], pad: [54, 61, 64, 69], mel: { 0: 78, 2: 80, 4: 81, 6: 80, 8: 78, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 38, arp: [50, 57, 62, 66, 69, 66, 62, 57], pad: [50, 57, 62, 66], mel: { 0: 74, 2: 73, 4: 71, 6: 69, 8: 71, 10: 73, 12: 74 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [57, 61, 64, 73], mel: { 0: 76, 2: 78, 4: 81, 8: 80, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
+    { bass: 40, arp: [52, 59, 64, 68, 64, 59, 52, 47], pad: [52, 56, 59, 64], mel: { 0: 71, 4: 76, 8: 74, 10: 73, 12: 71 }, kick: [0, 6, 8], snare: [4, 12, 14] }
+  ]
+}
+
+const SCORES = {
+  kataware: SCORE_KATAWARE,
+  bluedragon: SCORE_BLUEDRAGON,
+  mysoul: SCORE_MYSOUL
 }
 
 const ENDING_A = 'ENDING_A_WARMTH'
@@ -67,6 +140,14 @@ export class AudioEngine {
     this._chainStep = 0
     this._nextChord = 0
     this._chordIndex = 0
+    this._bgmMode = 'auto'
+    this._sceneContext = 'title'
+    this._activeTrack = 'kataware'
+    this._stepIndex = 0
+    this._nextStepTime = 0
+    this._customAudioEl = null
+    this._customUrl = ''
+    this._customTitle = ''
     this._dropletNext = 0
     this._timer = 0
     this._timers = new Set()
@@ -129,7 +210,81 @@ export class AudioEngine {
     if (this.ready) {
       this.master.gain.setTargetAtTime(this._muted ? 0 : MASTER_LEVEL, this.ctx.currentTime, 0.08)
     }
+    if (this._customAudioEl) {
+      this._customAudioEl.muted = this._muted
+      if (!this._muted && this._customAudioEl.paused) {
+        this._customAudioEl.play().catch(() => {})
+      }
+    }
     return this._muted
+  }
+
+  /** @param {'auto'|'kataware'|'bluedragon'|'mysoul'|'ambient'} trackId */
+  setBgmTrack(trackId) {
+    const id = ['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'].includes(trackId) ? trackId : 'auto'
+    this._bgmMode = id
+    this.clearCustomAudio()
+    this._syncActiveTrack(true)
+  }
+
+  /** @param {string} sceneKey */
+  setSceneContext(sceneKey) {
+    this._sceneContext = String(sceneKey || 'hub')
+    if (this._bgmMode === 'auto') this._syncActiveTrack(false)
+  }
+
+  getBgmState() {
+    return {
+      mode: this._bgmMode,
+      activeTrack: this._customUrl ? 'custom' : this._activeTrack,
+      customTitle: this._customTitle,
+      muted: this._muted
+    }
+  }
+
+  /** Allow player to load a local .mp3/.wav/.ogg file on top of WebAudio SFX. */
+  loadCustomAudioFile(file) {
+    if (!file || typeof URL === 'undefined' || typeof window === 'undefined' || !window.Audio) return false
+    this.clearCustomAudio()
+    try {
+      const url = URL.createObjectURL(file)
+      const audio = new window.Audio(url)
+      audio.loop = true
+      audio.volume = 0.55
+      audio.muted = this._muted
+      this._customUrl = url
+      this._customTitle = String(file.name || '本地音乐').replace(/\.[^.]+$/, '').slice(0, 24)
+      this._customAudioEl = audio
+      audio.play().catch(() => {})
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  clearCustomAudio() {
+    if (this._customAudioEl) {
+      try { this._customAudioEl.pause() } catch {}
+      this._customAudioEl = null
+    }
+    if (this._customUrl && typeof URL !== 'undefined') {
+      try { URL.revokeObjectURL(this._customUrl) } catch {}
+    }
+    this._customUrl = ''
+    this._customTitle = ''
+  }
+
+  _syncActiveTrack(resetPhrase = false) {
+    const next = this._bgmMode === 'auto'
+      ? (SCENE_AUTO_TRACK[this._sceneContext] || 'kataware')
+      : this._bgmMode
+    if (next === this._activeTrack && !resetPhrase) return
+    this._activeTrack = next
+    this._stepIndex = 0
+    if (this.ready) {
+      this._nextStepTime = this.ctx.currentTime + 0.08
+      this._applyLit()
+    }
   }
 
   setWeather(weather) {
@@ -387,6 +542,7 @@ export class AudioEngine {
   }
 
   dispose() {
+    this.clearCustomAudio()
     if (this._timer) {
       clearInterval(this._timer)
       this._timer = 0
@@ -453,12 +609,14 @@ export class AudioEngine {
 
     this._nextChord = now + 1.2
     this._chordIndex = 0
+    this._nextStepTime = now + 0.08
+    this._stepIndex = 0
     this._dropletNext = 0
     this._applyWeather()
     this._applyLit()
     this._schedule()
     // @ts-expect-error Node types say setTimeout returns a Timeout, the field is a number
-    this._timer = setInterval(() => this._schedule(), LOOKAHEAD * 1000 + 20)
+    this._timer = setInterval(() => this._schedule(), 48)
   }
 
   _buildBed(now, music) {
@@ -597,18 +755,18 @@ export class AudioEngine {
     if (!this.ready) return
     const t = this.ctx.currentTime
     const n = this._litCount
-    // Square-root curves track perceived loudness: the first few windows
-    // after 5 already lift the pad instead of staying inaudible.
+    const isAmbient = this._activeTrack === 'ambient' && !this._customUrl
     let pad = 0
-    if (n > 5) pad = Math.sqrt(Math.min(1, (n - 5) / 10)) * 0.55
-    if (n > 15) pad = 0.55 + Math.sqrt(Math.min(1, (n - 15) / 8)) * 0.3
-    const shim = n < 20 ? 0 : 0.1 + Math.sqrt(Math.min(1, (n - 20) / 4)) * 0.2
+    if (isAmbient) {
+      if (n > 2) pad = Math.sqrt(Math.min(1, n / 12)) * 0.55
+      if (n > 15) pad = 0.55 + Math.sqrt(Math.min(1, (n - 15) / 8)) * 0.3
+    }
+    const shim = isAmbient && n >= 20 ? 0.1 + Math.sqrt(Math.min(1, (n - 20) / 4)) * 0.2 : 0
     this._padGain.gain.setTargetAtTime(pad, t, 0.9)
     this._shimmerGain.gain.setTargetAtTime(shim, t, 1.2)
   }
 
-  // Chord + droplet clock. Notes are always scheduled ahead on the audio
-  // clock; the interval only decides when to look forward.
+  // Step-sequenced BGM + ambient pad + droplet clock.
   _schedule() {
     if (!this.ready) return
     const now = this.ctx.currentTime
@@ -619,7 +777,246 @@ export class AudioEngine {
       this._nextChord += this._chordDur
       this._chordIndex = (this._chordIndex + 1) % CHORDS.length
     }
+
+    const score = (!this._customUrl && this._activeTrack !== 'ambient') ? SCORES[this._activeTrack] : null
+    if (score && !this._muted) {
+      const stepDur = 60 / score.bpm / 4
+      if (this._nextStepTime < now - 0.25) this._nextStepTime = now + 0.04
+      let stepGuard = 0
+      while (this._nextStepTime < now + LOOKAHEAD && stepGuard++ < 12) {
+        this._playScoreStep(score, this._stepIndex, this._nextStepTime, stepDur)
+        this._nextStepTime += stepDur
+        this._stepIndex = (this._stepIndex + 1) % (score.bars.length * 16)
+      }
+    }
+
     if (this._weather === 'light_rain' && !this._muted) this._scheduleDroplets(now + 0.7)
+  }
+
+  _playScoreStep(score, globalStep, t, stepDur) {
+    const barIdx = Math.floor(globalStep / 16) % score.bars.length
+    const step = globalStep % 16
+    const bar = score.bars[barIdx]
+    const intense = this._activeTrack === 'bluedragon'
+
+    // Downbeat warm orchestral string pad & deep bass anchor
+    if (step === 0) {
+      this._piano(midiHz(bar.bass), t, intense ? 0.16 : 0.13, stepDur * 14, -0.15, true)
+      if (bar.pad) {
+        for (let i = 0; i < bar.pad.length; i++) {
+          this._strings(midiHz(bar.pad[i]), t, intense ? 0.042 : 0.032, stepDur * 16, (i - 1.5) * 0.22)
+        }
+      }
+    }
+
+    // Left-hand flowing piano / driving Sawano string ostinato every 8th note (or 16th ostinato pulse)
+    if (bar.arp) {
+      if (step % 2 === 0) {
+        const note = bar.arp[(step / 2) % bar.arp.length]
+        if (score.ostinato) {
+          this._strings(midiHz(note), t, 0.048, stepDur * 1.9, (step % 4 === 0 ? -0.25 : 0.25))
+          this._piano(midiHz(note), t, 0.072, stepDur * 2.4, -0.18)
+        } else {
+          this._piano(midiHz(note), t, 0.085, stepDur * 3.8, -0.22)
+        }
+      } else if (score.ostinato && step % 2 === 1) {
+        const note = bar.arp[Math.floor(step / 2) % bar.arp.length]
+        this._strings(midiHz(note), t, 0.026, stepDur * 1.1, 0.2)
+      }
+    }
+
+    // Right-hand expressive singing lead melody
+    if (bar.mel && bar.mel[step] !== undefined) {
+      const m = bar.mel[step]
+      const vel = intense ? 0.145 : 0.135
+      this._piano(midiHz(m), t, vel, stepDur * 5.2, 0.12)
+      if (intense) this._piano(midiHz(m + 12), t, vel * 0.42, stepDur * 4.0, -0.1)
+    }
+
+    // Twilight celesta chime sparkle (Kataware)
+    if (bar.cel && bar.cel[step] !== undefined) {
+      this._celesta(midiHz(bar.cel[step]), t, 0.055, stepDur * 6.0, 0.28)
+    }
+
+    // Rhythmic percussion (My Soul boom-bap / Blue Dragon dramatic pulse)
+    if (bar.kick && bar.kick.includes(step)) this._kick(t, intense ? 0.16 : 0.11)
+    if (bar.snare && bar.snare.includes(step)) this._snare(t, intense ? 0.095 : 0.055, !intense)
+    if (bar.timp && bar.timp.includes(step)) this._timpani(midiHz(bar.bass), t, 0.15)
+    if ((bar.kick || bar.snare) && step % 2 === 0) this._hat(t, step % 4 === 2 ? 0.026 : 0.014)
+  }
+
+  _piano(freq, t, vel, dur, pan = 0, warmBass = false) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(warmBass ? 1100 : 3800, t)
+    filter.frequency.exponentialRampToValueAtTime(warmBass ? 240 : 620, t + Math.min(0.6, dur * 0.7))
+    filter.Q.value = 0.8
+
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0.0001, t)
+    env.gain.exponentialRampToValueAtTime(clamp(vel, 0.01, 0.35), t + 0.008)
+    env.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.18, dur))
+
+    const p = ctx.createStereoPanner()
+    p.pan.value = clamp(pan, -0.8, 0.8)
+
+    const o1 = ctx.createOscillator()
+    o1.type = 'triangle'
+    o1.frequency.setValueAtTime(freq, t)
+    const o2 = ctx.createOscillator()
+    o2.type = 'sine'
+    o2.frequency.setValueAtTime(freq * 2, t)
+    const g2 = ctx.createGain()
+    g2.gain.value = warmBass ? 0.25 : 0.34
+
+    o1.connect(filter)
+    o2.connect(g2)
+    g2.connect(filter)
+    filter.connect(env)
+    env.connect(p)
+    p.connect(this.music)
+    o1.start(t)
+    o2.start(t)
+    const endT = t + Math.max(0.2, dur) + 0.05
+    o1.stop(endT)
+    o2.stop(endT)
+    o1.onended = () => this._releaseVoice()
+  }
+
+  _strings(freq, t, vel, dur, pan = 0) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const lp = ctx.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.setValueAtTime(700, t)
+    lp.frequency.linearRampToValueAtTime(1950, t + Math.min(0.6, dur * 0.45))
+    lp.frequency.linearRampToValueAtTime(820, t + dur)
+
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0.0001, t)
+    env.gain.linearRampToValueAtTime(clamp(vel, 0.005, 0.14), t + Math.min(0.35, dur * 0.35))
+    env.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.25, dur))
+
+    const p = ctx.createStereoPanner()
+    p.pan.value = clamp(pan, -0.8, 0.8)
+
+    const o1 = ctx.createOscillator()
+    o1.type = 'sawtooth'
+    o1.frequency.setValueAtTime(freq, t)
+    o1.detune.value = -7
+    const o2 = ctx.createOscillator()
+    o2.type = 'sawtooth'
+    o2.frequency.setValueAtTime(freq, t)
+    o2.detune.value = 7
+
+    o1.connect(lp)
+    o2.connect(lp)
+    lp.connect(env)
+    env.connect(p)
+    p.connect(this.music)
+    o1.start(t)
+    o2.start(t)
+    const endT = t + Math.max(0.26, dur) + 0.06
+    o1.stop(endT)
+    o2.stop(endT)
+    o1.onended = () => this._releaseVoice()
+  }
+
+  _celesta(freq, t, vel, dur, pan = 0) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const o = ctx.createOscillator()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(freq, t)
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0.0001, t)
+    env.gain.exponentialRampToValueAtTime(clamp(vel, 0.01, 0.15), t + 0.006)
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    const p = ctx.createStereoPanner()
+    p.pan.value = clamp(pan, -0.8, 0.8)
+    o.connect(env)
+    env.connect(p)
+    p.connect(this.music)
+    o.start(t)
+    o.stop(t + dur + 0.04)
+    o.onended = () => this._releaseVoice()
+  }
+
+  _kick(t, peak = 0.12) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const o = ctx.createOscillator()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(125, t)
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.11)
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.005)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24)
+    o.connect(g)
+    g.connect(this.music)
+    o.start(t)
+    o.stop(t + 0.26)
+    o.onended = () => this._releaseVoice()
+  }
+
+  _snare(t, peak = 0.06, rimOnly = false) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const src = this._noiseSource('pink', t, 0.16)
+    const bp = ctx.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = rimOnly ? 1650 : 2200
+    bp.Q.value = rimOnly ? 3.2 : 1.1
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.004)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (rimOnly ? 0.07 : 0.14))
+    src.connect(bp)
+    bp.connect(g)
+    g.connect(this.music)
+    this._hold(180)
+  }
+
+  _hat(t, peak = 0.02) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const src = this._noiseSource('pink', t, 0.05)
+    const hp = ctx.createBiquadFilter()
+    hp.type = 'highpass'
+    hp.frequency.value = 6800
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.002)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045)
+    src.connect(hp)
+    hp.connect(g)
+    g.connect(this.music)
+    this._hold(70)
+  }
+
+  _timpani(freq, t, peak = 0.16) {
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const o = ctx.createOscillator()
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(freq * 1.15, t)
+    o.frequency.exponentialRampToValueAtTime(freq, t + 0.08)
+    const lp = ctx.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.value = 340
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55)
+    o.connect(lp)
+    lp.connect(g)
+    g.connect(this.music)
+    o.start(t)
+    o.stop(t + 0.58)
+    o.onended = () => this._releaseVoice()
   }
 
   _playChord(t, index) {
@@ -629,14 +1026,14 @@ export class AudioEngine {
         this._padOscs[tone * 3 + d].frequency.setTargetAtTime(chord[tone], t, 0.4)
       }
     }
-    const base = 640 + this._litCount * 14
-    this._padFilter.frequency.setTargetAtTime(base * 1.25, t, 0.18)
-    this._padFilter.frequency.setTargetAtTime(base * 0.7, t + 0.9, 0.9)
+    const base = 520 + this._litCount * 12
+    this._padFilter.frequency.setTargetAtTime(base * 1.1, t, 0.2)
+    this._padFilter.frequency.setTargetAtTime(base * 0.65, t + 0.9, 0.9)
     this._shimmerOscs[0].frequency.setTargetAtTime(chord[2] * 4, t, 0.5)
     this._shimmerOscs[1].frequency.setTargetAtTime(chord[3] * 4, t, 0.5)
-    if (this._muted) return
+    if (this._muted || (this._activeTrack !== 'ambient' && !this._customUrl)) return
     for (let i = 0; i < 3; i++) {
-      this._softTone(chord[(i + 1) % 4] * 2, t + i * 0.9, 0.026, 1.8, 'sine', 0.05)
+      this._softTone(chord[(i + 1) % 4] * 2, t + i * 0.9, 0.024, 1.8, 'sine', 0.05)
     }
   }
 

@@ -22,7 +22,16 @@ import {
   NIGHT_SECONDS,
   WINDOW_COUNT
 } from '../src/game-logic.js'
-import { DEFAULT_COMMISSIONS, WINDOW_STATES, WINDOW_IDS } from '../shared/constants.js'
+import {
+  DEFAULT_COMMISSIONS,
+  WINDOW_STATES,
+  WINDOW_IDS,
+  BGM_TRACKS,
+  adaptCommissionsForDorm,
+  adaptResonancePairForDorm,
+  buildWindowIds,
+  dormDef
+} from '../shared/constants.js'
 
 describe('gainForCombo (v3 ladder)', () => {
   it('gives +3 for the first two taps', () => {
@@ -476,5 +485,34 @@ describe('game constants', () => {
     expect(STORY_SCHEDULE[0]).toHaveLength(2)
     expect(STORY_SCHEDULE[1]).toHaveLength(3)
     expect(STORY_SCHEDULE[2]).toHaveLength(3)
+  })
+})
+
+describe('dorm adaptation & BGM tracks', () => {
+  it('adapts nightly commissions and row_lit target for 12-window staff dorm', () => {
+    const staffComs = adaptCommissionsForDorm(DEFAULT_COMMISSIONS[1], 'staff')
+    const rowC = staffComs.find(c => c.type === 'row_lit')
+    expect(rowC.target).toBe(4)
+    const out = evaluateCommissions(staffComs, { litRooms: [301, 302, 303, 304], dormCols: 4 })
+    expect(out.items.find(i => i.type === 'row_lit').done).toBe(true)
+
+    const night3Staff = adaptCommissionsForDorm(DEFAULT_COMMISSIONS[2], 'staff')
+    expect(night3Staff.find(c => c.type === 'lit_count').target).toBe(12)
+  })
+
+  it('guarantees resonance pairs map onto existing rooms on all 4 dormitories', () => {
+    for (const dId of ['staff', 'highschool', 'university', 'grad']) {
+      const d = dormDef(dId)
+      const valid = new Set(buildWindowIds(d.rows, d.cols).map(w => w.roomId))
+      const pair = adaptResonancePairForDorm({ rooms: [205, 406], line: 'test' }, dId)
+      expect(valid.has(pair.rooms[0])).toBe(true)
+      expect(valid.has(pair.rooms[1])).toBe(true)
+      expect(pair.rooms[0]).not.toBe(pair.rooms[1])
+    }
+  })
+
+  it('exposes all five BGM presets including kataware, bluedragon, and mysoul', () => {
+    const ids = BGM_TRACKS.map(t => t.id)
+    expect(ids).toEqual(['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'])
   })
 })

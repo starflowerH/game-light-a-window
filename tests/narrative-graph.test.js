@@ -12,6 +12,8 @@ import {
   resonanceForNight,
   ENDING_SCRIPTS,
   endingScript,
+  STORY_CHAPTERS,
+  chapterMeta,
   buildOfflinePlan,
   buildOfflineEvolution,
   buildOfflineEpilogue,
@@ -336,8 +338,18 @@ describe('bond helpers', () => {
 describe('narration stays inside the content policy', () => {
   it('never uses clinical or preachy wording', () => {
     const banned = ['抑郁', '焦虑症', '心理疾病', '自杀', '自残', '诊断', '治疗', '你应该', '想开点', '正能量', '加油']
-    const blob = JSON.stringify({ RESIDENTS, FLOWING_STORIES, RESONANCE_PAIRS, ENDING_SCRIPTS })
+    const blob = JSON.stringify({ RESIDENTS, FLOWING_STORIES, RESONANCE_PAIRS, ENDING_SCRIPTS, STORY_CHAPTERS })
     for (const w of banned) expect(blob).not.toContain(w)
+  })
+
+  it('provides three novella chapter openers with cliffhangers', () => {
+    expect(STORY_CHAPTERS).toHaveLength(3)
+    for (let i = 0; i < 3; i++) {
+      const ch = chapterMeta(i)
+      expect(ch.night).toBe(i + 1)
+      expect(ch.beats.length).toBeGreaterThanOrEqual(2)
+      expect(ch.cliffhanger.length).toBeGreaterThan(20)
+    }
   })
 
   it('does not mention the five-state enum inside prose by accident', () => {

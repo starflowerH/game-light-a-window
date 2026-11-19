@@ -151,7 +151,7 @@ export function createAgentHub({
           }
         : null
 
-      const cacheKey = 'plan|' + fnv1a([mood, playCount % 4, unlocked.join(','), memory ? memory.roomId : 0].join('|'))
+      const cacheKey = 'plan_v5|' + fnv1a([mood, playCount % 4, unlocked.join(','), memory ? memory.roomId : 0].join('|'))
 
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
@@ -219,7 +219,7 @@ export function createAgentHub({
           : []
       }
       const firstNight = Math.max(2, Math.min(3, Number(input.firstNight) || 2))
-      const cacheKey = 'evolve|' + fnv1a([mood, firstNight, telemetryBucket(telemetry)].join('|'))
+      const cacheKey = 'evolve_v5|' + fnv1a([mood, firstNight, telemetryBucket(telemetry)].join('|'))
 
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
@@ -329,7 +329,7 @@ export function createAgentHub({
       const season = sanitizeText(input.season, 16) || 'autumn'
       const weather = sanitizeText(input.weather, 16) || 'clear'
       const dorm = dormDef(dormType)
-      const cacheKey = 'dialogue|' + fnv1a([dormType, season, weather].join('|'))
+      const cacheKey = 'dialogue_v5|' + fnv1a([dormType, season, weather].join('|'))
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
         const normalised = normalizeDialoguePayload(cached)

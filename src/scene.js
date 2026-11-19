@@ -283,10 +283,10 @@ function rooftopSvg() {
 // ---------------------------------------------------------------- volumetric mist + camera presets
 
 const VIEW_PRESETS = {
-  front:   { pos: [0, 48, 860],     look: [0, -26, 0],  fov: 40 },
-  stardew: { pos: [330, 270, 740],  look: [0, -32, 0],  fov: 41 },
-  street:  { pos: [-175, -135, 455], look: [15, 22, -20], fov: 44 },
-  rooftop: { pos: [215, 410, 560],  look: [0, 42, -10], fov: 42 }
+  front:   { pos: [0, 32, 920],      look: [0, -34, 0],  fov: 40 },
+  stardew: { pos: [340, 270, 790],   look: [0, -34, 0],  fov: 41 },
+  street:  { pos: [-175, -125, 485], look: [15, 18, -20], fov: 44 },
+  rooftop: { pos: [215, 420, 600],   look: [0, 36, -10], fov: 42 }
 }
 
 /**
@@ -498,6 +498,12 @@ export class Scene {
 
       // Clone once per mesh material so leaf/texture mutations stay clean
       const mat = rawMat.clone()
+      if (name.startsWith('Season_Snow_') && mat.isMeshStandardMaterial) {
+        // Keep snow softly matte so UnrealBloom never washes rooftops into white glare
+        if (mat.color) mat.color.setHex(0xcbd8ec)
+        mat.roughness = 0.94
+        mat.metalness = 0.0
+      }
       if (mesh.geometry && mesh.geometry.attributes.color) {
         mat.vertexColors = true
       }
@@ -1275,8 +1281,12 @@ export class Scene {
   _adjustedViewPos(pos) {
     const aspect = this.camera.aspect || 1
     const v = new THREE.Vector3(...pos)
-    if (aspect < 0.72) v.multiplyScalar(1.16)
-    else if (aspect < 1.0) v.multiplyScalar(1.06)
+    // Scale distance proportionally on narrow portrait viewports so all 6 columns remain visible
+    if (aspect < 1.0) {
+      const portraitZoom = Math.min(2.15, Math.max(1.10, 0.90 / Math.max(0.40, aspect)))
+      v.multiplyScalar(portraitZoom)
+    }
+    if (this.dormId === 'grad') v.multiplyScalar(1.07)
     return v
   }
 
@@ -1754,10 +1764,14 @@ export class Scene {
       this.painterly.material.uniforms.resolution.value.set(w, h)
       this.painterly.material.uniforms.paperScale.value = Math.min(2, Math.max(0.7, w / 1400))
     }
+    const prevAspect = this.camera.aspect || 1
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
     const portrait = this.camera.aspect < 1
     this.moonGroup.position.set(portrait ? 230 : 430, portrait ? 420 : 340, -900)
+    if (Math.abs(prevAspect - this.camera.aspect) > 0.12 && !this._cutscene) {
+      this.setCameraView(this.cameraView, true)
+    }
   }
 
   tick() {

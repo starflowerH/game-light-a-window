@@ -211,6 +211,7 @@ export function actionableCount(windows) {
  *   storyChoices?: number,
  *   bondRooms?: number,
  *   litRooms?: number[],
+ *   dormCols?: number,
  *   stamped?: string[]
  * }} NightState
  */
@@ -239,7 +240,7 @@ export function commissionProgress(c, s) {
       return (state.litRooms || []).length
     case 'row_lit': {
       const floor = Number(c.floor) || 3
-      const want = roomsOnFloor(floor)
+      const want = roomsOnFloor(floor, Number(state.dormCols) || undefined)
       const lit = new Set(state.litRooms || [])
       return want.filter(r => lit.has(r)).length
     }

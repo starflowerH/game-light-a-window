@@ -7,6 +7,7 @@
 import { paintIcons } from './icons.js'
 import { fetchLeaderboardWithRank } from './records.js'
 import {
+  BGM_TRACKS,
   CAMERA_VIEWS,
   DORM_TYPES,
   ENDINGS,
@@ -15,6 +16,7 @@ import {
   SEASONS,
   WEATHER_CATALOG,
   WINDOW_STATES,
+  bgmTrackDef,
   buildWindowIds,
   dormDef,
   gameModeDef,
@@ -87,25 +89,27 @@ export class UI {
 
   /**
    * @param {{ records: any, whispers: any[], stats: any, keyStatus: any, nickname: string,
+   *   bgmState?: any, onBgmSelect?: Function, onBgmUpload?: Function, onMute?: Function,
    *   onEnterCampus?: Function, onStart: Function, onCollection: Function, onLeaderboard: Function,
    *   onWhisperWall: Function, onKeyConfig: Function, onNpcGallery?: Function, onNicknameChange?: (name: string) => void }} opts
    */
-  showTitle({ records, whispers, stats, keyStatus, nickname, onEnterCampus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig, onNpcGallery, onNicknameChange }) {
+  showTitle({ records, whispers, stats, keyStatus, nickname, bgmState, onBgmSelect, onBgmUpload, onMute, onEnterCampus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig, onNpcGallery, onNicknameChange }) {
     this.hideAll()
     this._onStart = onStart
     const unlocked = (records && records.unlockedEndings) ? records.unlockedEndings.length : 0
     const total = stats && stats.totalLit ? stats.totalLit.toLocaleString('zh-CN') : '0'
     const firstWhisper = whispers && whispers.length ? whispers[0] : null
     const aiDirect = Boolean(keyStatus && keyStatus.enabled)
+    const curMode = bgmState ? bgmState.mode : 'auto'
 
     const s = this._layer()
     s.classList.add('title-screen')
     s.innerHTML = '<div class="title-veil"></div>' +
       '<div class="title-wrap">' +
-        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V4.0</div>' +
+        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V4.1</div>' +
         '<h1 class="title-h1">今晚，<span class="accent">亮一盏灯</span></h1>' +
-        '<p class="lede">星露谷写意 3D 校园物语：四栋实时建模宿舍楼、四季晴雨雾雪、<br/>记忆熄灯闯关、查寝夜猫子、宿管故事与全校排行榜。</p>' +
-        '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">' +
+        '<p class="lede">星露谷写意 3D 校园物语：四栋实时建模宿舍楼、四季晴雨雾雪、<br/>悬疑三夜小说剧情、记忆熄灯闯关、查寝反应与全校排行榜。</p>' +
+        '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
           '<div class="nick-inline">' +
             '<span>夜巡代号</span>' +
             '<input data-nick maxlength="8" value="' + esc(nickname || '三楼夜猫') + '" aria-label="玩家昵称" />' +
@@ -113,17 +117,23 @@ export class UI {
           '</div>' +
           '<span class="ai-radio-pill ' + (aiDirect ? '' : 'offline') + '">' +
             '<i class="ai-radio-dot"></i>' +
-            (aiDirect ? 'DeepSeek AI 直连 · ' + esc(keyStatus.masked) : 'AI 导演电台就绪（云端/离线自适应）') +
+            (aiDirect ? 'DeepSeek AI 直连 · ' + esc(keyStatus.masked) : 'AI 导演电台就绪') +
           '</span>' +
         '</div>' +
+        '<div class="bgm-strip" data-bgmstrip>' +
+          '<span class="bgm-lab">🎵 背景配乐</span>' +
+          BGM_TRACKS.map(t => '<button type="button" class="chip-sm ' + (t.id === curMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '" title="' + esc(t.desc) + '">' + esc(t.shortName) + '</button>').join('') +
+          '<label class="chip-sm bgm-upload" title="导入电脑/手机里的本地MP3">📁 本地歌曲<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
+          '<button type="button" class="chip-sm" data-act="mute">' + (bgmState && bgmState.muted ? '🔇' : '🔊') + '</button>' +
+        '</div>' +
         '<div class="pills">' +
-          '<span class="pill">记忆顺序 · 快照亮灯</span>' +
-          '<span class="pill">查寝反应 · 熄灯解谜</span>' +
+          '<span class="pill">黄昏之时 · 医龙 · My Soul 风格配乐</span>' +
+          '<span class="pill">悬疑剧情 · 记忆顺序 · 查寝反应 · 解谜</span>' +
           '<span class="pill">4栋宿舍 × 四季五天气</span>' +
         '</div>' +
         '<div class="title-actions">' +
           '<button class="btn primary" data-act="enter">进入校园夜巡 ▸</button>' +
-          '<button class="btn ghost" data-act="start">快速直进三晚故事</button>' +
+          '<button class="btn ghost" data-act="start">直接读三夜剧情</button>' +
           '<button class="btn ghost" data-act="board">全校排行榜</button>' +
           '<button class="btn ghost" data-act="npcs">NPC 换装图鉴</button>' +
           '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
@@ -135,6 +145,28 @@ export class UI {
         '</div>' +
       '</div>'
     paintIcons(s)
+
+    for (const b of qsa(s, '[data-bgm]')) {
+      b.onclick = () => {
+        const id = b.getAttribute('data-bgm') || 'auto'
+        for (const x of qsa(s, '[data-bgm]')) x.classList.toggle('on', x === b)
+        if (onBgmSelect) onBgmSelect(id)
+      }
+    }
+    const fileInp = qs(s, 'input[data-bgmfile]')
+    if (fileInp && onBgmUpload) {
+      fileInp.onchange = () => {
+        const f = fileInp.files && fileInp.files[0]
+        if (f) onBgmUpload(f)
+      }
+    }
+    const muteBtn = qs(s, '[data-act="mute"]')
+    if (muteBtn && onMute) {
+      muteBtn.onclick = () => {
+        const m = onMute()
+        muteBtn.textContent = m ? '🔇' : '🔊'
+      }
+    }
 
     const nickInput = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
     nickInput.onchange = () => { if (onNicknameChange) onNicknameChange(nickInput.value) }
@@ -151,6 +183,14 @@ export class UI {
     qs(s, '[data-act="whispers"]').onclick = () => onWhisperWall()
     qs(s, '[data-act="key"]').onclick = () => onKeyConfig()
     if (onNpcGallery) qs(s, '[data-act="npcs"]').onclick = () => onNpcGallery()
+  }
+
+  updateBgmBadge(bgmState) {
+    const tMeta = bgmTrackDef(bgmState?.mode || 'auto')
+    const txt = bgmState?.customTitle ? ('🎵 ' + bgmState.customTitle) : ('🎵 ' + tMeta.shortName)
+    for (const el of document.querySelectorAll('[data-bgmbadge]')) {
+      el.textContent = txt
+    }
   }
 
   // ------------------------------------------------------------- RPG dialogue cutscene
@@ -276,6 +316,7 @@ export class UI {
    * @param {{
    *   nickname: string, dormId: string, season: string, weather: string, viewId: string,
    *   gameMode: string, aiSource: string, keyEnabled: boolean,
+   *   bgmState?: any, onBgmSelect?: (id: string) => void, onBgmUpload?: (f: File) => void, onMute?: () => boolean,
    *   onDorm: (id: string) => void,
    *   onSeason: (id: string) => void,
    *   onWeather: (id: string) => void,
@@ -297,6 +338,8 @@ export class UI {
     const season = seasonDef(opts.season)
     const weatherMeta = WEATHER_CATALOG.find(w => w.id === opts.weather) || WEATHER_CATALOG[0]
     const aiActive = opts.keyEnabled || opts.aiSource === 'ai' || opts.aiSource === 'direct' || opts.aiSource === 'cache'
+    const bgmMode = opts.bgmState ? opts.bgmState.mode : 'auto'
+    const bgmMeta = bgmTrackDef(bgmMode)
 
     const hub = document.createElement('div')
     hub.id = 'hub'
@@ -313,16 +356,19 @@ export class UI {
             '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
           '</div>' +
           '<span class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI' : '本地剧本')) + '</span>' +
+          '<button class="chip-btn" data-act="panel-toggle">🎛 换楼/环境</button>' +
+          '<button class="chip-btn" data-act="bgm-cycle" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' +
+          '<button class="chip-btn" data-act="mute">' + (opts.bgmState && opts.bgmState.muted ? '🔇' : '🔊') + '</button>' +
           '<button class="chip-btn" data-act="board">🏆 排行榜</button>' +
-          '<button class="chip-btn" data-act="npcs">👘 NPC换装</button>' +
-          '<button class="chip-btn" data-act="dialogue">💬 宿管对话</button>' +
-          '<button class="chip-btn" data-act="collection">⭐ 结局图鉴</button>' +
+          '<button class="chip-btn" data-act="npcs">👘 换装</button>' +
+          '<button class="chip-btn" data-act="dialogue">💬 剧情开场</button>' +
+          '<button class="chip-btn" data-act="collection">⭐ 图鉴</button>' +
           '<button class="chip-btn" data-act="key">🔑 AI</button>' +
           '<button class="chip-btn" data-act="title">标题</button>' +
         '</div>' +
       '</div>' +
 
-      '<div class="hub-mid">' +
+      '<div class="hub-mid" data-hubmid>' +
         '<div class="hub-panel">' +
           '<div>' +
             '<div class="hub-group-label">切换附近宿舍楼（3D 航拍漫游）</div>' +
@@ -348,10 +394,30 @@ export class UI {
               CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') +
             '</div>' +
           '</div>' +
+          '<div>' +
+            '<div class="hub-group-label">配乐风格（黄昏之时/医龙/My Soul）</div>' +
+            '<div class="chip-row">' +
+              BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') +
+              '<label class="chip-sm bgm-upload">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
 
       '<div class="hub-bottom">' +
+        '<div class="hub-mobile-dormbar" data-mobiledock>' +
+          '<div class="mob-dorm-row">' +
+            '<span class="mob-lab">🏢 换楼</span>' +
+            DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === opts.dormId ? 'on' : '') + '" data-dorm="' + esc(d.id) + '">' + esc(d.shortName) + '·' + d.windowCount + '窗</button>').join('') +
+            '<button class="chip-sm on" data-act="mob-env-toggle">🌦 天气/视角/🎵 ▾</button>' +
+          '</div>' +
+          '<div class="mob-env-drawer" data-mobenv>' +
+            '<div class="chip-row">' + SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') + '</div>' +
+            '<div class="chip-row">' + WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') + '</div>' +
+            '<div class="chip-row">' + CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') + '</div>' +
+            '<div class="chip-row">' + BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') + '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
+          '</div>' +
+        '</div>' +
         '<div class="hub-orbit-hint">拖动画布可 3D 环绕查看宿舍楼 · 当前：' + esc(weatherMeta.hint) + '</div>' +
         '<div class="hub-modes">' +
           GAME_MODES.map(m =>
@@ -366,12 +432,55 @@ export class UI {
 
     this.el.appendChild(hub)
 
+    const hubMid = qs(hub, '[data-hubmid]')
+    const panelBtn = qs(hub, '[data-act="panel-toggle"]')
+    if (panelBtn && hubMid) {
+      panelBtn.onclick = () => {
+        const hidden = hubMid.classList.toggle('collapsed')
+        panelBtn.textContent = hidden ? '🎛 展开换楼/环境' : '🎛 隐藏面板'
+      }
+    }
+
+    const mobEnvBtn = qs(hub, '[data-act="mob-env-toggle"]')
+    const mobEnvDrawer = qs(hub, '[data-mobenv]')
+    if (mobEnvBtn && mobEnvDrawer) {
+      mobEnvBtn.onclick = () => {
+        const open = mobEnvDrawer.classList.toggle('open')
+        mobEnvBtn.textContent = open ? '🌦 收起 ▴' : '🌦 天气/视角/🎵 ▾'
+      }
+    }
+
     const nickInput = /** @type {HTMLInputElement} */ (qs(hub, 'input[data-nick]'))
     nickInput.onchange = () => opts.onNicknameChange(nickInput.value)
     qs(hub, '[data-act="randnick"]').onclick = () => {
       const next = generateCampusNickname()
       nickInput.value = next
       opts.onNicknameChange(next)
+    }
+
+    const cycleBgmBtn = qs(hub, '[data-act="bgm-cycle"]')
+    if (cycleBgmBtn && opts.onBgmSelect) {
+      cycleBgmBtn.onclick = () => {
+        const order = BGM_TRACKS.map(t => t.id)
+        const next = order[(order.indexOf(bgmMode) + 1) % order.length]
+        opts.onBgmSelect(next)
+      }
+    }
+    const muteBtn = qs(hub, '[data-act="mute"]')
+    if (muteBtn && opts.onMute) {
+      muteBtn.onclick = () => {
+        const m = opts.onMute()
+        muteBtn.textContent = m ? '🔇' : '🔊'
+      }
+    }
+    for (const b of qsa(hub, '[data-bgm]')) {
+      b.onclick = () => opts.onBgmSelect && opts.onBgmSelect(b.getAttribute('data-bgm') || 'auto')
+    }
+    for (const inp of qsa(hub, 'input[data-bgmfile]')) {
+      inp.onchange = () => {
+        const f = inp.files && inp.files[0]
+        if (f && opts.onBgmUpload) opts.onBgmUpload(f)
+      }
     }
 
     qs(hub, '[data-act="board"]').onclick = () => opts.onLeaderboard()
@@ -409,12 +518,14 @@ export class UI {
   /**
    * @param {{
    *   modeMeta: any, dormMeta: any, aiPattern: string,
+   *   bgmState?: any, onCycleBgm?: Function,
    *   showHintBtn?: boolean, onHint?: Function, onMute: Function, onExit: Function, muted: boolean,
    *   onViewCycle?: Function
    * }} opts
    */
   startMinigameHud(opts) {
     this.hideAll()
+    const bgmMeta = bgmTrackDef(opts.bgmState?.mode || 'auto')
     const bar = document.createElement('div')
     bar.id = 'hud-v4'
     bar.innerHTML =
@@ -433,6 +544,7 @@ export class UI {
       '</div>' +
       '<div class="hv4-actions">' +
         (opts.showHintBtn ? '<button class="chip-sm on" data-act="hint">💡 林阿姨提示</button>' : '') +
+        (opts.onCycleBgm ? '<button class="chip-sm" data-act="bgm" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
         (opts.onViewCycle ? '<button class="chip-sm" data-act="view">🎥 切换视角</button>' : '') +
         '<button class="chip-sm" data-act="mute">' + (opts.muted ? '🔇' : '🔊') + '</button>' +
         '<button class="chip-sm" data-act="exit">返回选楼</button>' +
@@ -459,6 +571,7 @@ export class UI {
     }
 
     if (opts.showHintBtn && opts.onHint) qs(bar, '[data-act="hint"]').onclick = () => opts.onHint()
+    if (opts.onCycleBgm) qs(bar, '[data-act="bgm"]').onclick = () => opts.onCycleBgm()
     if (opts.onViewCycle) qs(bar, '[data-act="view"]').onclick = () => opts.onViewCycle()
     const muteBtn = qs(bar, '[data-act="mute"]')
     muteBtn.onclick = () => {
@@ -659,20 +772,67 @@ export class UI {
     typeLine()
   }
 
-  // ------------------------------------------------------------------ v3 Story HUD
+  // ------------------------------------------------------------------ v3 Story HUD + VN Chapter Opener
 
-  startNight({ night, index, count, commissions, directorNote, muted, totalWindows = 24, onPause, onMute }) {
+  showChapterOpener({ chapter, dormMeta, commissions, bgmState, onCycleBgm, onStart, onBack }) {
     this.hideAll()
+    const bgmMeta = bgmTrackDef(bgmState?.mode || 'auto')
+    const s = this._layer()
+    const beatsHtml = (chapter.beats || []).map(b => {
+      const npc = NPC_CATALOG[b.speakerId] || NPC_CATALOG.aunt_lin
+      return '<div class="chap-beat">' +
+        '<span class="cb-spk">' + esc(npc.name) + ' · ' + esc(npc.role) + '</span>' +
+        '<p class="cb-line">' + esc(b.line) + '</p>' +
+      '</div>'
+    }).join('')
+
+    const goalsHtml = (commissions || []).map(c => '<li>' + esc(c.label) + '</li>').join('')
+
+    s.innerHTML = '<div class="panel glass chapter-panel">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        '<div class="kicker" style="margin-bottom:0;">' + esc(chapter.kicker + ' · ' + dormMeta.shortName) + '</div>' +
+        (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge>🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
+      '</div>' +
+      '<h2 class="h2" style="margin-top:8px;">' + esc(chapter.title) + '</h2>' +
+      '<p class="chap-cue">' + esc(chapter.sceneCue) + '</p>' +
+      '<div class="chap-beats">' + beatsHtml + '</div>' +
+      '<div class="chap-rules">' +
+        '<div class="cr-head">🎯 怎么玩 & 今夜过关标准</div>' +
+        '<p class="cr-std"><b>过关要求：</b>在 75s 内达成以下任意 <b>1</b> 项目标即算过关（全达成得火漆金章并可随时提前进下一夜）：</p>' +
+        '<ul class="cr-goals">' + goalsHtml + '</ul>' +
+        '<div class="cr-legend">' +
+          '<span>✨ <b>微光窗</b>：点击或按住连划点亮</span>' +
+          '<span>🏮 <b>红金信标</b>：点击触发悬疑抉择（计时暂停）</span>' +
+          '<span>🌟 <b>青金星轨</b>：从一扇拖向另一扇连桥</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="dialog-actions" style="margin-top:14px;">' +
+        '<button class="btn primary" type="button" data-act="go">进入第 ' + chapter.night + ' 夜巡查 ▸</button>' +
+        (onBack ? '<button class="btn ghost" type="button" data-act="back">返回换楼</button>' : '') +
+      '</div>' +
+    '</div>'
+    paintIcons(s)
+    if (onCycleBgm) qs(s, '[data-act="bgm"]').onclick = () => onCycleBgm()
+    qs(s, '[data-act="go"]').onclick = () => onStart()
+    if (onBack) qs(s, '[data-act="back"]').onclick = () => onBack()
+  }
+
+  startNight({ night, index, count, commissions, directorNote, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, onAdvanceNight, onPause, onMute }) {
+    this.hideAll()
+    const bgmMeta = bgmTrackDef(bgmState?.mode || 'auto')
     const hud = document.createElement('div')
     hud.id = 'hud'
     const ledger = (commissions || []).map(c => '<div class="ledger-item" data-cid="' + esc(c.id || c.type) + '">' +
       '<span class="ledger-dot"></span>' +
-      '<span class="ledger-label">' + esc(c.label) + '</span>' +
+      '<div class="ledger-row-main">' +
+        '<span class="ledger-label">' + esc(c.label) + '</span>' +
+        '<span class="ledger-count" data-count>0/' + Number(c.target || 1) + '</span>' +
+      '</div>' +
       '<span class="ledger-prog"><i></i></span>' +
     '</div>').join('')
 
     hud.innerHTML = '<div class="hud-top">' +
-        '<div class="brand"><b>今晚，亮一盏灯</b><span>第 ' + (index + 1) + ' 晚 / ' + count + '</span></div>' +
+        '<div class="brand"><b>' + esc(dormMeta ? dormMeta.shortName : '17号宿舍楼') + '</b><span>第 ' + (index + 1) + ' 晚 / ' + count + ' · ' + esc(weatherLabel(night && night.weather)) + ' · ' + esc(tempoLabel(night && night.tempo)) + '</span></div>' +
         '<div class="stats">' +
           '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
           '<div class="warmbar"><i data-warmbar></i></div>' +
@@ -681,27 +841,59 @@ export class UI {
           '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
+          (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge title="切换背景音乐">🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
+          '<button class="chip-sm" type="button" data-act="rules" title="查看玩法说明">? 规则</button>' +
           '<button class="iconbtn" data-act="mute" data-icon="' + (muted ? 'mute' : 'sound') + '" title="声音"></button>' +
           '<button class="iconbtn" data-act="pause" data-icon="pause" title="暂停"></button>' +
         '</div>' +
       '</div>' +
-      '<div class="ledger glass" id="ledger">' +
-        '<div class="ledger-head"><span class="kicker">今夜手账</span><span class="weather">' + esc(weatherLabel(night && night.weather)) + ' · ' + esc(tempoLabel(night && night.tempo)) + '</span></div>' +
-        ledger +
-        (directorNote ? '<div class="ledger-note">' + esc(directorNote) + '</div>' : '') +
-      '</div>' +
-      '<div class="hint">点一下发光的窗 · 按住划过去可以一笔连亮</div>'
+      '<div class="ledger-dock glass" id="ledger">' +
+        '<div class="ledger-head">' +
+          '<span class="kicker" data-pass-status>🎯 过关标准：完成 ≥1 项目标 (0/' + (commissions || []).length + ')</span>' +
+          '<div class="ledger-head-btns">' +
+            '<button class="chip-sm" type="button" data-act="next-night" style="display:none;">进下一夜 ▸</button>' +
+            '<button class="chip-sm" type="button" data-act="collapse">收起 ▾</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="ledger-body" data-lbody>' +
+          '<div class="ledger-grid">' + ledger + '</div>' +
+          '<div class="ledger-legend">✨ 微光窗：点或划亮  ·  🏮 信标：触剧情抉择  ·  🌟 星轨：两窗连拖' + (directorNote ? '  ｜  ' + esc(directorNote) : '') + '</div>' +
+        '</div>' +
+      '</div>'
 
     this.el.appendChild(hud)
     paintIcons(hud)
     requestAnimationFrame(() => hud.classList.add('on'))
     qs(hud, '[data-act="pause"]').onclick = onPause
+    if (onCycleBgm) qs(hud, '[data-act="bgm"]').onclick = () => onCycleBgm()
     qs(hud, '[data-act="mute"]').onclick = () => {
       const m = onMute()
       const btn = qs(hud, '[data-act="mute"]')
       btn.setAttribute('data-icon', m ? 'mute' : 'sound')
       paintIcons(btn.parentNode || hud)
     }
+
+    const bodyEl = qs(hud, '[data-lbody]')
+    const colBtn = qs(hud, '[data-act="collapse"]')
+    if (bodyEl && colBtn) {
+      colBtn.onclick = () => {
+        const collapsed = bodyEl.classList.toggle('collapsed')
+        colBtn.textContent = collapsed ? '展开目标 ▴' : '收起 ▾'
+      }
+    }
+
+    const nextNightBtn = qs(hud, '[data-act="next-night"]')
+    if (nextNightBtn && onAdvanceNight) {
+      nextNightBtn.onclick = () => onAdvanceNight()
+    }
+
+    const rulesBtn = qs(hud, '[data-act="rules"]')
+    if (rulesBtn) {
+      rulesBtn.onclick = () => {
+        this.toast('过关标准：点/划亮微光窗，75s 内完成 ≥1 项底部目标即可！', '点红色信标窗停表读剧情 · 拖过青金星轨连双窗')
+      }
+    }
+
     this.hudEl = hud
     this._warmEl = qs(hud, 'b[data-warm]')
     this._barEl = qs(hud, 'i[data-warmbar]')
@@ -709,6 +901,8 @@ export class UI {
     this._timeEl = qs(hud, 'b[data-time]')
     this._litEl = qs(hud, 'b[data-lit]')
     this._ledger = qs(hud, '#ledger')
+    this._passStatus = qs(hud, '[data-pass-status]')
+    this._nextNightBtn = nextNightBtn
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
@@ -741,14 +935,39 @@ export class UI {
     }
   }
 
-  updateCommissions(items) {
+  updateCommissions(items, status) {
     if (!this._ledger) return
-    for (const item of items || []) {
+    const list = items || []
+    let doneCount = 0
+    for (const item of list) {
+      if (item.done) doneCount += 1
       const row = this._ledger.querySelector('[data-cid="' + String(item.id).replace(/"/g, '') + '"]')
       if (!row) continue
       const bar = row.querySelector('.ledger-prog i')
       if (bar) bar.style.setProperty('--p', String(Math.min(1, item.progress / item.target)))
+      const countEl = row.querySelector('[data-count]')
+      if (countEl) countEl.textContent = item.done ? '✓ ' + item.target + '/' + item.target : item.progress + '/' + item.target
       row.classList.toggle('done', item.done)
+    }
+    if (this._passStatus) {
+      if (doneCount > 0) {
+        this._passStatus.textContent = status?.allDone
+          ? `🏆 全 3 项手账已满贯！可随时进下一夜`
+          : `✓ 已过关 (${doneCount}/${list.length}) · 可继续冲满章`
+        this._passStatus.classList.add('passed')
+      } else {
+        this._passStatus.textContent = `🎯 过关标准：完成 ≥1 项目标 (0/${list.length})`
+        this._passStatus.classList.remove('passed')
+      }
+    }
+    if (this._nextNightBtn) {
+      if (doneCount > 0) {
+        this._nextNightBtn.style.display = 'inline-block'
+        this._nextNightBtn.classList.add('on')
+        this._nextNightBtn.textContent = status?.isLastNight ? '提前揭晓终局 ▸' : '提前进下一夜 ▸'
+      } else {
+        this._nextNightBtn.style.display = 'none'
+      }
     }
   }
 
@@ -858,7 +1077,7 @@ export class UI {
 
     card.innerHTML = '<div class="choice-card glass">' +
       '<div class="choice-head"><span class="kicker">' + esc(resident ? resident.resident : '窗后的小事') + '</span>' +
-        '<span class="freeze">连击已冻结 5s</span></div>' +
+        '<span class="freeze">⏱ 倒计时已暂停 · 安心抉择</span></div>' +
       '<p class="choice-text">' + esc(story.text) + '</p>' +
       whisperHtml +
       '<div class="choice-opts">' + options + '</div>' +
@@ -883,7 +1102,7 @@ export class UI {
         if (typeof n === 'number') qs(likeBtn, 'b').textContent = String(n)
       }
     }
-    this._choiceTimer = setTimeout(() => { this.hideChoice(); onTimeout() }, 6000)
+    this._choiceTimer = setTimeout(() => { this.hideChoice(); onTimeout() }, 20000)
     this._choiceEl = card
   }
 
@@ -909,10 +1128,10 @@ export class UI {
 
   nightSummary(sum, onNext) {
     this.hideAll()
-    const titles = ['灯，安静地亮着', '风把灯吹得更暖了', '整栋楼都有了回声']
+    const titles = ['23:17 副线暂稳，但天台红灯亮了', '停电三分钟背后的旧秘密浮出水面', '黎明前，整栋楼一起回响']
     const s = this._layer()
     s.innerHTML = '<div class="panel glass center">' +
-      '<div class="kicker">第 ' + sum.night + ' 晚 · 结束</div>' +
+      '<div class="kicker">第 ' + sum.night + ' 晚 · ' + (sum.minPassed ? '✓ 过关达成' : '手记收尾') + '</div>' +
       '<h2 class="h2">' + esc(titles[sum.night - 1] || '灯，亮了') + '</h2>' +
       '<div class="statgrid">' +
         '<div class="cell"><b>' + sum.warmth + '</b><span>温暖</span></div>' +
@@ -920,9 +1139,10 @@ export class UI {
         '<div class="cell"><b>' + sum.maxCombo + '</b><span>最高连击</span></div>' +
         '<div class="cell"><b>' + sum.stamps + '</b><span>火漆章</span></div>' +
       '</div>' +
-      '<p class="lede center">' + (sum.allLit ? '整栋楼都亮过了。' : '今晚亮到这里也很好。') + (sum.resonanceCount ? ' 你连起了 ' + sum.resonanceCount + ' 次星轨。' : '') + '</p>' +
+      '<p class="lede center">' + (sum.allLit ? '整栋楼都亮过了。' : '这一晚的光路已经被大楼记下。') + (sum.resonanceCount ? ' 你接通了 ' + sum.resonanceCount + ' 道跨窗星轨。' : '') + '</p>' +
       '<div class="commission-recap">' + (sum.commissions || []).map(c => '<span class="recap ' + (c.done ? 'on' : '') + '">' + esc(c.label) + '</span>').join('') + '</div>' +
-      '<button class="btn primary" data-act="next">' + (sum.night === sum.count ? '看看今晚的明信片' : '继续第 ' + (sum.night + 1) + ' 晚') + '</button>' +
+      (sum.cliffhanger ? '<div class="cliffhanger-box"><div class="cf-tag">📖 下夜悬念预告</div><p>' + esc(sum.cliffhanger) + '</p></div>' : '') +
+      '<button class="btn primary" data-act="next">' + (sum.night === sum.count ? '揭晓最终结局与信件 ▸' : '继续第 ' + (sum.night + 1) + ' 晚 · 追查真相 ▸') + '</button>' +
     '</div>'
     paintIcons(s)
     qs(s, '[data-act="next"]').onclick = onNext

@@ -195,29 +195,30 @@ export function buildOfflineDialogue(dormType, season, weather) {
   const outfit = outfitForEnv(weather, season)
 
   const envLine = {
-    rain_gear: `林阿姨刚把黄雨衣抖落水珠、撑开门口那把大黄伞，朝你招了招手。`,
-    winter_puffer: `寒风卷着雪粒，周副校长把厚棉服领子竖高了些，递过来一杯热腾腾的姜茶。`,
-    fog_coat: `夜雾顺着草坪漫了过来，林阿姨拧亮手电筒光柱，照出石板路边的小水洼。`,
-    autumn_knit: `晚风吹动格子围巾，${seas.name}的落叶刚好飘过值班室窗台。`,
-    sunny_light: `${seas.name}的夜风很清透，星空刚好落在${dorm.shortName}的屋檐上方。`
+    rain_gear: '林阿姨急匆匆收起滴水的黄雨伞，雨衣下摆还沾着积水，手里却紧攥着一串铜钥匙。',
+    winter_puffer: '风雪把走廊门吹得吱呀一响，周副校长竖起深蓝厚棉服领口，目光紧盯着二楼电表箱。',
+    fog_coat: '浓雾漫到台阶第三级，手电光柱只照得出三步远——王师傅蹲在箱门前突然喊了一声：快过来。',
+    autumn_knit: `${seas.name}的干风卷着银杏叶刮过值班室窗玻璃，林阿姨刚披上的格子围巾被吹起一角。`,
+    sunny_light: `${seas.name}的月色清冷得发蓝，${dorm.shortName}顶楼水箱的影子正好斜切过整面窗墙。`
   }[outfit]
 
   const dormFlavor = {
-    highschool: '今天轮到巡查高中晨光楼，晚自习十点半刚结束，总有同学想躲被窝再背两页书。',
-    university: '今晚重点关照 17 号大学宿舍楼——二十四扇窗里藏着画画的、熬夜打游戏的、还有蹲窗台的橘猫。',
-    grad: '研究生研思楼一共三十扇窗，刚从实验室回来的学长学姐们常常忘了几点该拉灯休息。',
-    staff: '教职工桂花院最安静，十二扇宽窗后是热牛奶、书桌和晚归的灯光，记得温柔点亮引路哦。'
-  }[dorm.id] || '今晚我们一起沿着宿舍楼巡查一圈，记住熬夜亮灯的房间，温柔提醒大家按时熄灯助眠。'
+    highschool: '高中晨光楼的熄灯铃响过十五分钟了，电表上的老指针却自己往回拨了一格——十一年前停电夜那间没登记的教室窗，刚刚又亮了一次。',
+    university: '17号大学宿舍楼明天就要切新总闸。可每晚 23:17，不知谁偷偷搭上的“零号副线”总把几扇窗同时点亮，周副校长今晚点名要来亲手查封它。',
+    grad: '研思楼三十扇窗静得反常，只有顶层温室玻璃后透出一道琥珀色微光。王师傅怀疑，十一年前那卷没来得及播出的旧磁带，就藏在这栋楼的回路里。',
+    staff: '桂花院明明只住着十二户，今晚总表上却多出第十三个用电回路。林阿姨翻着缺了一页的值班簿，脸色比窗外的夜色还沉。'
+  }[dorm.id] || '全楼电路将在三夜后彻底切改，而今夜 23:17 的未登记灯光已经先一步亮了起来。'
 
   return {
     lines: [
-      { speakerId: 'aunt_lin', line: `${envLine}「小夜巡员，今晚咱俩在${dorm.name}搭班值守！」` },
-      { speakerId: 'dean_zhou', line: `「${dormFlavor}」` },
-      { speakerId: 'aunt_lin', line: '「记住规则：等全楼熄灯信号扫过，按记忆点出还亮着灯的寝室，帮大家安稳睡个好觉！」' }
+      { speakerId: 'aunt_lin', line: `${envLine}她压低声音对你说：「小夜巡员，今晚${dorm.name}的值班不对劲——你先替我看住各层窗灯。」` },
+      { speakerId: 'uncle_wang', line: `「${dormFlavor}」王师傅晃了晃手里发烫的测电笔，「可别一上来就乱拉闸，先把那些半明半暗的房间摸清！」` },
+      { speakerId: 'dean_zhou', line: '周副校长停下脚步，夹在文件夹里的旧信封露出半截日期：“2015.11”。他清了清嗓子：「巡查归巡查……若碰到 406 或顶楼亮灯，先带话给我，别声张。」' },
+      { speakerId: 'aunt_lin', line: '「记住，不同模式有不同做法：【剧情夜巡】可触发三晚悬念支线；【依次/全景记忆】【查寝反应】【熄灯解谜】则可冲击全校榜单——挑好玩法与宿舍楼就出发吧！」' }
     ],
     choices: [
-      { label: '我记性好，先查依次亮灯', buffType: 'extra_shield', buffLabel: '护盾 +1 容错' },
-      { label: '直接开始巡楼！', buffType: 'score_boost', buffLabel: '首关得分 +25%' }
+      { label: '接过黄铜钥匙，加护盾出发', buffType: 'extra_shield', buffLabel: '容错护盾 +1（悬念调查态）' },
+      { label: '帮王师傅稳住电表，首关加分', buffType: 'score_boost', buffLabel: '首关得分 +25%（雷厉风行态）' }
     ]
   }
 }

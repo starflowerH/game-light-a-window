@@ -29,9 +29,10 @@ import {
   LIT_RETAP_GAIN, DARK_TAP_GAIN, DARK_TAP_WAKE_CHANCE,
   STORY_BEACON_SCHEDULE, RESONANCE_SCHEDULE,
   EVOLVE_AT_S, CORE_RESIDENT_ROOMS, CAMERA_VIEW_IDS,
+  BGM_TRACKS, adaptCommissionsForDorm, adaptResonancePairForDorm,
   dormDef, gameModeDef, endingMeta
 } from '../shared/constants.js'
-import { RESIDENT_BY_ROOM } from './narrative-graph.js'
+import { RESIDENT_BY_ROOM, chapterMeta } from './narrative-graph.js'
 import { pickRandomEvent } from './random-events.js'
 import {
   computeMemoryDifficulty,
@@ -92,6 +93,7 @@ export class Game {
     this._raf = 0
     this._pausedAt = 0
     this._choiceOpen = false
+    this._choicePausedAt = 0
     this._choiceTimer = 0
     this._comboFreezeUntil = 0
     this._lastTap = 0
@@ -171,12 +173,59 @@ export class Game {
       this.aiSource = 'offline'
     }
     this.showTitle()
-    if (this.audio) this.audio.setWeather(this.weather)
+    if (this.audio) {
+      this.audio.setWeather(this.weather)
+      const savedBgm = this.records.preferredBgm || 'auto'
+      this.audio.setBgmTrack(savedBgm)
+    }
+  }
+
+  getBgmState() {
+    if (!this.audio) return { mode: 'auto', activeTrack: 'kataware', customTitle: '', muted: false }
+    return this.audio.getBgmState()
+  }
+
+  setBgmTrack(trackId) {
+    if (!this.audio) return
+    this.audio.unlock()
+    if (trackId !== 'custom') {
+      this.audio.setBgmTrack(trackId)
+      this.records.preferredBgm = trackId
+      saveRecords(this.records)
+    }
+    const meta = BGM_TRACKS.find(t => t.id === trackId)
+    if (meta) this.ui.toast(`配乐已切为：${meta.name}`, meta.desc)
+    this._refreshBgmHud()
+  }
+
+  cycleBgmTrack() {
+    const order = ['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient']
+    const cur = this.getBgmState().mode
+    const next = order[(order.indexOf(cur) + 1) % order.length]
+    this.setBgmTrack(next)
+    return this.getBgmState()
+  }
+
+  loadCustomBgm(file) {
+    if (!this.audio || !file) return false
+    this.audio.unlock()
+    const ok = this.audio.loadCustomAudioFile(file)
+    if (ok) {
+      this.ui.toast(`正在播放本地音乐：${this.audio.getBgmState().customTitle}`, '已保留游戏音效')
+      this._refreshBgmHud()
+    }
+    return ok
+  }
+
+  _refreshBgmHud() {
+    if (this.ui && this.ui.updateBgmBadge) this.ui.updateBgmBadge(this.getBgmState())
+    if (this.state === 'hub') this.showHub()
   }
 
   showTitle() {
     this._clearMinigame()
     this.state = 'title'
+    if (this.audio) this.audio.setSceneContext('title')
     this.scene.setOrbitLocked(false)
     this.scene.setFlyover(true)
     this.scene.setPaused(false)
@@ -186,6 +235,10 @@ export class Game {
       stats: this.community.stats,
       keyStatus: getUserApiKeyStatus(),
       nickname: this.nickname,
+      bgmState: this.getBgmState(),
+      onBgmSelect: id => this.setBgmTrack(id),
+      onBgmUpload: f => this.loadCustomBgm(f),
+      onMute: () => this.toggleMute(),
       onNicknameChange: name => this._setNickname(name),
       onEnterCampus: () => this.enterCampus(),
       onStart: () => this.start(),
@@ -258,6 +311,7 @@ export class Game {
   showHub() {
     this._clearMinigame()
     this.state = 'hub'
+    if (this.audio) this.audio.setSceneContext('hub')
     this.scene.setFlyover(false)
     this.scene.setOrbitLocked(false)
     this.scene.setPaused(false)
@@ -273,6 +327,10 @@ export class Game {
       gameMode: this.gameMode,
       aiSource: this.aiSource,
       keyEnabled: getUserApiKeyStatus().enabled,
+      bgmState: this.getBgmState(),
+      onBgmSelect: id => this.setBgmTrack(id),
+      onBgmUpload: f => this.loadCustomBgm(f),
+      onMute: () => this.toggleMute(),
       onNicknameChange: name => this._setNickname(name),
       onDorm: id => this.changeDorm(id),
       onSeason: id => this.changeSeason(id),
@@ -409,10 +467,13 @@ export class Game {
       combo: 0
     }
 
+    if (this.audio) this.audio.setSceneContext(mode)
     this.ui.startMinigameHud({
       modeMeta,
       dormMeta: dorm,
       aiPattern: 'AI 构图中…',
+      bgmState: this.getBgmState(),
+      onCycleBgm: () => this.cycleBgmTrack(),
       muted: this.audio ? this.audio.muted : false,
       onMute: () => this.toggleMute(),
       onViewCycle: () => this._cycleCameraView(),
@@ -582,7 +643,10 @@ export class Game {
     }
 
     const acc = this._calcAcc(mg.correctCount, mg.correctCount + mg.totalMistakes)
+    const stageTarget = mg.round ? mg.round.targets.length : 1
+    const stageDone = res.progress || 0
     this.ui.updateMinigameHud({
+      phaseText: `✨ 复现进度 ${stageDone} / ${stageTarget} 窗`,
       score: mg.score,
       correctCount: mg.correctCount,
       accuracyPct: acc,
@@ -638,10 +702,13 @@ export class Game {
       lastEventAt: performance.now()
     }
 
+    if (this.audio) this.audio.setSceneContext('patrol_reflex')
     this.ui.startMinigameHud({
       modeMeta: gameModeDef('patrol_reflex'),
       dormMeta: dorm,
       aiPattern: '夜猫子查寝中',
+      bgmState: this.getBgmState(),
+      onCycleBgm: () => this.cycleBgmTrack(),
       muted: this.audio ? this.audio.muted : false,
       onMute: () => this.toggleMute(),
       onViewCycle: () => this._cycleCameraView(),
@@ -650,7 +717,7 @@ export class Game {
     this.ui.updateMinigameHud({
       phaseText: '🔦 灭蓝灯 · 留暖灯 · 助晚归',
       timeLeftSec: PATROL_DURATION_SEC,
-      bottomText: '点灭【蓝紫熬夜窗】 · 点亮【淡金晚归门灯】 · 别误点【浅绿合规学习灯】！'
+      bottomText: '过关目标：守住 45s！点灭【蓝紫熬夜窗】、点亮【淡金晚归门灯】，别误点【浅绿学习灯】'
     })
 
     const loop = () => {
@@ -761,10 +828,13 @@ export class Game {
       cols: dorm.cols
     }
 
+    if (this.audio) this.audio.setSceneContext('lights_out_puzzle')
     this.ui.startMinigameHud({
       modeMeta: gameModeDef('lights_out_puzzle'),
       dormMeta: dorm,
       aiPattern: 'GF(2) 熄灯棋盘',
+      bgmState: this.getBgmState(),
+      onCycleBgm: () => this.cycleBgmTrack(),
       showHintBtn: true,
       onHint: () => this._hintLightsOut(),
       muted: this.audio ? this.audio.muted : false,
@@ -964,7 +1034,6 @@ export class Game {
 
   async _beginWithMood(mood) {
     this.moodToken = mood
-    const token = mood
     this.ui.showLoading('导演正在排这三个夜晚')
     const planPromise = this.ai.requestInitialPlan({
       moodToken: mood,
@@ -988,10 +1057,10 @@ export class Game {
     } else {
       this.nights = cloneNights(FALLBACK_NIGHTS)
       this.aiSource = 'offline'
-      this.directorNote = '今夜从微雨开始，慢一点也没关系。'
+      this.directorNote = '23:17，封存十一年前的零号副线自己通电了。在总闸落锁之前，沿着亮起的窗找到答案。'
       planPromise.then(res => {
         if (!res || !res.payload) return
-        if (this.state !== 'night' && this.state !== 'paused') return
+        if (this.state !== 'night' && this.state !== 'paused' && this.state !== 'chapter') return
         for (let i = this.nightIndex + 1; i < NIGHT_COUNT; i++) {
           if (res.payload.nights[i]) this.nights[i] = res.payload.nights[i]
         }
@@ -999,20 +1068,38 @@ export class Game {
       }).catch(() => {})
     }
 
-    const total = this.scene.windows.length || 24
-    this.ui.intro([
-      '熄灯铃响过很久了。',
-      `这栋${dormDef(this.dormId).shortName}里，还有 ${total} 扇窗等着亮起来。`,
-      '点一下正在发光的窗，或者按住不放，一笔把整排划亮。',
-      '今晚，就由你来把灯一盏盏点起来。'
-    ], () => this._launchNight(0), { token })
+    this._showChapterAndLaunch(0)
+  }
+
+  _showChapterAndLaunch(index) {
+    const rawNight = this.nights[index] || this.nights[NIGHT_COUNT - 1]
+    const dorm = dormDef(this.dormId)
+    const commissions = adaptCommissionsForDorm(rawNight.commissions, this.dormId)
+    const chapter = chapterMeta(index)
+    this.state = 'chapter'
+    if (this.audio) this.audio.setSceneContext('story' + (index + 1))
+    this.ui.showChapterOpener({
+      chapter,
+      dormMeta: dorm,
+      commissions,
+      bgmState: this.getBgmState(),
+      onCycleBgm: () => this.cycleBgmTrack(),
+      onStart: () => this._launchNight(index),
+      onBack: () => this.showHub()
+    })
   }
 
   _launchNight(index) {
-    const data = this.nights[index] || this.nights[NIGHT_COUNT - 1]
+    const raw = this.nights[index] || this.nights[NIGHT_COUNT - 1]
+    const data = {
+      ...JSON.parse(JSON.stringify(raw)),
+      commissions: adaptCommissionsForDorm(raw.commissions, this.dormId),
+      resonancePair: adaptResonancePairForDorm(raw.resonancePair, this.dormId)
+    }
     this.nightIndex = index
     this.state = 'night'
     this._choiceOpen = false
+    this._choicePausedAt = 0
     this.ui.hideAll()
 
     this.scene.resetWindows()
@@ -1022,6 +1109,7 @@ export class Game {
     this.scene.applyTheme(palette)
     this.scene.setWeatherFx(data.weather)
     if (this.audio) {
+      this.audio.setSceneContext('story' + (index + 1))
       this.audio.setWeather(data.weather)
       this.audio.setTempo(data.tempo)
       this.audio.setLitCount(0)
@@ -1033,7 +1121,7 @@ export class Game {
     this.night = {
       index, data, cfg, startedAt: now, endsAt: now + NIGHT_SECONDS * 1000, timeLeft: NIGHT_SECONDS,
       warmth: 0, combo: 0, maxCombo: 0, litCount: 0, litRooms: [], resonanceCount: 0,
-      storyChoices: 0, bestChain: 0, bondRooms: [], stamped: [],
+      storyChoices: 0, bestChain: 0, bondRooms: [], stamped: [], minPassed: false, allDone: false,
       chain: { active: false, count: 0, ids: new Set(), startRoom: 0 },
       nextSpawnAt: now + 400,
       beaconAt: (STORY_BEACON_SCHEDULE[index] || []).slice(),
@@ -1049,10 +1137,15 @@ export class Game {
 
     this.ui.startNight({
       night: data, index, count: NIGHT_COUNT, commissions: data.commissions,
-      directorNote: this.directorNote, totalWindows: this.scene.windows.length || 24,
+      directorNote: this.directorNote, totalWindows: this.scene.windows.length || dormDef(this.dormId).windowCount,
+      dormMeta: dormDef(this.dormId),
+      bgmState: this.getBgmState(),
+      onCycleBgm: () => this.cycleBgmTrack(),
+      onAdvanceNight: () => this.advanceNightEarly(),
       onPause: () => this.togglePause(), onMute: () => this.toggleMute(),
       muted: this.audio ? this.audio.muted : false
     })
+    this._checkCommissions()
     this._showCoachIfNeeded()
     this._startTicker()
   }
@@ -1118,11 +1211,12 @@ export class Game {
   }
 
   _openBeacon() {
-    const pool = this.scene.windows.filter(w => CORE_RESIDENT_ROOMS.includes(w.roomId) && w.state === WINDOW_STATES.DARK)
+    const dormCore = dormDef(this.dormId).coreRooms || CORE_RESIDENT_ROOMS
+    const pool = this.scene.windows.filter(w => (dormCore.includes(w.roomId) || CORE_RESIDENT_ROOMS.includes(w.roomId)) && w.state === WINDOW_STATES.DARK)
     const target = pool[0] || this.scene.windows.find(w => w.state === WINDOW_STATES.DARK)
     if (!target) return
     this.scene.setWindowState(target, WINDOW_STATES.STORY_BEACON)
-    target.expiresAt = performance.now() + 12000
+    target.expiresAt = performance.now() + 14000
     this.night.beaconRoom = target.roomId
   }
 
@@ -1366,18 +1460,20 @@ export class Game {
   _openChoice(roomId) {
     const n = this.night
     if (!n || this._choiceOpen) return
-    const story = (n.data.stories || []).find(s => s.roomId === roomId) || (n.data.stories || [])[0]
+    const list = n.data.stories || []
+    const story = list.find(s => s.roomId === roomId) || list[(n.storyChoices || 0) % Math.max(1, list.length)]
     if (!story) return
-    const resident = RESIDENT_BY_ROOM[roomId]
+    const resident = RESIDENT_BY_ROOM[story.roomId] || RESIDENT_BY_ROOM[roomId]
     this._choiceOpen = true
-    this._comboFreezeUntil = performance.now() + COMBO_FREEZE_MS
+    this._choicePausedAt = performance.now()
+    this._comboFreezeUntil = this._choicePausedAt + COMBO_FREEZE_MS
     this.ui.combo(n.combo)
     this.ui.showChoice({
       story, resident,
-      whisper: this.community.whispers.find(w => w.roomId === roomId) || null,
+      whisper: this.community.whispers.find(w => w.roomId === story.roomId || w.roomId === roomId) || null,
       onLike: id => this.likeWhisper(id),
-      onChoose: choice => this._resolveChoice(roomId, story, choice),
-      onTimeout: () => this._resolveChoice(roomId, story, story.choices[0], true)
+      onChoose: choice => this._resolveChoice(story.roomId || roomId, story, choice),
+      onTimeout: () => this._resolveChoice(story.roomId || roomId, story, story.choices[0], true)
     })
   }
 
@@ -1385,6 +1481,13 @@ export class Game {
     if (!this._choiceOpen) return
     const n = this.night
     this._choiceOpen = false
+    if (this._choicePausedAt) {
+      const pauseDelta = Math.max(0, performance.now() - this._choicePausedAt)
+      this._choicePausedAt = 0
+      n.endsAt += pauseDelta
+      n.startedAt += pauseDelta
+      for (const w of this.scene.windows) if (w.expiresAt) w.expiresAt += pauseDelta
+    }
     this.ui.hideChoice()
     const resident = RESIDENT_BY_ROOM[roomId]
     n.storyChoices += 1; n.warmth += 6; n.bondRooms = uniq([...n.bondRooms, roomId])
@@ -1405,10 +1508,12 @@ export class Game {
   _checkCommissions() {
     const n = this.night
     if (!n) return
+    const wasPassed = n.minPassed
     const out = evaluateCommissions(n.data.commissions || [], {
       litCount: n.litCount, maxCombo: n.maxCombo, bestChain: n.bestChain,
       resonanceCount: n.resonanceCount, storyChoices: n.storyChoices,
-      bondRooms: n.bondRooms.length, litRooms: n.litRooms, stamped: n.stamped
+      bondRooms: n.bondRooms.length, litRooms: n.litRooms, stamped: n.stamped,
+      dormCols: dormDef(this.dormId).cols
     })
     for (const id of out.newlyStamped) {
       n.stamped.push(id); n.warmth += COMMISSION_BONUS; this.run.stampsEarned += 1
@@ -1416,7 +1521,23 @@ export class Game {
       this.ui.stampCommission(id, item ? item.label : '')
       if (this.audio) this.audio.stamp()
     }
-    this.ui.updateCommissions(out.items)
+    const doneCount = out.items.filter(i => i.done).length
+    n.minPassed = doneCount >= 1
+    n.allDone = out.allDone
+    if (!wasPassed && n.minPassed) {
+      this.ui.toast('🎉 本夜过关标准已达成！', '可继续冲满章或随时点左下角进下一夜')
+    }
+    this.ui.updateCommissions(out.items, { minPassed: n.minPassed, allDone: n.allDone, isLastNight: n.index + 1 >= NIGHT_COUNT })
+  }
+
+  advanceNightEarly() {
+    const n = this.night
+    if (!n || n.ended || !n.minPassed) {
+      this.ui.toast('还差一点！至少完成手账任意 1 项即可过关', '')
+      return
+    }
+    n.warmth += n.allDone ? 18 : 6
+    this._endNight()
   }
 
   _maybeSurprise(w, now) {
@@ -1483,6 +1604,10 @@ export class Game {
       if (this.state !== 'night' || !this.night) return
       const now = performance.now()
       const n = this.night
+      if (this._choiceOpen) {
+        this._raf = requestAnimationFrame(loop)
+        return
+      }
       const left = Math.max(0, n.endsAt - now)
       n.timeLeft = left / 1000
       this.ui.tick(this)
@@ -1543,13 +1668,15 @@ export class Game {
       choices: this.run.choices.filter(c => c.night === n.index + 1).map(c => ({ roomId: c.roomId, label: c.label }))
     })
 
+    const ch = chapterMeta(n.index)
     const summary = {
       night: n.index + 1, count: NIGHT_COUNT, warmth: n.warmth, lit: n.litCount,
       maxCombo: n.maxCombo, stamps: n.stamped.length, commissions: n.data.commissions,
-      resonanceCount: n.resonanceCount, allLit: n.allLit
+      resonanceCount: n.resonanceCount, allLit: n.allLit, minPassed: n.minPassed,
+      cliffhanger: ch.cliffhanger
     }
     setTimeout(() => {
-      if (n.index + 1 < NIGHT_COUNT) this.ui.nightSummary(summary, () => this._launchNight(n.index + 1))
+      if (n.index + 1 < NIGHT_COUNT) this.ui.nightSummary(summary, () => this._showChapterAndLaunch(n.index + 1))
       else this._finish()
     }, 700)
   }
