@@ -302,8 +302,9 @@ function buildRepository(db, dataDir) {
   if (num(stmt.runsEmpty.get()?.n) === 0) {
     const insertLegacyRows = rows => {
       for (const r of rows) {
+        const nick = String(r.nickname || '今晚的某某')
         stmt.insertRun.run(
-          'legacy', String(r.nickname || '今晚的某某'), 'ENDING_F_DRIFT', '夜色漫步者',
+          `legacy:${nick}`, nick, 'ENDING_F_DRIFT', '夜色漫步者',
           num(r.lit_windows), num(r.max_combo), num(r.total_warmth), 0, 0, '[]', '{}',
           String(r.created_at || nowIso()),
           'star_sweep', 'university', 'autumn', 'clear', 1, num(r.lit_windows), 0, num(r.total_warmth)
