@@ -83,7 +83,7 @@ export function createAgentHub({
   aiBase = 'https://t.xiaoxin.email/v1',
   aiModel = 'deepseek-v4.1-flash',
   fetchImpl = fetch,
-  timeoutMs = 12000
+  timeoutMs = 24000
 }) {
   const configured = Boolean(aiKey)
 
