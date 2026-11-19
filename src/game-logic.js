@@ -62,6 +62,38 @@ export function isChainCallout(chainLength) {
 }
 
 /**
+ * Checks whether all windows on a specified floor are currently lit (C3 Floor Clear).
+ *
+ * @param {any} windows
+ *   Array of window objects (with roomId/state/lit) or array of lit room IDs.
+ * @param {number} floor
+ *   Floor number (e.g. 1, 2, 3, 4, 5).
+ * @param {number} [cols=6]
+ *   Number of columns / rooms per floor.
+ * @returns {boolean}
+ */
+export function floorCleared(windows, floor, cols = 6) {
+  if (!Array.isArray(windows)) return false
+  const targetRooms = roomsOnFloor(floor, cols)
+  if (!targetRooms || targetRooms.length === 0) return false
+
+  const litSet = new Set()
+  for (const item of windows) {
+    if (typeof item === 'number') {
+      litSet.add(item)
+    } else if (item && typeof item === 'object') {
+      const roomId = Number(item.roomId ?? item.id)
+      const isLit = item.state === 'lit' || item.lit === true
+      if (roomId && isLit) {
+        litSet.add(roomId)
+      }
+    }
+  }
+
+  return targetRooms.every(r => litSet.has(r))
+}
+
+/**
  * When a night ends with this much time left, the encore round starts.
  * @param {number} secondsLeft
  * @returns {boolean}

@@ -335,6 +335,21 @@ export class AudioEngine {
     this._chainStep = (this._chainStep + n + 2) % (SCALE.length * 3)
   }
 
+  /**
+   * Multi-select scale pitch ascent on chain drag (plays note for k-th window in chain).
+   * @param {number} [k=1] - 1-based index of the window in the current drag chain.
+   */
+  chainNote(k = 1) {
+    if (!this.ready || this._muted) return
+    const idx = Math.max(1, Math.floor(finite(k, 1)))
+    const step = (idx - 1) % SCALE.length
+    const octave = Math.min(2, Math.floor((idx - 1) / SCALE.length))
+    const freq = SCALE[step] * Math.pow(2, octave)
+    const t = this.ctx.currentTime + 0.012
+    const pan = clamp(((step % 5) - 2) * 0.16, -0.6, 0.6)
+    this._marimba(freq, t, 0.16 + Math.min(0.06, idx * 0.006), pan)
+  }
+
   /** Play clear glass chime cue when memory sequence flashes a window. */
   cue(step = 0) {
     if (!this.ready || this._muted) return
@@ -441,6 +456,53 @@ export class AudioEngine {
     bp.connect(ng)
     ng.connect(this.sfx)
     this._hold(2800)
+  }
+
+  /**
+   * C3 Floor Clear ascending major 7th / arpeggio chord:
+   * (C4, E4, G4, B4, C5, E5) with marimba, celesta shimmer, and piano bass.
+   */
+  floorClear() {
+    if (!this.ready || this._muted) return
+    if (!this._takeVoice()) return
+    const ctx = this.ctx
+    const t = ctx.currentTime + 0.02
+
+    // Piano bass root (C3: 130.81 Hz)
+    const bass = ctx.createOscillator()
+    bass.type = 'triangle'
+    bass.frequency.setValueAtTime(130.81, t)
+    bass.frequency.exponentialRampToValueAtTime(65.41, t + 1.2)
+    const bg = ctx.createGain()
+    bg.gain.setValueAtTime(0.0001, t)
+    bg.gain.linearRampToValueAtTime(0.24, t + 0.02)
+    bg.gain.exponentialRampToValueAtTime(0.0001, t + 1.8)
+    bass.connect(bg)
+    bg.connect(this.sfx)
+    bass.start(t)
+    bass.stop(t + 1.9)
+
+    // Arpeggio notes: C4 (261.63), E4 (329.63), G4 (392.00), B4 (493.88), C5 (523.25), E5 (659.25)
+    const notes = [261.63, 329.63, 392.00, 493.88, 523.25, 659.25]
+    for (let i = 0; i < notes.length; i++) {
+      const noteTime = t + i * 0.075
+      const pan = -0.3 + (i / (notes.length - 1)) * 0.6
+      this._marimba(notes[i], noteTime, 0.18, pan)
+
+      const cel = ctx.createOscillator()
+      cel.type = 'sine'
+      cel.frequency.setValueAtTime(notes[i] * 2, noteTime)
+      const cg = ctx.createGain()
+      cg.gain.setValueAtTime(0.0001, noteTime)
+      cg.gain.linearRampToValueAtTime(0.06, noteTime + 0.015)
+      cg.gain.exponentialRampToValueAtTime(0.0001, noteTime + 0.9)
+      cel.connect(cg)
+      cg.connect(this.sfx)
+      cel.start(noteTime)
+      cel.stop(noteTime + 1.0)
+    }
+
+    this._hold(1800)
   }
 
   stamp() {

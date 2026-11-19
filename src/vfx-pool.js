@@ -135,20 +135,45 @@ const burstFragmentShader = /* glsl */ `
 
 const threadVertexShader = /* glsl */ `
   uniform float uTime;
+  uniform float uWidth;
 
+  attribute float aSide;
   attribute float aT;
+  attribute vec3 aTangent;
 
   varying float vPulse;
+  varying float vSide;
+  varying float vT;
 
   void main() {
-    // one highlight sweeps a -> b every ~2.8s, the thread itself breathes
+    vSide = aSide;
+    vT = aT;
+
+    // Travelling highlight sweeps a -> b every ~2.8s; thread breathes
     float head = fract(uTime * 0.36 - aT);
     float spark = pow(1.0 - head, 12.0);
     float breathe = 0.5 + 0.5 * sin(uTime * 1.7 - aT * 9.0);
     float bead = smoothstep(0.15, 0.85, fract(aT * 18.0 - uTime * 0.5));
+    vPulse = (0.28 + 0.32 * breathe) * (0.60 + 0.40 * bead) + 1.20 * spark;
 
-    vPulse = (0.22 + 0.30 * breathe) * (0.55 + 0.45 * bead) + 1.05 * spark;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    // Transform position and tangent to view space
+    vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
+    vec3 viewTangent = normalize((modelViewMatrix * vec4(aTangent, 0.0)).xyz);
+    vec3 viewCamDir = normalize(-viewPos.xyz);
+    vec3 ribbonNormal = cross(viewTangent, viewCamDir);
+    float normLen = length(ribbonNormal);
+    if (normLen > 0.0001) {
+      ribbonNormal /= normLen;
+    } else {
+      ribbonNormal = vec3(0.0, 1.0, 0.0);
+    }
+
+    // Taper at endpoints, pulsing width in the middle
+    float taper = smoothstep(0.0, 0.12, aT) * smoothstep(1.0, 0.88, aT);
+    float width = uWidth * (0.70 + 0.30 * sin(uTime * 2.4 + aT * 6.28)) * taper;
+
+    viewPos.xyz += ribbonNormal * (aSide * width);
+    gl_Position = projectionMatrix * viewPos;
   }
 `
 
@@ -156,9 +181,16 @@ const threadFragmentShader = /* glsl */ `
   uniform vec3 uColor;
 
   varying float vPulse;
+  varying float vSide;
+  varying float vT;
 
   void main() {
-    gl_FragColor = vec4(uColor * vPulse, vPulse);
+    float edge = 1.0 - abs(vSide);
+    float alpha = edge * edge * (3.0 - 2.0 * edge) * clamp(vPulse, 0.0, 2.0);
+    if (alpha < 0.005) discard;
+
+    vec3 col = mix(uColor * vPulse, vec3(1.0, 0.98, 0.92), pow(edge, 4.0) * 0.72);
+    gl_FragColor = vec4(col, min(alpha, 1.0));
     #include <colorspace_fragment>
   }
 `
@@ -235,34 +267,70 @@ export class VfxPool {
     this._points.renderOrder = 6
     scene.add(this._points)
 
-    // --- resonance bridge: one preallocated polyline, rewritten on demand ---
-    this._arcPositions = new Float32Array((ARC_SEGMENTS + 1) * 3)
-    const arcT = new Float32Array(ARC_SEGMENTS + 1)
-    for (let i = 0; i <= ARC_SEGMENTS; i++) arcT[i] = i / ARC_SEGMENTS
+    // --- resonance bridge: camera-facing triangle strip ribbon mesh ---
+    const RIBBON_VERTS = (ARC_SEGMENTS + 1) * 2 // 50 vertices
+    this._arcPositions = new Float32Array(RIBBON_VERTS * 3)
+    this._arcTangents = new Float32Array(RIBBON_VERTS * 3)
+    const ribbonSides = new Float32Array(RIBBON_VERTS)
+    const ribbonT = new Float32Array(RIBBON_VERTS)
+
+    for (let i = 0; i <= ARC_SEGMENTS; i++) {
+      const u = i / ARC_SEGMENTS
+      const v0 = i * 2
+      const v1 = i * 2 + 1
+      ribbonSides[v0] = -1.0
+      ribbonSides[v1] = 1.0
+      ribbonT[v0] = u
+      ribbonT[v1] = u
+    }
+
+    const ribbonIndices = new Uint16Array(ARC_SEGMENTS * 6) // 144 indices (48 triangles)
+    for (let i = 0; i < ARC_SEGMENTS; i++) {
+      const l0 = i * 2
+      const r0 = i * 2 + 1
+      const l1 = (i + 1) * 2
+      const r1 = (i + 1) * 2 + 1
+      const idx = i * 6
+      ribbonIndices[idx] = l0
+      ribbonIndices[idx + 1] = r0
+      ribbonIndices[idx + 2] = l1
+      ribbonIndices[idx + 3] = r0
+      ribbonIndices[idx + 4] = r1
+      ribbonIndices[idx + 5] = l1
+    }
 
     const arcGeometry = new THREE.BufferGeometry()
     this._arcAttr = new THREE.BufferAttribute(this._arcPositions, 3)
+    this._arcTanAttr = new THREE.BufferAttribute(this._arcTangents, 3)
     arcGeometry.setAttribute('position', this._arcAttr)
-    arcGeometry.setAttribute('aT', new THREE.BufferAttribute(arcT, 1))
+    arcGeometry.setAttribute('aTangent', this._arcTanAttr)
+    arcGeometry.setAttribute('aSide', new THREE.BufferAttribute(ribbonSides, 1))
+    arcGeometry.setAttribute('aT', new THREE.BufferAttribute(ribbonT, 1))
+    arcGeometry.setIndex(new THREE.BufferAttribute(ribbonIndices, 1))
 
     this._threadMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
-        uColor: { value: new THREE.Color(0xffd98a) }
+        uColor: { value: new THREE.Color(0xffd98a) },
+        uWidth: { value: 5.2 }
       },
       vertexShader: threadVertexShader,
       fragmentShader: threadFragmentShader,
       transparent: true,
       depthWrite: false,
       depthTest: true,
-      blending: THREE.AdditiveBlending
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
     })
 
-    this._thread = new THREE.Line(arcGeometry, this._threadMat)
+    this._thread = new THREE.Mesh(arcGeometry, this._threadMat)
     this._thread.frustumCulled = false
     this._thread.renderOrder = 7
     this._thread.visible = false
     scene.add(this._thread)
+
+    // Preallocate curve sampling scratch array
+    this._curvePoints = new Float32Array((ARC_SEGMENTS + 1) * 3)
   }
 
   /**
@@ -380,7 +448,7 @@ export class VfxPool {
     const cy = (ay + by) * 0.5 + bow
     const cz = (az + bz) * 0.5 + bow * 0.12
 
-    const p = this._arcPositions
+    const curve = this._curvePoints
     for (let i = 0; i <= ARC_SEGMENTS; i++) {
       const u = i / ARC_SEGMENTS
       const iu = 1 - u
@@ -388,15 +456,52 @@ export class VfxPool {
       const w1 = 2 * iu * u
       const w2 = u * u
       const i3 = i * 3
-      p[i3] = ax * w0 + cx * w1 + bx * w2
-      p[i3 + 1] = ay * w0 + cy * w1 + by * w2
-      p[i3 + 2] = az * w0 + cz * w1 + bz * w2
+      curve[i3] = ax * w0 + cx * w1 + bx * w2
+      curve[i3 + 1] = ay * w0 + cy * w1 + by * w2
+      curve[i3 + 2] = az * w0 + cz * w1 + bz * w2
     }
+
+    const pos = this._arcPositions
+    const tan = this._arcTangents
+
+    for (let i = 0; i <= ARC_SEGMENTS; i++) {
+      const i3 = i * 3
+      const px = curve[i3]
+      const py = curve[i3 + 1]
+      const pz = curve[i3 + 2]
+
+      let tx, ty, tz
+      if (i === 0) {
+        tx = curve[3] - px; ty = curve[4] - py; tz = curve[5] - pz
+      } else if (i === ARC_SEGMENTS) {
+        tx = px - curve[i3 - 3]; ty = py - curve[i3 - 2]; tz = pz - curve[i3 - 1]
+      } else {
+        tx = curve[i3 + 3] - curve[i3 - 3]; ty = curve[i3 + 4] - curve[i3 - 2]; tz = curve[i3 + 5] - curve[i3 - 1]
+      }
+      const tLen = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1
+      tx /= tLen; ty /= tLen; tz /= tLen
+
+      const v0 = i * 6
+      const v1 = v0 + 3
+      pos[v0] = px; pos[v0 + 1] = py; pos[v0 + 2] = pz
+      pos[v1] = px; pos[v1 + 1] = py; pos[v1 + 2] = pz
+      tan[v0] = tx; tan[v0 + 1] = ty; tan[v0 + 2] = tz
+      tan[v1] = tx; tan[v1 + 1] = ty; tan[v1 + 2] = tz
+    }
+
     this._arcAttr.needsUpdate = true
+    this._arcTanAttr.needsUpdate = true
 
     this._threadMat.uniforms.uColor.value.set(color)
     this._hasBridge = true
     this._thread.visible = this._visible
+
+    // Star particle burst along the resonant ribbon on bridge completion ("合龙")
+    for (let step = 0.2; step <= 0.8; step += 0.2) {
+      const pt = new THREE.Vector3().lerpVectors(a, b, step)
+      pt.y += bow * Math.sin(step * Math.PI)
+      this.emitBurst(pt, color, 4, 2)
+    }
   }
 
   /** Called every frame with elapsed seconds. Only uniforms are touched. */

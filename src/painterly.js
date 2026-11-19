@@ -21,7 +21,11 @@ export const PainterlyShader = {
     tint: { value: new THREE.Color(0x2a1c3a) },
     uRainAmount: { value: 0 },
     uDawn: { value: 0 },
-    uKuwaharaRadius: { value: 0.95 }
+    uKuwaharaRadius: { value: 0.95 },
+    uComboVignette: { value: 0 },
+    uTiltShiftAmount: { value: 1.0 },
+    uTiltShiftCenter: { value: 0.46 },
+    uTiltShiftRange: { value: 0.18 }
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -44,6 +48,10 @@ export const PainterlyShader = {
     uniform float uRainAmount;
     uniform float uDawn;
     uniform float uKuwaharaRadius;
+    uniform float uComboVignette;
+    uniform float uTiltShiftAmount;
+    uniform float uTiltShiftCenter;
+    uniform float uTiltShiftRange;
 
     const vec3 INK_COLD = vec3(0.0784, 0.0941, 0.1804); // #14182e deep ultramarine
     const vec3 INK_WARM = vec3(0.2196, 0.1333, 0.0784); // #382214 warm burnt tea
@@ -174,9 +182,13 @@ export const PainterlyShader = {
       vec3 baseCol = texture2D(tDiffuse, uv).rgb;
       float baseLum = lum(baseCol);
 
-      // ---- 1. brush clustering -----------------------------------------
+      // ---- 1. brush clustering with tilt-shift depth-of-field -----------
+      // Modulate radius by vertical distance from building center (|uv.y - 0.46|)
+      float distFromFocal = abs(uv.y - uTiltShiftCenter);
+      float dof = smoothstep(uTiltShiftRange * 0.5, uTiltShiftRange * 2.2, distFromFocal);
+      float tiltRadius = uKuwaharaRadius * (1.0 + dof * 2.2 * uTiltShiftAmount);
       // Radius shrinks on glowing window cores so silhouettes stay readable.
-      float kr = max(0.6, uKuwaharaRadius * (1.0 - 0.62 * smoothstep(0.72, 0.96, baseLum)));
+      float kr = max(0.6, tiltRadius * (1.0 - 0.62 * smoothstep(0.72, 0.96, baseLum)));
       vec3 paint = kuwahara(tDiffuse, uv, px, kr);
 
       // ---- 2. dual-scale hand-wobbled ink ------------------------------
@@ -249,6 +261,23 @@ export const PainterlyShader = {
 
       vec3 col = mix(baseCol, paint, clamp(strength, 0.0, 1.0));
 
+      // ---- cinematic split-toning: ultramarine shadows & warm highlights ----
+      float splitL = lum(col);
+      vec3 shadowTint = mix(vec3(0.08, 0.10, 0.22), vec3(0.14, 0.18, 0.28), uDawn);
+      vec3 highlightTint = mix(vec3(1.0, 0.88, 0.70), vec3(1.05, 0.92, 0.82), uDawn);
+      vec3 graded = mix(col * shadowTint * 2.2, col * highlightTint, smoothstep(0.18, 0.75, splitL));
+      col = mix(col, graded, 0.28);
+
+      // ---- combo-driven vignette contraction ----------------------------
+      if (uComboVignette > 0.001) {
+        vec2 dVig = (uv - 0.5) * vec2(resolution.x / max(resolution.y, 1.0), 1.0);
+        float rVig = dot(dVig, dVig);
+        float vigRadius = mix(0.72, 0.38, uComboVignette);
+        float vigSoft = mix(0.42, 0.20, uComboVignette);
+        float vig = smoothstep(vigRadius, vigRadius - vigSoft, rVig);
+        col *= mix(vec3(0.55, 0.60, 0.75), vec3(1.0), vig);
+      }
+
       // ---- dawn grade: night -> rose-gold sunrise ----------------------
       float dl = lum(col);
       vec3 dawnLift = mix(vec3(0.34, 0.22, 0.30), vec3(1.00, 0.84, 0.62), smoothstep(0.05, 0.85, dl));
@@ -305,6 +334,7 @@ export function createPainterlyPass() {
   setPainterlyStyle(pass, 'stardew')
   pass.material.uniforms.uRainAmount.value = 0
   pass.material.uniforms.uDawn.value = 0
+  pass.material.uniforms.uComboVignette.value = 0
   return pass
 }
 
@@ -323,4 +353,15 @@ export function setPainterlyStyle(pass, mode = 'stardew') {
     u.strength.value = 0.40
     u.uKuwaharaRadius.value = 0.95
   }
+}
+
+/**
+ * 设置连击驱动暗角收缩
+ * @param {any} pass
+ * @param {number} comboStreak
+ */
+export function setComboVignette(pass, comboStreak) {
+  if (!pass?.material?.uniforms?.uComboVignette) return
+  const norm = Math.min(1.0, Math.max(0.0, (comboStreak || 0) / 15.0))
+  pass.material.uniforms.uComboVignette.value = norm
 }

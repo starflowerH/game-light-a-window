@@ -3,6 +3,7 @@ import {
   gainForCombo,
   gainForDragChain,
   isChainCallout,
+  floorCleared,
   shouldEncore,
   pickSurprise,
   canSurprise,
@@ -514,5 +515,65 @@ describe('dorm adaptation & BGM tracks', () => {
   it('exposes all five BGM presets including kataware, bluedragon, and mysoul', () => {
     const ids = BGM_TRACKS.map(t => t.id)
     expect(ids).toEqual(['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'])
+  })
+})
+
+describe('floorCleared (C3 Floor Clear)', () => {
+  it('returns true when all rooms of a floor are lit (object array with state=lit)', () => {
+    // Floor 2 with 6 columns: 201 to 206
+    const windows = [
+      { roomId: 201, state: 'lit' },
+      { roomId: 202, state: 'lit' },
+      { roomId: 203, state: 'lit' },
+      { roomId: 204, state: 'lit' },
+      { roomId: 205, state: 'lit' },
+      { roomId: 206, state: 'lit' },
+      { roomId: 101, state: 'dark' }
+    ]
+    expect(floorCleared(windows, 2, 6)).toBe(true)
+  })
+
+  it('returns false when floor is only partially lit', () => {
+    // Missing 206
+    const windows = [
+      { roomId: 201, state: 'lit' },
+      { roomId: 202, state: 'lit' },
+      { roomId: 203, state: 'lit' },
+      { roomId: 204, state: 'lit' },
+      { roomId: 205, state: 'lit' },
+      { roomId: 206, state: 'glimmer' }
+    ]
+    expect(floorCleared(windows, 2, 6)).toBe(false)
+  })
+
+  it('supports raw number arrays of lit room IDs', () => {
+    const litRoomIds = [301, 302, 303, 304, 305, 306]
+    expect(floorCleared(litRoomIds, 3, 6)).toBe(true)
+    expect(floorCleared([301, 302, 303, 304, 305], 3, 6)).toBe(false)
+  })
+
+  it('supports 4-column staff dorm floors', () => {
+    // Floor 1 with 4 columns: 101, 102, 103, 104
+    const staffWindows = [
+      { roomId: 101, lit: true },
+      { roomId: 102, lit: true },
+      { roomId: 103, lit: true },
+      { roomId: 104, lit: true }
+    ]
+    expect(floorCleared(staffWindows, 1, 4)).toBe(true)
+    expect(floorCleared(staffWindows.slice(0, 3), 1, 4)).toBe(false)
+  })
+
+  it('supports multiple floors (1F to 5F)', () => {
+    const gradFloor5 = [501, 502, 503, 504, 505, 506]
+    expect(floorCleared(gradFloor5, 5, 6)).toBe(true)
+    expect(floorCleared(gradFloor5, 4, 6)).toBe(false)
+  })
+
+  it('handles empty, null, or invalid input safely without throwing', () => {
+    expect(floorCleared([], 1, 6)).toBe(false)
+    expect(floorCleared(null, 1, 6)).toBe(false)
+    expect(floorCleared(undefined, 1, 6)).toBe(false)
+    expect(floorCleared('invalid', 1, 6)).toBe(false)
   })
 })

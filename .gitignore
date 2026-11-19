@@ -29,5 +29,10 @@ data/
 __pycache__/
 *.py[cod]
 
+# test artifacts
+test-results/
+playwright-report/
+
 # local scratch
 /tmp/
+.agents/

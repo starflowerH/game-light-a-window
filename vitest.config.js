@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.js'],
+    exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
     reporters: 'verbose',
     // Fastify's very first instantiation inside a vitest worker is slow on a
     // cold module graph (tens of seconds on WSL / Windows-mounted disks).

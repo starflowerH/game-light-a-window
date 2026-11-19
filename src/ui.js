@@ -26,6 +26,7 @@ import {
 } from '../shared/constants.js'
 import { NPC_CATALOG, OUTFIT_LABELS, renderNpcPortraitSvg } from './npc-portraits.js'
 import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
+import { ReplayPlayer } from './replay.js'
 
 const qs = (root, sel) => root.querySelector(sel)
 const qsa = (root, sel) => root.querySelectorAll(sel)
@@ -49,6 +50,15 @@ export class UI {
     /** @type {any} */ this._choiceTimer = 0
     /** @type {any} */ this._toastTimer = 0
     /** @type {any} */ this._dlgTimer = 0
+
+    this.tagsEl = document.getElementById('tags')
+    if (!this.tagsEl) {
+      this.tagsEl = document.createElement('div')
+      this.tagsEl.id = 'tags'
+      root.appendChild(this.tagsEl)
+    }
+    this._tutOverlayEl = null
+    this._tutGestureRaf = 0
   }
 
   _layer() {
@@ -854,12 +864,12 @@ export class UI {
     if (onBack) qs(s, '[data-act="back"]').onclick = () => onBack()
   }
 
-  startNight({ night, index, count, commissions, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, orbitLocked = true, onToggleOrbit, onResetView, onAdvanceNight, onPause, onMute }) {
+  startNight({ night, index, count, commissions, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, orbitLocked = true, onToggleOrbit, onResetView, onAdvanceNight, onPause, onMute, onPingCommission, onReplayTutorial }) {
     this.hideAll()
     const bgmMeta = bgmTrackDef(bgmState?.mode || 'auto')
     const hud = document.createElement('div')
     hud.id = 'hud'
-    const ledger = (commissions || []).map(c => '<div class="ledger-item" data-cid="' + esc(c.id || c.type) + '">' +
+    const ledger = (commissions || []).map((c, i) => '<div class="ledger-item" data-cid="' + esc(c.id || c.type) + '" data-cidx="' + i + '" title="点击在楼栋定位目标">' +
       '<span class="ledger-dot"></span>' +
       '<div class="ledger-row-main">' +
         '<span class="ledger-label">' + esc(c.label) + '</span>' +
@@ -876,6 +886,7 @@ export class UI {
           '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
           '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/' + totalWindows + '</span></div>' +
           '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
+          '<div class="flow-pill flow-state-flow" id="flow-pill" title="夜巡心流状态"><i class="flow-dot"></i><span data-flow-text>心流</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
           (onToggleOrbit ? '<button class="chip-sm ' + (orbitLocked ? 'on' : '') + '" type="button" data-act="orbit" data-orbitbadge title="固定连窗 / 自由转看楼栋">' + (orbitLocked ? '🔒 固定连窗' : '🔄 自由转看') + '</button>' : '') +
@@ -928,10 +939,26 @@ export class UI {
       nextNightBtn.onclick = () => onAdvanceNight()
     }
 
+    const ledgerItems = qsa(hud, '.ledger-item')
+    ledgerItems.forEach(item => {
+      item.onclick = () => {
+        const cidx = Number(item.getAttribute('data-cidx'))
+        const c = commissions && commissions[cidx]
+        if (c && onPingCommission) {
+          onPingCommission(c)
+        }
+      }
+    })
+
     const rulesBtn = qs(hud, '[data-act="rules"]')
     if (rulesBtn) {
       rulesBtn.onclick = () => {
-        this.toast('默认「🔒固定连窗」不误转楼！点/划亮微光窗完成底部任意 1 项即过关', '星轨支持拖连或先后点击两窗 · 点「🔄自由转看」可转楼欣赏')
+        if (onReplayTutorial) {
+          this.toast('重播新手教学', '已为您重置教学指引')
+          onReplayTutorial()
+        } else {
+          this.toast('默认「🔒固定连窗」不误转楼！点/划亮微光窗完成底部任意 1 项即过关', '星轨支持拖连或先后点击两窗 · 点「🔄自由转看」可转楼欣赏')
+        }
       }
     }
 
@@ -956,6 +983,7 @@ export class UI {
       this._timeEl.classList.toggle('urgent', sec <= 10)
     }
     this.setStats(game)
+    this.updateWindowTags(game)
   }
 
   setStats(game) {
@@ -1071,6 +1099,31 @@ export class UI {
     anim.onfinish = () => d.remove()
   }
 
+  /**
+   * Floating circular gold sequence badge popped during drag chains (auto-fading in 0.6s).
+   * @param {number} x
+   * @param {number} y
+   * @param {number} count
+   */
+  showSequenceBadge(x, y, count) {
+    if (!this.fx) return
+    const BADGES = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
+    const idx = Math.max(1, Math.min(10, Number(count) || 1))
+    const char = BADGES[idx - 1]
+    const d = document.createElement('div')
+    d.className = 'seq-badge'
+    d.textContent = char
+    d.style.left = Math.round(x) + 'px'
+    d.style.top = Math.round(y) + 'px'
+    this.fx.appendChild(d)
+    const anim = d.animate([
+      { transform: 'translate(-50%, -50%) scale(0.6)', opacity: 0 },
+      { transform: 'translate(-50%, -50%) scale(1.22)', opacity: 1, offset: 0.28 },
+      { transform: 'translate(-50%, calc(-50% - 18px)) scale(1.0)', opacity: 0 }
+    ], { duration: 600, easing: 'cubic-bezier(.18,.85,.25,1)' })
+    anim.onfinish = () => d.remove()
+  }
+
   toast(text, gain) {
     const old = document.getElementById('toast')
     if (old) old.remove()
@@ -1081,6 +1134,55 @@ export class UI {
     paintIcons(d)
     clearTimeout(this._toastTimer)
     this._toastTimer = setTimeout(() => d.remove(), 2400)
+  }
+
+  /**
+   * Show contextual tooltip speech bubble pointing at a target button/element.
+   * @param {string|HTMLElement} target
+   * @param {string} text
+   * @param {string} [subtext]
+   * @param {number} [durationMs=3200]
+   */
+  showHintBubble(target, text, subtext = '', durationMs = 3200) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target
+    if (!el) return
+    const old = document.getElementById('hint-bubble')
+    if (old) old.remove()
+
+    const r = el.getBoundingClientRect()
+    const bubble = document.createElement('div')
+    bubble.id = 'hint-bubble'
+    bubble.className = 'hint-bubble'
+    bubble.innerHTML = '<div class="hint-arrow"></div><div class="hint-title">' + esc(text) + '</div>' +
+      (subtext ? '<div class="hint-sub">' + esc(subtext) + '</div>' : '')
+    document.body.appendChild(bubble)
+
+    const bubbleRect = bubble.getBoundingClientRect()
+    let left = r.left + r.width / 2 - bubbleRect.width / 2
+    left = Math.max(12, Math.min(window.innerWidth - bubbleRect.width - 12, left))
+    let top = r.bottom + 10
+    if (top + bubbleRect.height > window.innerHeight - 10) {
+      top = r.top - bubbleRect.height - 10
+      bubble.classList.add('arrow-bottom')
+    } else {
+      bubble.classList.add('arrow-top')
+    }
+    const arrow = bubble.querySelector('.hint-arrow')
+    if (arrow instanceof HTMLElement) {
+      const arrowLeft = Math.max(12, Math.min(bubbleRect.width - 16, r.left + r.width / 2 - left))
+      arrow.style.left = arrowLeft + 'px'
+    }
+    bubble.style.left = Math.round(left) + 'px'
+    bubble.style.top = Math.round(top) + 'px'
+    requestAnimationFrame(() => bubble.classList.add('show'))
+
+    const dismiss = () => {
+      bubble.classList.remove('show')
+      setTimeout(() => bubble.remove(), 260)
+      window.removeEventListener('pointerdown', dismiss)
+    }
+    window.addEventListener('pointerdown', dismiss, { once: true })
+    setTimeout(dismiss, durationMs)
   }
 
   banner(text, sub) {
@@ -1242,6 +1344,7 @@ export class UI {
         '</div>' +
         '<div class="result-actions">' +
           '<button class="btn primary" data-act="replay"><span data-icon="replay"></span>再来三晚</button>' +
+          (opts.replayEvents && opts.replayEvents.length ? '<button class="btn secondary btn-replay" data-act="watch-replay">🎬 6秒夜巡延时回放</button>' : '') +
           (opts.onLeaderboard ? '<button class="btn ghost" data-act="board">🏆 查看排名</button>' : '') +
           '<button class="btn ghost" data-act="home"><span data-icon="home"></span>回到标题</button>' +
         '</div>' +
@@ -1267,6 +1370,12 @@ export class UI {
 
     qs(s, '[data-act="replay"]').onclick = () => opts.onReplay()
     qs(s, '[data-act="home"]').onclick = () => opts.onHome()
+    const replayBtn = qs(s, '[data-act="watch-replay"]')
+    if (replayBtn) {
+      replayBtn.onclick = () => {
+        this.playAcceleratedReplay(opts.replayEvents, opts.scene, opts.audio)
+      }
+    }
     if (opts.onLeaderboard) qs(s, '[data-act="board"]').onclick = () => opts.onLeaderboard()
     const input = qs(s, 'input[data-whisper]')
     const status = qs(s, '[data-status]')
@@ -1509,6 +1618,206 @@ export class UI {
     if (this._coachEl) { this._coachEl.remove(); this._coachEl = null }
   }
 
+  /**
+   * Show or update the tutorial overlay card and gesture visualization.
+   * @param {Object} options
+   * @param {string} options.step
+   * @param {string} options.title
+   * @param {string} options.desc
+   * @param {() => void} [options.onSkip]
+   */
+  showTutorialOverlay({ step, title, desc, onSkip }) {
+    if (!this._tutOverlayEl) {
+      this._tutOverlayEl = document.createElement('div')
+      this._tutOverlayEl.id = 'tut-overlay'
+      this._tutOverlayEl.className = 'tut-overlay'
+      this._tutOverlayEl.innerHTML =
+        '<div class="tut-card">' +
+          '<div class="tut-step-badge"></div>' +
+          '<div class="tut-title"></div>' +
+          '<div class="tut-desc"></div>' +
+          '<button class="tut-skip-btn" type="button">跳过教程 ▸</button>' +
+        '</div>' +
+        '<svg class="tut-gesture-svg" id="tut-gesture-svg"></svg>'
+      this.root.appendChild(this._tutOverlayEl)
+    }
+
+    const card = qs(this._tutOverlayEl, '.tut-card')
+    if (card) card.classList.remove('tut-pulse')
+    const badgeEl = qs(card, '.tut-step-badge')
+    const titleEl = qs(card, '.tut-title')
+    const descEl = qs(card, '.tut-desc')
+    const skipBtn = qs(card, '.tut-skip-btn')
+
+    if (badgeEl) {
+      let badgeText = '新手教学'
+      if (step === 'step1_tap') badgeText = '新手教学 1/3 · 点亮'
+      else if (step === 'step2_drag') badgeText = '新手教学 2/3 · 拖连'
+      else if (step === 'step3_bridge') badgeText = '新手教学 3/3 · 星桥'
+      badgeEl.textContent = badgeText
+    }
+    if (titleEl) titleEl.textContent = title || ''
+    if (descEl) descEl.textContent = desc || ''
+    if (skipBtn && onSkip) {
+      skipBtn.onclick = (e) => {
+        e.stopPropagation()
+        onSkip()
+      }
+    }
+  }
+
+  /**
+   * Trigger inactivity pulse reminder on tutorial card.
+   * @param {string} [text]
+   */
+  pulseTutorialInactivity(text) {
+    if (!this._tutOverlayEl) return
+    const card = qs(this._tutOverlayEl, '.tut-card')
+    if (!card) return
+    card.classList.add('tut-pulse')
+    if (text) {
+      const descEl = qs(card, '.tut-desc')
+      if (descEl) descEl.textContent = text
+    }
+  }
+
+  /**
+   * Render or update SVG trajectory demonstration for step 2 (drag ①->②->③).
+   * @param {Array<{ x: number, y: number, w?: number, h?: number }>} points
+   * @param {number} [timeSec=0]
+   */
+  updateTutorialGesture(points, timeSec = 0) {
+    if (!this._tutOverlayEl) return
+    const svg = qs(this._tutOverlayEl, '#tut-gesture-svg')
+    if (!svg) return
+
+    if (!Array.isArray(points) || points.length < 2) {
+      svg.innerHTML = ''
+      return
+    }
+
+    const p0 = points[0]
+    const p1 = points[1]
+    const p2 = points[2] || points[points.length - 1]
+
+    const period = 2.2
+    const phase = (timeSec % period) / period
+
+    let handX = p0.x
+    let handY = p0.y
+    let handScale = 1.0
+    let handOpacity = 1.0
+
+    if (phase < 0.2) {
+      const sub = phase / 0.2
+      handX = p0.x
+      handY = p0.y
+      handScale = 1.0 - 0.15 * Math.sin(sub * Math.PI)
+    } else if (phase < 0.55) {
+      const sub = (phase - 0.2) / 0.35
+      const ease = sub * sub * (3 - 2 * sub)
+      handX = p0.x + (p1.x - p0.x) * ease
+      handY = p0.y + (p1.y - p0.y) * ease
+    } else if (phase < 0.85) {
+      const sub = (phase - 0.55) / 0.30
+      const ease = sub * sub * (3 - 2 * sub)
+      handX = p1.x + (p2.x - p1.x) * ease
+      handY = p1.y + (p2.y - p1.y) * ease
+    } else {
+      const sub = (phase - 0.85) / 0.15
+      handX = p2.x
+      handY = p2.y
+      handOpacity = Math.max(0, 1 - sub * 1.5)
+    }
+
+    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`).join(' ')
+
+    const badgesHtml = points.map((p, i) => {
+      const num = ['①', '②', '③', '④'][i] || (i + 1)
+      return `
+        <g transform="translate(${Math.round(p.x)}, ${Math.round(p.y)})">
+          <circle r="18" fill="rgba(18, 14, 32, 0.75)" stroke="rgba(255, 215, 120, 0.8)" stroke-width="2"/>
+          <text text-anchor="middle" dominant-baseline="central" fill="#fff5d0" font-size="14" font-weight="bold">${num}</text>
+        </g>
+      `
+    }).join('')
+
+    svg.innerHTML = `
+      <defs>
+        <filter id="tut-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <path d="${pathD}" fill="none" stroke="rgba(255, 215, 120, 0.75)" stroke-width="3" stroke-dasharray="6,4" filter="url(#tut-glow)"/>
+      ${badgesHtml}
+      <g transform="translate(${Math.round(handX)}, ${Math.round(handY)}) scale(${handScale})" opacity="${handOpacity.toFixed(2)}">
+        <circle r="22" fill="rgba(255, 220, 130, 0.25)" stroke="rgba(255, 230, 150, 0.8)" stroke-width="2"/>
+        <path d="M 0 0 L 8 22 L 3 20 L 0 27 L -3 20 L -8 22 Z" fill="#fff" stroke="#ffcc66" stroke-width="1.5" transform="rotate(-25) translate(0, -6)" />
+      </g>
+    `
+  }
+
+  /**
+   * Hide and remove tutorial overlay.
+   */
+  hideTutorialOverlay() {
+    if (this._tutOverlayEl) {
+      this._tutOverlayEl.remove()
+      this._tutOverlayEl = null
+    }
+  }
+
+  /**
+   * Update floating smart capsule tags above special actionable windows (max 4 on screen).
+   * @param {any} game
+   */
+  updateWindowTags(game) {
+    if (!this.tagsEl || !game || !game.scene || !Array.isArray(game.scene.windows)) {
+      if (this.tagsEl) this.tagsEl.innerHTML = ''
+      return
+    }
+
+    /** @type {Array<{ w: any, text: string, type: string, priority: number }>} */
+    const candidates = []
+
+    const wins = game.scene.windows
+    for (const w of wins) {
+      if (w.state === 'story_beacon' || w.state === 3) {
+        candidates.push({ w, text: '📖偷听', type: 'beacon', priority: 10 })
+      } else if (w.state === 'resonance_pair' || w.state === 4) {
+        const isA = game.scene.resonancePair && w.roomId === game.scene.resonancePair.a
+        candidates.push({
+          w,
+          text: isA ? '🌉星桥①' : '🌉星桥②',
+          type: 'bridge',
+          priority: 9
+        })
+      } else if (w.crisis === 'cat' || w.state === 'crisis_cat') {
+        candidates.push({ w, text: '📱抓猫', type: 'crisis', priority: 12 })
+      } else if (w.crisis === 'sleep' || w.state === 'sleep') {
+        candidates.push({ w, text: '💤安睡', type: 'sleep', priority: 8 })
+      }
+    }
+
+    candidates.sort((a, b) => b.priority - a.priority)
+    const selected = candidates.slice(0, 4)
+
+    let html = ''
+    for (const item of selected) {
+      const rect = game.scene.windowScreenRect(item.w)
+      if (!rect) continue
+      const x = Math.round(rect.x)
+      const y = Math.round(rect.y - rect.h / 2 - 12)
+      if (x < -40 || x > window.innerWidth + 40 || y < -40 || y > window.innerHeight + 40) continue
+      html += '<div class="win-tag ' + item.type + '" style="left:' + x + 'px;top:' + y + 'px">' + item.text + '</div>'
+    }
+    this.tagsEl.innerHTML = html
+  }
+
   pause({ onResume, onHome }) {
     this.hidePause()
     const s = this._layer()
@@ -1528,6 +1837,110 @@ export class UI {
 
   hidePause() {
     if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null }
+  }
+
+  setFlowState(flowState) {
+    const pill = document.getElementById('flow-pill')
+    if (!pill) return
+    pill.className = 'flow-pill flow-state-' + flowState
+    const txt = pill.querySelector('[data-flow-text]')
+    if (txt) {
+      txt.textContent = flowState === 'flow' ? '心流' : (flowState === 'breeze' ? '悠闲' : '急迫')
+    }
+  }
+
+  showCrisisPrompt(crisis) {
+    if (!crisis) return
+    let card = document.getElementById('crisis-card')
+    if (!card) {
+      card = document.createElement('div')
+      card.id = 'crisis-card'
+      card.className = 'crisis-card glass'
+      this.el.appendChild(card)
+    }
+    const rem = Math.max(0, crisis.remainingSec || crisis.durationSec).toFixed(1)
+    const prog = Math.min(1.0, (crisis.progress || 0)) * 100
+    card.innerHTML =
+      '<div class="crisis-badge">' + esc(crisis.tag || '⚡ 突发事件') + '</div>' +
+      '<div class="crisis-content">' +
+        '<div class="crisis-title">' + esc(crisis.title) + '</div>' +
+        '<div class="crisis-prompt">' + esc(crisis.prompt) + '</div>' +
+      '</div>' +
+      '<div class="crisis-timer-block">' +
+        '<div class="crisis-time">' + rem + 's</div>' +
+        '<div class="crisis-bar"><i style="width:' + (100 - prog).toFixed(1) + '%"></i></div>' +
+      '</div>'
+    requestAnimationFrame(() => card.classList.add('on'))
+  }
+
+  updateCrisisPrompt(crisis) {
+    const card = document.getElementById('crisis-card')
+    if (!card || !crisis) return
+    const timeEl = card.querySelector('.crisis-time')
+    const barEl = /** @type {HTMLElement|null} */ (card.querySelector('.crisis-bar i'))
+    if (timeEl) timeEl.textContent = Math.max(0, crisis.remainingSec || 0).toFixed(1) + 's'
+    if (barEl) {
+      const prog = Math.min(1.0, (crisis.progress || 0)) * 100
+      barEl.style.width = Math.max(0, (100 - prog)).toFixed(1) + '%'
+    }
+  }
+
+  hideCrisisPrompt() {
+    const card = document.getElementById('crisis-card')
+    if (card) {
+      card.classList.remove('on')
+      setTimeout(() => card.remove(), 400)
+    }
+  }
+
+  playAcceleratedReplay(events, scene, audio) {
+    if (!Array.isArray(events) || events.length === 0) return
+    let dock = document.getElementById('replay-dock')
+    if (dock) dock.remove()
+
+    dock = document.createElement('div')
+    dock.id = 'replay-dock'
+    dock.className = 'replay-dock glass on'
+    dock.innerHTML =
+      '<div class="replay-status">🎬 6秒夜巡延时回放中 (<span id="replay-time">0.0</span>s / 6.0s)</div>' +
+      '<div class="replay-track"><div class="replay-fill" id="replay-fill"></div></div>' +
+      '<button class="chip-sm replay-skip" id="btn-replay-skip">跳过回放</button>'
+    this.el.appendChild(dock)
+
+    const player = new ReplayPlayer(events, 75000, 6000)
+    const timeEl = dock.querySelector('#replay-time')
+    const fillEl = /** @type {HTMLElement|null} */ (dock.querySelector('#replay-fill'))
+    const skipBtn = /** @type {HTMLElement|null} */ (dock.querySelector('#btn-replay-skip'))
+
+    if (scene && Array.isArray(scene.windows)) {
+      scene.windows.forEach(w => {
+        scene.setWindowState(w, WINDOW_STATES.DARK)
+      })
+    }
+
+    const cleanup = () => {
+      player.stop()
+      if (dock) {
+        dock.classList.remove('on')
+        setTimeout(() => dock.remove(), 300)
+      }
+    }
+
+    if (skipBtn) skipBtn.onclick = cleanup
+
+    player.start((evt, prog) => {
+      if (timeEl) timeEl.textContent = (prog * 6.0).toFixed(1)
+      if (fillEl) fillEl.style.width = (prog * 100).toFixed(1) + '%'
+      if (scene) {
+        scene.setWindowState(evt.idx, WINDOW_STATES.LIT)
+        scene.burstWindow(evt.idx, 0xffd700)
+      }
+      if (audio && audio.tap) {
+        audio.tap(1)
+      }
+    }, () => {
+      cleanup()
+    })
   }
 
   setMuted(muted) {

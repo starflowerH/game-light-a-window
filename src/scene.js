@@ -280,6 +280,201 @@ function rooftopSvg() {
   return t
 }
 
+function createInteriorAtlas() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return new THREE.Texture()
+
+  ctx.fillStyle = '#0f121d'
+  ctx.fillRect(0, 0, 512, 512)
+
+  const cellW = 128
+  const cellH = 256
+
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 4; col++) {
+      const x = col * cellW
+      const y = row * cellH
+      const isWarm = (row === 0)
+
+      // Wall background
+      ctx.fillStyle = isWarm ? '#28202e' : '#141d2e'
+      ctx.fillRect(x, y, cellW, cellH)
+
+      // Floor (bottom 25%)
+      const floorH = 64
+      ctx.fillStyle = isWarm ? '#3a2720' : '#101624'
+      ctx.fillRect(x, y + cellH - floorH, cellW, floorH)
+
+      // Floor plank lines
+      ctx.strokeStyle = isWarm ? '#221612' : '#080c14'
+      ctx.lineWidth = 1.5
+      for (let p = 0; p < cellW; p += 24) {
+        ctx.beginPath()
+        ctx.moveTo(x + p, y + cellH - floorH)
+        ctx.lineTo(x + p - 12, y + cellH)
+        ctx.stroke()
+      }
+
+      // Ceiling pendant light or monitor glow
+      if (isWarm) {
+        ctx.strokeStyle = '#5a4635'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(x + cellW / 2, y)
+        ctx.lineTo(x + cellW / 2, y + 36)
+        ctx.stroke()
+
+        const lampGrad = ctx.createRadialGradient(x + cellW / 2, y + 42, 4, x + cellW / 2, y + 42, 54)
+        lampGrad.addColorStop(0, 'rgba(255, 230, 160, 0.95)')
+        lampGrad.addColorStop(0.4, 'rgba(255, 180, 80, 0.45)')
+        lampGrad.addColorStop(1, 'rgba(255, 180, 80, 0.0)')
+        ctx.fillStyle = lampGrad
+        ctx.beginPath()
+        ctx.arc(x + cellW / 2, y + 42, 54, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        const screenGrad = ctx.createRadialGradient(x + cellW * 0.6, y + cellH * 0.58, 8, x + cellW * 0.6, y + cellH * 0.58, 70)
+        screenGrad.addColorStop(0, 'rgba(120, 200, 255, 0.85)')
+        screenGrad.addColorStop(0.5, 'rgba(50, 120, 220, 0.35)')
+        screenGrad.addColorStop(1, 'rgba(20, 50, 120, 0.0)')
+        ctx.fillStyle = screenGrad
+        ctx.beginPath()
+        ctx.arc(x + cellW * 0.6, y + cellH * 0.58, 70, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      if (col === 0) {
+        // Study Room: Bookshelf left, desk right
+        ctx.fillStyle = isWarm ? '#1c1420' : '#0b101c'
+        ctx.fillRect(x + 8, y + 40, 32, 140)
+        ctx.fillStyle = isWarm ? '#4a342a' : '#1c283c'
+        ctx.fillRect(x + 10, y + 75, 28, 4)
+        ctx.fillRect(x + 10, y + 110, 28, 4)
+        ctx.fillRect(x + 10, y + 145, 28, 4)
+
+        ctx.fillStyle = isWarm ? '#a04838' : '#286088'
+        ctx.fillRect(x + 12, y + 83, 7, 26)
+        ctx.fillStyle = isWarm ? '#d0a040' : '#4090c0'
+        ctx.fillRect(x + 20, y + 86, 6, 23)
+        ctx.fillStyle = isWarm ? '#508060' : '#305070'
+        ctx.fillRect(x + 27, y + 80, 8, 29)
+
+        ctx.fillStyle = isWarm ? '#281c20' : '#121824'
+        ctx.fillRect(x + 48, y + 150, 72, 38)
+        ctx.fillStyle = isWarm ? '#fff2c0' : '#64c8ff'
+        ctx.fillRect(x + 68, y + 134, 24, 16)
+
+        ctx.fillStyle = '#08060a'
+        ctx.beginPath()
+        ctx.arc(x + 104, y + 130, 9, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillRect(x + 96, y + 139, 20, 48)
+      } else if (col === 1) {
+        // Bedroom: Bed left, nightstand with mug
+        ctx.fillStyle = isWarm ? '#8a4055' : '#2a4870'
+        ctx.fillRect(x + 20, y + 45, 36, 48)
+        ctx.fillStyle = isWarm ? '#442a26' : '#1a2234'
+        ctx.fillRect(x + 10, y + 155, 80, 32)
+        ctx.fillStyle = isWarm ? '#c89078' : '#3a5070'
+        ctx.fillRect(x + 12, y + 150, 76, 14)
+        ctx.fillStyle = isWarm ? '#e8d8c0' : '#607898'
+        ctx.fillRect(x + 14, y + 142, 22, 10)
+        ctx.fillStyle = isWarm ? '#30201c' : '#141c28'
+        ctx.fillRect(x + 94, y + 158, 24, 30)
+        ctx.fillStyle = isWarm ? '#ffd888' : '#80c0ff'
+        ctx.fillRect(x + 102, y + 150, 8, 8)
+      } else if (col === 2) {
+        // Lounge: Fairy lights, cat tree, cat
+        ctx.strokeStyle = isWarm ? '#ffc860' : '#50b0ff'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(x + 10, y + 40)
+        ctx.quadraticCurveTo(x + 64, y + 60, x + 118, y + 42)
+        ctx.stroke()
+        for (let t = 0.15; t <= 0.85; t += 0.18) {
+          ctx.fillStyle = isWarm ? '#ffe890' : '#90e0ff'
+          const lx = x + 10 + t * 108
+          const ly = y + 40 + Math.sin(t * Math.PI) * 18
+          ctx.beginPath()
+          ctx.arc(lx, ly, 2.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.fillStyle = isWarm ? '#362420' : '#162030'
+        ctx.fillRect(x + 82, y + 110, 8, 80)
+        ctx.fillRect(x + 70, y + 110, 32, 6)
+        ctx.fillStyle = isWarm ? '#d67830' : '#d07028'
+        ctx.beginPath()
+        ctx.arc(x + 86, y + 104, 7, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = isWarm ? '#d67830' : '#d07028'
+        ctx.beginPath()
+        ctx.moveTo(x + 92, y + 106)
+        ctx.quadraticCurveTo(x + 97, y + 114, x + 94, y + 120)
+        ctx.stroke()
+        ctx.fillStyle = isWarm ? '#783850' : '#284868'
+        ctx.beginPath()
+        ctx.ellipse(x + 40, y + 175, 24, 12, 0, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        // Tech Room: Whiteboard, monitors, desk plant
+        ctx.fillStyle = isWarm ? '#d0c8b0' : '#304050'
+        ctx.fillRect(x + 16, y + 45, 54, 38)
+        ctx.fillStyle = isWarm ? '#201824' : '#101826'
+        ctx.fillRect(x + 20, y + 148, 92, 38)
+        ctx.fillStyle = isWarm ? '#ffe890' : '#48c0ff'
+        ctx.fillRect(x + 36, y + 130, 26, 18)
+        ctx.fillStyle = isWarm ? '#a0e8c0' : '#80e8ff'
+        ctx.fillRect(x + 66, y + 128, 28, 20)
+        ctx.fillStyle = isWarm ? '#c06030' : '#804020'
+        ctx.fillRect(x + 24, y + 142, 8, 8)
+        ctx.fillStyle = isWarm ? '#48a050' : '#309060'
+        ctx.beginPath()
+        ctx.arc(x + 28, y + 138, 5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      ctx.fillStyle = isWarm ? 'rgba(30, 18, 36, 0.85)' : 'rgba(12, 18, 30, 0.85)'
+      ctx.fillRect(x, y, 10, cellH)
+      ctx.fillRect(x + cellW - 10, y, 10, cellH)
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
+  return texture
+}
+
+function createSpillAlphaTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return new THREE.Texture()
+
+  const grad = ctx.createRadialGradient(64, 16, 4, 64, 48, 72)
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.95)')
+  grad.addColorStop(0.35, 'rgba(255, 255, 255, 0.65)')
+  grad.addColorStop(0.75, 'rgba(255, 255, 255, 0.15)')
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)')
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.moveTo(64, 16)
+  ctx.arc(64, 16, 100, 0.1 * Math.PI, 0.9 * Math.PI)
+  ctx.closePath()
+  ctx.fill()
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 // ---------------------------------------------------------------- volumetric mist + camera presets
 
 const VIEW_PRESETS = {
@@ -401,6 +596,30 @@ export class Scene {
 
     this.dorm = new THREE.Group()
     this.dormAnchor.add(this.dorm)
+
+    this._floorSigns = new Map()
+    this._pings = []
+
+    // Adaptive quality controller state (Features A1/A6)
+    this._quality = 3
+    this._frameTimes = new Float32Array(90)
+    this._frameTimeIdx = 0
+    this._frameCount = 0
+    this._degradeTimer = 0
+    this._upgradeTimer = 0
+    this._tempLocalCam = new THREE.Vector3()
+
+    // Shared procedural interior mapping atlas (Feature A1)
+    this._interiorAtlas = createInteriorAtlas()
+
+    // Spill decal alpha texture & InstancedMesh (Feature A2)
+    this._spillTex = createSpillAlphaTexture()
+    this.spillMesh = null
+
+    // Campus animated ecology references (Feature A5)
+    this._acFans = []
+    this.flashlight = null
+    this.flashlightMat = null
 
     this._buildSky()
     this._buildStars()
@@ -645,10 +864,251 @@ export class Scene {
       this._paintWindow(rec)
     }
 
+    this._acFans = []
+    glb.traverse(obj => {
+      if (obj.name && /^AC_Fan_/i.test(obj.name)) {
+        this._acFans.push(obj)
+      }
+    })
+
+    this._buildFloorSigns(def)
     this._attachDormAtmosphereLights()
+    this._buildSpillDecals()
     this.setSeason(this.season)
     this._syncSnowVisibility()
     this.setLitCount(this.windows.filter(w => w.state === WINDOW_STATES.LIT).length)
+  }
+
+  _createInteriorMaterial(idx, winW, winH) {
+    const depth = 38.0
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uAtlas: { value: this._interiorAtlas },
+        uCamLocal: { value: new THREE.Vector3(0, 0, 800) },
+        uWinSize: { value: new THREE.Vector2(winW, winH) },
+        uRoomDepth: { value: depth },
+        uRoomIndex: { value: idx % 4 },
+        uPaletteRow: { value: 0.0 },
+        uState: { value: 0.0 },
+        uWarmColor: { value: new THREE.Color(0xffc06a) },
+        uTime: { value: 0 }
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vLocalPos;
+        void main() {
+          vUv = uv;
+          vLocalPos = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+
+        varying vec2 vUv;
+        varying vec3 vLocalPos;
+
+        uniform sampler2D uAtlas;
+        uniform vec3 uCamLocal;
+        uniform vec2 uWinSize;
+        uniform float uRoomDepth;
+        uniform float uRoomIndex;
+        uniform float uPaletteRow;
+        uniform float uState;
+        uniform vec3 uWarmColor;
+        uniform float uTime;
+
+        void main() {
+          vec3 boxMin = vec3(-uWinSize.x * 0.5, -uWinSize.y * 0.5, -uRoomDepth);
+          vec3 boxMax = vec3(uWinSize.x * 0.5, uWinSize.y * 0.5, 0.0);
+
+          vec3 rayOrigin = uCamLocal;
+          vec3 rayDir = normalize(vLocalPos - uCamLocal);
+
+          vec3 invDir = 1.0 / (rayDir + vec3(equal(rayDir, vec3(0.0))) * 1e-6);
+          vec3 t0 = (boxMin - rayOrigin) * invDir;
+          vec3 t1 = (boxMax - rayOrigin) * invDir;
+          vec3 tMax = max(t0, t1);
+          float tFar = min(min(tMax.x, tMax.y), tMax.z);
+          vec3 hit = rayOrigin + rayDir * tFar;
+
+          vec3 normPos = (hit - boxMin) / (boxMax - boxMin);
+
+          vec2 roomUv;
+          if (tFar == tMax.z) {
+            roomUv = normPos.xy;
+          } else if (tFar == tMax.x) {
+            roomUv = (rayDir.x < 0.0) ? vec2(1.0 - normPos.z, normPos.y) : vec2(normPos.z, normPos.y);
+          } else {
+            roomUv = (rayDir.y < 0.0) ? vec2(normPos.x, normPos.z) : vec2(normPos.x, 1.0 - normPos.z);
+          }
+
+          roomUv = clamp(roomUv, 0.002, 0.998);
+
+          vec2 cellOffset = vec2(floor(mod(uRoomIndex, 4.0)) * 0.25, uPaletteRow * 0.5);
+          vec2 atlasUv = cellOffset + roomUv * vec2(0.25, 0.5);
+          vec4 roomTex = texture2D(uAtlas, atlasUv);
+
+          vec3 col;
+          if (uState < 0.5) {
+            col = roomTex.rgb * 0.035 + vec3(0.03, 0.045, 0.09) * (0.8 + 0.2 * vUv.y);
+          } else if (uState >= 2.5 && uState < 3.5) {
+            float flick = 0.94 + 0.06 * sin(uTime * 16.0 + uRoomIndex);
+            col = roomTex.rgb * vec3(0.40, 0.70, 1.15) * flick;
+          } else if (uState >= 4.5 && uState < 5.5) {
+            col = roomTex.rgb * vec3(0.45, 1.10, 0.65);
+          } else if (uState >= 5.5 && uState < 6.5) {
+            col = roomTex.rgb * vec3(1.15, 0.55, 0.35);
+          } else {
+            float breath = 1.0 + 0.04 * sin(uTime * 2.8 + uRoomIndex * 1.5);
+            col = roomTex.rgb * uWarmColor * breath;
+          }
+
+          float edgeDist = min(vUv.x, min(1.0 - vUv.x, min(vUv.y, 1.0 - vUv.y)));
+          float frame = smoothstep(0.015, 0.040, edgeDist);
+          vec3 frameCol = vec3(0.07, 0.06, 0.10);
+          col = mix(frameCol, col, frame);
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false
+    })
+  }
+
+  _buildSpillDecals() {
+    if (this.spillMesh) {
+      if (this.spillMesh.parent) this.spillMesh.parent.remove(this.spillMesh)
+      this.spillMesh.geometry.dispose()
+      this.spillMesh.dispose()
+      this.spillMesh = null
+    }
+
+    const count = Math.max(30, this.windows.length || 30)
+    const sampleW = /** @type {any} */ (this.windows[0]?.glass?.geometry)?.parameters?.width || 34
+    const sampleH = /** @type {any} */ (this.windows[0]?.glass?.geometry)?.parameters?.height || 44
+    const geom = new THREE.PlaneGeometry(sampleW * 1.6, sampleH * 2.2)
+    geom.translate(0, -sampleH * 0.75, 0)
+
+    const mat = new THREE.MeshBasicMaterial({
+      map: this._spillTex,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false
+    })
+
+    this.spillMesh = new THREE.InstancedMesh(geom, mat, count)
+    this.spillMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3)
+    this.spillMesh.frustumCulled = false
+    this.spillMesh.visible = this._quality >= 2
+
+    const dummy = new THREE.Object3D()
+    const zeroColor = new THREE.Color(0x000000)
+
+    for (let i = 0; i < count; i++) {
+      const w = this.windows[i]
+      if (w) {
+        dummy.position.set(w.home.x, w.home.y, w.home.z + 1.2)
+        dummy.scale.set(0, 0, 0)
+        dummy.updateMatrix()
+        this.spillMesh.setMatrixAt(i, dummy.matrix)
+        this.spillMesh.setColorAt(i, zeroColor)
+      }
+    }
+    this.spillMesh.instanceMatrix.needsUpdate = true
+    if (this.spillMesh.instanceColor) this.spillMesh.instanceColor.needsUpdate = true
+
+    this.dorm.add(this.spillMesh)
+    this._syncSpillDecals()
+  }
+
+  _syncSpillDecals() {
+    if (!this.spillMesh || !this.spillMesh.instanceColor) return
+    const dummy = new THREE.Object3D()
+    const color = new THREE.Color()
+    const warmHex = this._target ? this._target.warm : 0xffc06a
+
+    for (let i = 0; i < this.windows.length; i++) {
+      const w = this.windows[i]
+      const lit = w.state !== WINDOW_STATES.DARK
+      if (!lit) {
+        dummy.position.set(w.home.x, w.home.y, w.home.z + 1.2)
+        dummy.scale.set(0, 0, 0)
+        dummy.updateMatrix()
+        this.spillMesh.setMatrixAt(i, dummy.matrix)
+        color.set(0x000000)
+      } else {
+        dummy.position.set(w.home.x, w.home.y, w.home.z + 1.2)
+        dummy.scale.set(1, 1, 1)
+        dummy.updateMatrix()
+        this.spillMesh.setMatrixAt(i, dummy.matrix)
+
+        if (w.state === WINDOW_STATES.DECOY_BLUE) color.set(0x5588ff)
+        else if (w.state === WINDOW_STATES.CORRECT_GREEN) color.set(0x5ae696)
+        else if (w.state === WINDOW_STATES.WRONG_AMBER) color.set(0xff8866)
+        else color.set(warmHex)
+      }
+      this.spillMesh.setColorAt(i, color)
+    }
+    this.spillMesh.instanceMatrix.needsUpdate = true
+    this.spillMesh.instanceColor.needsUpdate = true
+  }
+
+  getQuality() {
+    return this._quality
+  }
+
+  setQuality(q) {
+    const level = Math.max(0, Math.min(3, Math.floor(q)))
+    if (this._quality === level) return
+    this._quality = level
+
+    const dpr = level === 3 ? (matchMedia('(pointer: coarse)').matches ? 1.5 : 2.0) : level === 2 ? 1.5 : level === 1 ? 1.25 : 1.0
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, dpr))
+    this._resize()
+
+    if (this.spillMesh) {
+      this.spillMesh.visible = level >= 2
+    }
+
+    if (this.painterly) {
+      this.painterly.material.uniforms.strength.value = (level === 0) ? 0.0 : 0.40
+      this.painterly.material.uniforms.uKuwaharaRadius.value = (level <= 1) ? 0.6 : 0.95
+    }
+
+    if (this.mistGroup) {
+      this.mistGroup.visible = (level >= 2) && (this._fogStrength > 0.015)
+    }
+
+    for (const w of this.windows) {
+      const isShader = Boolean(w.glass.material && /** @type {any} */ (w.glass.material).uniforms)
+      if (level >= 2 && !isShader) {
+        const winW = /** @type {any} */ (w.glass.geometry).parameters?.width || 34
+        const winH = /** @type {any} */ (w.glass.geometry).parameters?.height || 44
+        const oldMat = /** @type {any} */ (w.glass.material)
+        if (oldMat && oldMat.dispose) oldMat.dispose()
+        w.glass.material = this._createInteriorMaterial(w.idx, winW, winH)
+        w.texKey = ''
+        this._paintWindow(w)
+      } else if (level < 2 && isShader) {
+        const oldMat = /** @type {any} */ (w.glass.material)
+        if (oldMat && oldMat.dispose) oldMat.dispose()
+        w.glass.material = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
+        w.texKey = ''
+        this._paintWindow(w)
+      }
+    }
+  }
+
+  setCombo(combo) {
+    if (this.painterly) {
+      const norm = Math.min(1.0, Math.max(0, (combo || 0) / 15.0))
+      this.painterly.material.uniforms.uComboVignette.value = norm
+    }
   }
 
   _createInteractiveWindow(idx, roomId, r, c, x, y, z, winW, winH) {
@@ -670,9 +1130,13 @@ export class Scene {
     silhouette.position.z = 0.8
     group.add(silhouette)
 
+    const glassMat = this._quality >= 2
+      ? this._createInteriorMaterial(idx, winW, winH)
+      : new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
+
     const glass = new THREE.Mesh(
       new THREE.PlaneGeometry(winW, winH),
-      new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
+      glassMat
     )
     glass.position.z = 2.8
     glass.userData.idx = idx
@@ -764,16 +1228,39 @@ export class Scene {
     this.moths.position.set(-292, BASE_Y + 95, 190)
     this.dorm.add(this.moths)
 
-    // Cat sprite placeholder for rooftop surprise
+    // Rooftop cat: default visible so it's always part of campus ecology
     const cat = new THREE.Group()
     const cMat = new THREE.MeshStandardMaterial({ color: 0xd98038, roughness: 0.85 })
     const b = new THREE.Mesh(new THREE.SphereGeometry(5.5, 10, 8), cMat)
     b.scale.set(1.25, 0.9, 1)
     cat.add(b)
     cat.position.set(0, BASE_Y + 370, -10)
-    cat.visible = false
+    cat.visible = true
     this.dorm.add(cat)
     this.roofCat = cat
+
+    // Night watch flashlight cone at ground level (Feature A5)
+    const flashMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(0xfff2c8) }, uIntensity: { value: 0.35 }, uTime: { value: 0 } },
+      vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
+        'void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0);\n' +
+        '  vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);\n' +
+        '  gl_Position = projectionMatrix * mv; }',
+      fragmentShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
+        'uniform vec3 uColor; uniform float uIntensity; uniform float uTime;\n' +
+        'void main(){\n' +
+        '  float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);\n' +
+        '  float fall = pow(clamp(vUv.y, 0.0, 1.0), 1.6);\n' +
+        '  float flick = 0.95 + 0.05 * sin(uTime * 4.2 + vUv.y * 7.0);\n' +
+        '  gl_FragColor = vec4(uColor, uIntensity * fres * fall * flick);\n' +
+        '}'
+    })
+    this.flashlight = new THREE.Mesh(new THREE.ConeGeometry(38, 92, 16, 1, true), flashMat)
+    this.flashlight.position.set(-180, BASE_Y + 14, 160)
+    this.flashlight.rotation.x = Math.PI / 2 - 0.15
+    this.flashlightMat = flashMat
+    this.dorm.add(this.flashlight)
   }
 
   /** Instant fallback builder before GLB fetch settles (or in offline test runs). */
@@ -801,10 +1288,179 @@ export class Scene {
       this.windows.push(rec)
       this._paintWindow(rec)
     }
+    this._buildFloorSigns(def)
     this._attachDormAtmosphereLights()
+    this._buildSpillDecals()
+  }
+
+  _buildFloorSigns(def) {
+    this._clearFloorSigns()
+    if (!this._floorSigns) this._floorSigns = new Map()
+
+    const rows = def?.rows || 4
+    for (let r = 0; r < rows; r++) {
+      const floor = r + 1
+      const floorLabel = `${floor}F`
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 128
+      canvas.height = 64
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.clearRect(0, 0, 128, 64)
+        ctx.fillStyle = 'rgba(16, 12, 26, 0.82)'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(8, 8, 112, 48, 14)
+        } else {
+          ctx.rect(8, 8, 112, 48)
+        }
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255, 218, 160, 0.55)'
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+
+        ctx.fillStyle = '#fff4db'
+        ctx.font = 'bold 28px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(floorLabel, 64, 33)
+      }
+
+      const texture = new THREE.CanvasTexture(canvas)
+      texture.colorSpace = THREE.SRGBColorSpace
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+        toneMapped: false
+      })
+      const sprite = new THREE.Sprite(material)
+
+      const rowWins = this.windows.filter(w => w.r === r)
+      const minX = rowWins.length > 0 ? rowWins.reduce((min, w) => Math.min(min, w.home.x), 0) : (-((def?.cols || 6) - 1) * 32.5)
+      const winY = rowWins.length > 0 ? rowWins[0].home.y : (BASE_Y + 106 + r * 72)
+      const winZ = rowWins.length > 0 ? rowWins[0].home.z + 2 : 82
+
+      sprite.position.set(minX - 44, winY, winZ)
+      sprite.scale.set(34, 17, 1)
+      this.dorm.add(sprite)
+
+      this._floorSigns.set(floor, {
+        sprite,
+        texture,
+        material,
+        active: false,
+        baseScale: { x: 34, y: 17 }
+      })
+    }
+  }
+
+  /**
+   * Highlight building facade floor sign for a given floor (1-based, 1..5).
+   * @param {number} floor
+   * @param {boolean} [active=true]
+   */
+  highlightFloorSign(floor, active = true) {
+    if (!this._floorSigns) return
+    const sign = this._floorSigns.get(Number(floor))
+    if (!sign) return
+    sign.active = Boolean(active)
+    if (sign.active) {
+      sign.material.color.setHex(0xffea88)
+      sign.sprite.scale.set(sign.baseScale.x * 1.25, sign.baseScale.y * 1.25, 1)
+    } else {
+      sign.material.color.setHex(0xffffff)
+      sign.sprite.scale.set(sign.baseScale.x, sign.baseScale.y, 1)
+    }
+  }
+
+  /**
+   * Emit 2-second expanding radar ripple ring at target window room.
+   * @param {number} roomId
+   */
+  pingRoom(roomId) {
+    const w = this.windows.find(win => win.roomId === Number(roomId))
+    if (!w) return
+    this._spawnRadarPing(w.home.x, w.home.y, w.home.z + 4)
+    if (this.vfx) {
+      this.vfx.emitBurst(w.world, 0xffe2b0, 16, 1)
+    }
+    w.cur.halo = Math.max(w.cur.halo, 0.9)
+  }
+
+  /**
+   * Emit 2-second expanding radar ripple rings across all windows on a floor.
+   * @param {number} floor - 1-based floor number
+   */
+  pingFloor(floor) {
+    const f = Number(floor)
+    const floorWins = this.windows.filter(w => w.r === f - 1)
+    for (const w of floorWins) {
+      this._spawnRadarPing(w.home.x, w.home.y, w.home.z + 4)
+    }
+    this.highlightFloorSign(f, true)
+    setTimeout(() => this.highlightFloorSign(f, false), 2200)
+  }
+
+  _spawnRadarPing(x, y, z) {
+    if (!this._pings) this._pings = []
+    const geom = new THREE.RingGeometry(10, 13, 32)
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffdf80,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    })
+    const mesh = new THREE.Mesh(geom, mat)
+    mesh.position.set(x, y, z)
+    this.dorm.add(mesh)
+    this._pings.push({
+      mesh,
+      geom,
+      mat,
+      startedAt: performance.now(),
+      duration: 2000
+    })
+  }
+
+  _clearPings() {
+    if (!this._pings) return
+    for (const p of this._pings) {
+      if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh)
+      p.geom.dispose()
+      p.mat.dispose()
+    }
+    this._pings = []
+  }
+
+  _clearFloorSigns() {
+    if (!this._floorSigns) return
+    for (const item of this._floorSigns.values()) {
+      if (item.sprite && item.sprite.parent) item.sprite.parent.remove(item.sprite)
+      if (item.texture) item.texture.dispose()
+      if (item.material) item.material.dispose()
+    }
+    this._floorSigns.clear()
   }
 
   _clearGroup(group) {
+    if (group === this.dorm) {
+      this._clearPings()
+      this._clearFloorSigns()
+      if (this.spillMesh) {
+        if (this.spillMesh.parent) this.spillMesh.parent.remove(this.spillMesh)
+        this.spillMesh.geometry.dispose()
+        this.spillMesh.dispose()
+        this.spillMesh = null
+      }
+      this._acFans = []
+      this.flashlight = null
+      this.flashlightMat = null
+      this.roofCat = null
+    }
     while (group.children.length) {
       const ch = group.children[0]
       group.remove(ch)
@@ -1373,12 +2029,31 @@ export class Scene {
       }
     }
     w.texKey = key
-    const glassMat = /** @type {THREE.MeshBasicMaterial} */ (w.glass.material)
-    glassMat.map = tex
-    glassMat.needsUpdate = true
 
     const lit = w.state !== WINDOW_STATES.DARK
-    glassMat.color.set(lit ? 0xffffff : 0xa9c6ee)
+
+    if (w.glass.material && /** @type {any} */ (w.glass.material).uniforms) {
+      const u = /** @type {any} */ (w.glass.material).uniforms
+      let stateNum = 0.0
+      if (w.state === WINDOW_STATES.LIT) stateNum = 1.0
+      else if (w.state === WINDOW_STATES.GLIMMER) stateNum = 2.0
+      else if (w.state === WINDOW_STATES.DECOY_BLUE) stateNum = 3.0
+      else if (w.state === WINDOW_STATES.TARGET_HINT) stateNum = 4.0
+      else if (w.state === WINDOW_STATES.CORRECT_GREEN) stateNum = 5.0
+      else if (w.state === WINDOW_STATES.WRONG_AMBER) stateNum = 6.0
+      else if (w.state === WINDOW_STATES.STORY_BEACON) stateNum = 7.0
+      else if (w.state === WINDOW_STATES.RESONANCE_PAIR) stateNum = 8.0
+      else if (w.state === WINDOW_STATES.SAFE_WARM) stateNum = 9.0
+
+      u.uState.value = stateNum
+      u.uPaletteRow.value = (w.state === WINDOW_STATES.DECOY_BLUE) ? 1.0 : 0.0
+      u.uWarmColor.value.set(warm)
+    } else {
+      const glassMat = /** @type {THREE.MeshBasicMaterial} */ (w.glass.material)
+      glassMat.map = tex
+      glassMat.needsUpdate = true
+      glassMat.color.set(lit ? 0xffffff : 0xa9c6ee)
+    }
 
     const silMat = /** @type {THREE.MeshBasicMaterial} */ (w.silhouette.material)
     const backMat = /** @type {THREE.MeshBasicMaterial} */ (w.backPanel.material)
@@ -1400,6 +2075,8 @@ export class Scene {
     w.target.glow = lit ? (w.state === WINDOW_STATES.LIT || w.state === WINDOW_STATES.TARGET_HINT ? 0.62 : 0.48) : 0
     w.target.halo = (w.state === WINDOW_STATES.GLIMMER || w.state === WINDOW_STATES.RESONANCE_PAIR || w.state === WINDOW_STATES.TARGET_HINT || w.state === WINDOW_STATES.DECOY_BLUE) ? 1 : 0
     w.target.beacon = w.state === WINDOW_STATES.STORY_BEACON ? 1 : 0
+
+    this._syncSpillDecals()
   }
 
   /** @param {number|WindowRecord} target @param {string} state */
@@ -1430,6 +2107,36 @@ export class Scene {
   burstWindow(idx, color) {
     const w = this.windows[idx]
     if (w) this.burstAt(w, color)
+  }
+
+  /**
+   * C3 Golden wave sweep burst across all windows on a given floor / row.
+   * @param {number} rowIndex 0-based row index or 1-based floor number
+   */
+  sweepFloor(rowIndex) {
+    const targetRow = (rowIndex >= 1 && rowIndex <= 5) ? rowIndex - 1 : rowIndex
+    const rowWindows = this.windows
+      .filter(w => w.r === targetRow || Math.floor(w.roomId / 100) === (targetRow + 1))
+      .sort((a, b) => a.c - b.c)
+
+    const floorNum = targetRow + 1
+    if (typeof this.highlightFloorSign === 'function') {
+      this.highlightFloorSign(floorNum, true)
+      setTimeout(() => {
+        if (typeof this.highlightFloorSign === 'function') {
+          this.highlightFloorSign(floorNum, false)
+        }
+      }, 2200)
+    }
+
+    rowWindows.forEach((w, colIdx) => {
+      setTimeout(() => {
+        this.burstAt(w, 0xffd700)
+        if (this.vfx && this.vfx.emitBurst) {
+          this.vfx.emitBurst(w.world, 0xfff0aa, 12, 1)
+        }
+      }, colIdx * 65)
+    })
   }
 
   resetWindows() {
@@ -1473,7 +2180,9 @@ export class Scene {
     this.warmLight.color.set(this._target ? this._target.warm : 0xffb060)
     if (this.doorGlow) this.doorGlow.material.opacity = 0.12 + p * 0.78
     if (this.doorLight) this.doorLight.intensity = 45 + p * 120
-    this.bloom.strength = 0.42 + p * 0.34
+    this.bloom.strength = 0.45 + p * 0.17
+    this.renderer.toneMappingExposure = 1.18 + p * 0.10
+    this._syncSpillDecals()
   }
 
   setResonancePair(a, b) {
@@ -1746,10 +2455,61 @@ export class Scene {
     for (let i = 0; i < 14; i++) {
       this.vfx.emitBurst(new THREE.Vector3().lerpVectors(from, to, i / 14), 0xfff4d0, 2, 2)
     }
-    const streak = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([from, to]),
-      new THREE.LineBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending })
-    )
+
+    const segments = 16
+    const ribbonVerts = (segments + 1) * 2
+    const positions = new Float32Array(ribbonVerts * 3)
+    const indices = new Uint16Array(segments * 6)
+
+    const dir = new THREE.Vector3().subVectors(to, from).normalize()
+    const camDir = new THREE.Vector3().subVectors(from, this.camera.position).normalize()
+    const normal = new THREE.Vector3().crossVectors(dir, camDir).normalize()
+
+    const maxW = 7.5
+    for (let i = 0; i <= segments; i++) {
+      const u = i / segments
+      const pt = new THREE.Vector3().lerpVectors(from, to, u)
+      const w = maxW * u
+      const v0 = i * 2
+      const v1 = i * 2 + 1
+
+      positions[v0 * 3] = pt.x - normal.x * w
+      positions[v0 * 3 + 1] = pt.y - normal.y * w
+      positions[v0 * 3 + 2] = pt.z - normal.z * w
+
+      positions[v1 * 3] = pt.x + normal.x * w
+      positions[v1 * 3 + 1] = pt.y + normal.y * w
+      positions[v1 * 3 + 2] = pt.z + normal.z * w
+    }
+
+    for (let i = 0; i < segments; i++) {
+      const l0 = i * 2
+      const r0 = i * 2 + 1
+      const l1 = (i + 1) * 2
+      const r1 = (i + 1) * 2 + 1
+      const idx = i * 6
+      indices[idx] = l0
+      indices[idx + 1] = r0
+      indices[idx + 2] = l1
+      indices[idx + 3] = r0
+      indices[idx + 4] = r1
+      indices[idx + 5] = l1
+    }
+
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geom.setIndex(new THREE.BufferAttribute(indices, 1))
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xfff2c8,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+
+    const streak = new THREE.Mesh(geom, mat)
     this.scene.add(streak)
     const start = performance.now()
     const step = () => {
@@ -1828,6 +2588,92 @@ export class Scene {
     const t = (now - this._t0) / 1000
     const dt = Math.min((now - this._lastNow) / 1000, 0.05)
     this._lastNow = now
+
+    // Adaptive quality controller: rolling 90-frame window averaging delta frame times (Feature A6)
+    const dtMs = dt * 1000
+    this._frameTimes[this._frameTimeIdx] = dtMs
+    this._frameTimeIdx = (this._frameTimeIdx + 1) % 90
+    this._frameCount = Math.min(90, this._frameCount + 1)
+
+    if (this._frameCount >= 90) {
+      let sum = 0
+      for (let i = 0; i < 90; i++) sum += this._frameTimes[i]
+      const avgMs = sum / 90
+
+      if (avgMs > 24.0) {
+        this._degradeTimer += dt
+        this._upgradeTimer = 0
+        if (this._degradeTimer >= 2.0 && this._quality > 0) {
+          this.setQuality(this._quality - 1)
+          this._degradeTimer = 0
+        }
+      } else if (avgMs < 12.0) {
+        this._upgradeTimer += dt
+        this._degradeTimer = 0
+        if (this._upgradeTimer >= 6.0 && this._quality < 3) {
+          this.setQuality(this._quality + 1)
+          this._upgradeTimer = 0
+        }
+      } else {
+        this._degradeTimer = Math.max(0, this._degradeTimer - dt)
+        this._upgradeTimer = Math.max(0, this._upgradeTimer - dt)
+      }
+    }
+
+    // Facade bloom, exposure & puddle glow easing linked to lit window ratio (Feature A2)
+    const totalWins = Math.max(1, this.windows.length)
+    const litWins = this.windows.filter(w => w.state !== WINDOW_STATES.DARK).length
+    const pLit = litWins / totalWins
+    const targetBloom = 0.45 + 0.17 * pLit
+    const targetExposure = 1.18 + 0.10 * pLit
+    if (this.bloom) {
+      this.bloom.strength += (targetBloom - this.bloom.strength) * Math.min(1, dt * 2.5)
+    }
+    if (this.renderer) {
+      this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1, dt * 2.5)
+    }
+    if (this.puddleUniforms) {
+      this.puddleUniforms.uWarmGlow.value += (pLit - this.puddleUniforms.uWarmGlow.value) * Math.min(1, dt * 2.5)
+    }
+
+    // Campus animated ecology details (Feature A5)
+    // 1. AC outdoor unit fan rotation
+    if (this._acFans && this._acFans.length) {
+      const fanDelta = dt * 9.0
+      for (let i = 0; i < this._acFans.length; i++) {
+        this._acFans[i].rotation.y += fanDelta
+      }
+    }
+
+    // 2. Night watch flashlight sweep at ground level
+    if (this.flashlight) {
+      if (this.flashlightMat) this.flashlightMat.uniforms.uTime.value = t
+      const patrolCycle = t * (Math.PI * 2 / 18.0)
+      this.flashlight.position.x = Math.sin(patrolCycle) * 220
+      const sweepAngle = Math.sin(t * 1.8) * 0.35 + (Math.cos(patrolCycle) > 0 ? 0.3 : -0.3)
+      this.flashlight.rotation.z = sweepAngle
+    }
+
+    // 3. Rooftop cat idle breathing/tail sway
+    if (this.roofCat) {
+      const breathe = 1.0 + 0.04 * Math.sin(t * 2.2)
+      this.roofCat.scale.set(1.25, 0.9 * breathe, 1.0)
+      this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 1.1) * 1.5
+    }
+
+    // Update window interior mapping shader camera uniform uCamLocal efficiently (Feature A1)
+    if (this._quality >= 2) {
+      const camPos = this.camera.position
+      for (let i = 0; i < this.windows.length; i++) {
+        const w = this.windows[i]
+        const mat = /** @type {any} */ (w.glass.material)
+        if (mat.uniforms && mat.uniforms.uCamLocal) {
+          w.group.worldToLocal(this._tempLocalCam.copy(camPos))
+          mat.uniforms.uCamLocal.value.copy(this._tempLocalCam)
+          mat.uniforms.uTime.value = t
+        }
+      }
+    }
 
     if (this._skyTo && this._skyT < 1) {
       this._skyT = Math.min(1, this._skyT + 0.02)
@@ -1984,6 +2830,32 @@ export class Scene {
       }
     }
 
+    if (this._floorSigns) {
+      for (const item of this._floorSigns.values()) {
+        if (item.active) {
+          const pulse = 1.0 + 0.12 * Math.sin(t * 8.0)
+          item.sprite.scale.set(item.baseScale.x * 1.25 * pulse, item.baseScale.y * 1.25 * pulse, 1)
+        }
+      }
+    }
+    if (this._pings && this._pings.length > 0) {
+      const nowMs = performance.now()
+      for (let i = this._pings.length - 1; i >= 0; i--) {
+        const p = this._pings[i]
+        const prog = (nowMs - p.startedAt) / p.duration
+        if (prog >= 1) {
+          if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh)
+          p.geom.dispose()
+          p.mat.dispose()
+          this._pings.splice(i, 1)
+        } else {
+          const s = 1.0 + 2.5 * prog
+          p.mesh.scale.set(s, s, 1)
+          p.mat.opacity = Math.pow(1 - prog, 1.3) * 0.95
+        }
+      }
+    }
+
     if (this.vfx) this.vfx.update(t)
     if (this.painterly) {
       const u = this.painterly.material.uniforms
@@ -1995,6 +2867,16 @@ export class Scene {
   }
 
   dispose() {
+    this._clearPings()
+    this._clearFloorSigns()
+    if (this.spillMesh) {
+      if (this.spillMesh.parent) this.spillMesh.parent.remove(this.spillMesh)
+      this.spillMesh.geometry.dispose()
+      this.spillMesh.dispose()
+      this.spillMesh = null
+    }
+    if (this._spillTex) this._spillTex.dispose()
+    if (this._interiorAtlas) this._interiorAtlas.dispose()
     this.renderer.setAnimationLoop(null)
     document.removeEventListener('visibilitychange', this._onVis)
     if (this.controls) this.controls.dispose()

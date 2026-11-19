@@ -8,6 +8,10 @@
 //   - Random Events, Visible AI Agents & Rank-Aware Settlement + Postcard
 
 import { PALETTES } from './scene.js'
+import { TutorialStateMachine, TUTORIAL_STATES } from './tutorial.js'
+import { DifficultyDirector } from './difficulty.js'
+import { CrisisManager } from './crisis.js'
+import { ReplayRecorder, REPLAY_EVENT_TYPES } from './replay.js'
 import { AIClient, FALLBACK_NIGHTS, getUserApiKeyStatus, verifyUserApiKey } from './ai.js'
 import {
   ensureNickname, loadRecords, saveRecords, saveNickname,
@@ -18,7 +22,8 @@ import { drawPostcard } from './postcard.js'
 import {
   gainForCombo, gainForDragChain, isChainCallout, shouldEncore,
   pickSurprise, canSurprise, comboMilestone, pickNextGlimmerWindow,
-  evaluateCommissions, resolveEnding, bumpBond, actionableCount
+  evaluateCommissions, resolveEnding, bumpBond, actionableCount,
+  floorCleared
 } from './game-logic.js'
 import {
   NIGHT_COUNT, NIGHT_SECONDS, WINDOW_STATES,
@@ -103,6 +108,20 @@ export class Game {
     this._surprise = { lastAt: -9000, sinceRare: 0 }
     this._events = { star: 0, cat: 0, lanterns: 0, golden: 0, chain: 0 }
 
+    this.tutorial = new TutorialStateMachine({
+      onStateChange: (next, prev) => this._onTutorialStateChange(next, prev)
+    })
+    this._tutorialActive = false
+    /** @type {number[]} */
+    this._tutorialTargetRooms = []
+    /** @type {string|null} */
+    this._pendingModeLaunch = null
+
+    // P2: Difficulty Director, Random Crisis Manager, Replay Recorder
+    this.difficulty = new DifficultyDirector()
+    this.crisis = new CrisisManager()
+    this.replay = new ReplayRecorder(400)
+
     addEventListener('keydown', e => {
       if (e.key === 'Escape' && (this.state === 'night' || this.state === 'paused')) this.togglePause()
     })
@@ -137,23 +156,36 @@ export class Game {
     cancelAnimationFrame(this._raf)
     cancelAnimationFrame(this._coachRaf)
     this.mg = null
+    if (this.ui && this.ui.hideTutorialOverlay) this.ui.hideTutorialOverlay()
   }
 
   toggleOrbitLock() {
     this.orbitLocked = !this.orbitLocked
     this.scene.setOrbitLocked(this.orbitLocked)
     if (this.ui && this.ui.updateOrbitBadge) this.ui.updateOrbitBadge(this.orbitLocked)
-    this.ui.toast(
-      this.orbitLocked ? '🔒 视角已固定（专注点/划连窗）' : '🔄 自由转看模式（可拖拽旋转楼体）',
-      this.orbitLocked ? '右键拖拽或双指仍可微调视角' : '点击顶部按钮可随时重新固定'
-    )
+    if (this.ui && this.ui.showHintBubble) {
+      if (this.orbitLocked) {
+        this.ui.showHintBubble('[data-orbitbadge]', '🔒 固定连窗已开启', '专注连窗不误转，右键/双指可微调视角', 3200)
+      } else {
+        this.ui.showHintBubble('[data-orbitbadge]', '🔄 自由转看已开启', '拖拽可旋转楼体，随时点击重新固定', 3200)
+      }
+    } else {
+      this.ui.toast(
+        this.orbitLocked ? '🔒 视角已固定（专注点/划连窗）' : '🔄 自由转看模式（可拖拽旋转楼体）',
+        this.orbitLocked ? '右键拖拽或双指仍可微调视角' : '点击顶部按钮可随时重新固定'
+      )
+    }
     return this.orbitLocked
   }
 
   resetFrontView() {
     this.viewId = 'front'
     this.scene.setCameraView('front', false)
-    this.ui.toast('↺ 已回正正面最佳连窗视角', '')
+    if (this.ui && this.ui.showHintBubble) {
+      this.ui.showHintBubble('[data-act="reset-view"]', '↺ 视角已回正', '已切回正面最佳视角', 2600)
+    } else {
+      this.ui.toast('↺ 已回正正面最佳连窗视角', '')
+    }
   }
 
   _setNickname(raw) {
@@ -439,6 +471,12 @@ export class Game {
     this.records.preferredMode = this.gameMode
     saveRecords(this.records)
 
+    if (this.tutorial && !this.tutorial.isCompleted()) {
+      this._pendingModeLaunch = this.gameMode
+      this.start()
+      return
+    }
+
     if (this.gameMode === 'star_sweep') {
       this.start()
       return
@@ -633,6 +671,7 @@ export class Game {
 
     const res = stepMemoryTap(mg.memState, w.idx)
     if (res.outcome === 'ignored' || res.outcome === 'duplicate') return
+    if (this.difficulty) this.difficulty.recordTap(res.outcome === 'correct', 0, false)
 
     let shieldSaved = false
     if (res.outcome === 'correct') {
@@ -805,6 +844,7 @@ export class Game {
     if (!mg) return
     const res = resolvePatrolTap(w.state, mg.combo)
     if (res.result === 'empty') return
+    if (this.difficulty) this.difficulty.recordTap(res.correctDelta > 0, 0, false)
 
     if (res.correctDelta > 0) {
       mg.combo = res.combo
@@ -925,6 +965,7 @@ export class Game {
     if (!mg || mg.kind !== 'lights_out_puzzle') return
     this.ui.hideCoach()
     mg.moves += 1
+    if (this.difficulty) this.difficulty.recordTap(true, 0, false)
     mg.litHistory.add(w.roomId)
     mg.grid = toggleCross(mg.grid, w.idx, mg.rows, mg.cols)
     const flipped = crossIndices(w.idx, mg.rows, mg.cols).length
@@ -1161,12 +1202,17 @@ export class Game {
       nextSpawnAt: now + 400,
       beaconAt: (STORY_BEACON_SCHEDULE[index] || []).slice(),
       resonanceAt: (RESONANCE_SCHEDULE[index] || []).slice(),
-      evolveFired: false, allLit: false, encore: false, ended: false, choices: []
+      evolveFired: false, allLit: false, encore: false, ended: false, choices: [],
+      clearedFloors: new Set()
     }
     this._surprise = { lastAt: -9000, sinceRare: 0 }
     this._chain = this.night.chain
     this._comboFreezeUntil = 0
     this._pendingRes = null
+
+    this.difficulty.reset()
+    this.crisis.reset({ availableRooms: this.scene.windows.map(w => w.roomId) })
+    this.replay.reset()
 
     for (let i = 0; i < cfg.initialGlimmer; i++) this._wakeRandom(false)
 
@@ -1181,10 +1227,16 @@ export class Game {
       onResetView: () => this.resetFrontView(),
       onAdvanceNight: () => this.advanceNightEarly(),
       onPause: () => this.togglePause(), onMute: () => this.toggleMute(),
-      muted: this.audio ? this.audio.muted : false
+      muted: this.audio ? this.audio.muted : false,
+      onPingCommission: c => this.pingCommission(c),
+      onReplayTutorial: () => this.replayTutorial()
     })
     this._checkCommissions()
-    this._showCoachIfNeeded()
+    if (!this.tutorial.isCompleted()) {
+      this._startTutorial()
+    } else {
+      this._showCoachIfNeeded()
+    }
     this._startTicker()
   }
 
@@ -1214,6 +1266,134 @@ export class Game {
     this._coachRaf = requestAnimationFrame(track)
   }
 
+  _startTutorial() {
+    this._tutorialActive = true
+    this.tutorial.start(true)
+    this._setupTutorialStep(this.tutorial.getState())
+  }
+
+  _onTutorialStateChange(nextState, prevState) {
+    if (nextState === TUTORIAL_STATES.DONE) {
+      this._tutorialActive = false
+      this.ui.hideTutorialOverlay()
+      this.ui.toast('太棒了！已掌握夜巡基本功', '现在开始自由点亮夜晚')
+      if (this.night) {
+        const now = performance.now()
+        this.night.startedAt = now
+        this.night.endsAt = now + NIGHT_SECONDS * 1000
+        this.night.timeLeft = NIGHT_SECONDS
+      }
+      if (this._pendingModeLaunch) {
+        const mode = this._pendingModeLaunch
+        this._pendingModeLaunch = null
+        this.launchGame(mode)
+      }
+    } else {
+      this._setupTutorialStep(nextState)
+    }
+  }
+
+  _setupTutorialStep(step) {
+    if (!this.night) return
+    this.scene.resetWindows()
+    this.scene.clearResonancePair()
+
+    if (step === TUTORIAL_STATES.STEP1_TAP) {
+      const w = this.scene.windows[0] || this.scene.windows.find(x => CORE_RESIDENT_ROOMS.includes(x.roomId))
+      if (w) {
+        this.scene.setWindowState(w, WINDOW_STATES.GLIMMER)
+        w.expiresAt = Infinity
+        this._tutorialTargetRooms = [w.roomId]
+      }
+      this.ui.showTutorialOverlay({
+        step,
+        title: '点一下点亮微光窗',
+        desc: '轻触发光的窗户，让暖意充满房间',
+        onSkip: () => this.skipTutorial()
+      })
+    } else if (step === TUTORIAL_STATES.STEP2_DRAG) {
+      const def = dormDef(this.dormId)
+      const targetRow = Math.min(1, def.rows - 1)
+      const rowWins = this.scene.windows.filter(w => w.r === targetRow).sort((a, b) => a.c - b.c)
+      const wins3 = rowWins.slice(0, 3)
+      for (const w of wins3) {
+        this.scene.setWindowState(w, WINDOW_STATES.GLIMMER)
+        w.expiresAt = Infinity
+      }
+      this._tutorialTargetRooms = wins3.map(w => w.roomId)
+      this.ui.showTutorialOverlay({
+        step,
+        title: '按住顺滑拖连 3 窗',
+        desc: '按住鼠标左键或手指，从 ① 连续滑过 ② 到 ③',
+        onSkip: () => this.skipTutorial()
+      })
+      this.ui.showHintBubble('[data-orbitbadge]', '🔒 固定连窗', '当前为固定连窗，右键/双指可微调视角', 3800)
+    } else if (step === TUTORIAL_STATES.STEP3_BRIDGE) {
+      const wA = this.scene.windows[0]
+      const wB = this.scene.windows[this.scene.windows.length - 1]
+      if (wA && wB) {
+        this.scene.setResonancePair(wA.roomId, wB.roomId)
+        this._tutorialTargetRooms = [wA.roomId, wB.roomId]
+      }
+      this.ui.showTutorialOverlay({
+        step,
+        title: '连接青色星桥',
+        desc: '星轨连窗！拖连或依次点按两扇带有星桥标记的窗户',
+        onSkip: () => this.skipTutorial()
+      })
+    }
+  }
+
+  skipTutorial() {
+    this.tutorial.skip()
+  }
+
+  replayTutorial() {
+    this._tutorialActive = true
+    this.tutorial.replay()
+    this._setupTutorialStep(this.tutorial.getState())
+  }
+
+  pingCommission(c) {
+    if (!c || !this.scene) return
+    if (c.type === 'row_lit' || c.floor) {
+      const f = Number(c.floor) || 3
+      this.scene.pingFloor(f)
+      this.ui.toast(`正在定位 ${f}F 整层窗户`, '完成整层点亮即可盖章')
+    } else if (c.roomId || c.room) {
+      const r = Number(c.roomId || c.room)
+      this.scene.pingRoom(r)
+      this.ui.toast(`正在定位 ${r} 室`, '按手账指引点亮目标')
+    } else if (c.type === 'resonance') {
+      const pair = this.scene.resonancePair
+      if (pair) {
+        this.scene.pingRoom(pair.a)
+        this.scene.pingRoom(pair.b)
+        this.ui.toast(`正在定位星桥 ${pair.a} 与 ${pair.b} 室`, '拖划或点按两扇青色星桥窗')
+      } else {
+        const act = this.scene.actionableWindows()
+        if (act.length > 0) this.scene.pingRoom(act[0].roomId)
+        this.ui.toast('等待星轨出现', '出现时将在楼面连起青色虚线')
+      }
+    } else if (c.type === 'story_choice') {
+      const beacon = this.scene.windows.find(w => w.state === WINDOW_STATES.STORY_BEACON)
+      if (beacon) {
+        this.scene.pingRoom(beacon.roomId)
+        this.ui.toast(`正在定位剧情信标 ${beacon.roomId} 室`, '点亮即可聆听今夜故事')
+      } else {
+        const act = this.scene.actionableWindows()
+        if (act.length > 0) this.scene.pingRoom(act[0].roomId)
+        this.ui.toast('剧情信标稍后点亮', '留意楼面上的橙红信标')
+      }
+    } else {
+      const act = this.scene.actionableWindows()
+      if (act.length > 0) {
+        this.scene.pingRoom(act[0].roomId)
+        this.ui.toast('已为您高亮目标窗', '快速点亮或连划')
+      }
+    }
+  }
+
   _wakeRandom(respectCap = true) {
     const n = this.night
     if (!n) return null
@@ -1221,7 +1401,8 @@ export class Game {
     const w = /** @type {any} */ (pickNextGlimmerWindow(this.scene.windows, CORE_RESIDENT_ROOMS))
     if (!w) return null
     this.scene.setWindowState(w, WINDOW_STATES.GLIMMER)
-    w.expiresAt = performance.now() + n.cfg.glimmerDurationMs
+    const ddaScales = this.difficulty ? this.difficulty.getScales() : { glimmerDurationScale: 1.0 }
+    w.expiresAt = performance.now() + (n.cfg.glimmerDurationMs * (ddaScales.glimmerDurationScale || 1.0))
     return w
   }
 
@@ -1236,7 +1417,8 @@ export class Game {
     }
     if (now >= n.nextSpawnAt) {
       this._wakeRandom(true)
-      n.nextSpawnAt = now + n.cfg.spawnIntervalMs * (0.85 + Math.random() * 0.3)
+      const ddaScales = this.difficulty ? this.difficulty.getScales() : { spawnIntervalScale: 1.0 }
+      n.nextSpawnAt = now + (n.cfg.spawnIntervalMs * (ddaScales.spawnIntervalScale || 1.0)) * (0.85 + Math.random() * 0.3)
     }
   }
 
@@ -1308,7 +1490,32 @@ export class Game {
     if (!comboAlive && n.combo > 0) { n.combo = 0; this.ui.combo(0) }
     this._lastTap = now
 
+    // P2: C2 Night Patrol Crisis resolution check
+    if (this.crisis && this.crisis.getActiveCrisis()) {
+      const crisisRes = this.crisis.onTap(w.roomId)
+      if (crisisRes) {
+        if (crisisRes.resolved) {
+          n.warmth += crisisRes.bonusWarmth
+          this.run.totalWarmth += crisisRes.bonusWarmth
+          this.ui.hideCrisisPrompt()
+          this.ui.banner('🎉 ' + crisisRes.title + ' 顺利解决！', '夜巡排障 · 温暖 +' + crisisRes.bonusWarmth)
+          this.ui.floatText('+' + crisisRes.bonusWarmth + ' 🌟', x, y, '#ffd700', 'big')
+          if (this.audio) (typeof this.audio.correct === 'function' ? this.audio.correct() : this.audio.tap(5))
+          this.scene.burstAt(w, 0xffd700)
+          if (this.replay) this.replay.record(now - n.startedAt, REPLAY_EVENT_TYPES.CRISIS, w.idx, x, y, w.roomId)
+          this._afterScore()
+          return
+        } else {
+          this.ui.updateCrisisPrompt(this.crisis.getActiveCrisis())
+          this.scene.burstAt(w, 0xffa050)
+          if (this.audio) this.audio.tap(crisisRes.currentTaps || 1)
+          return
+        }
+      }
+    }
+
     if (w.state === WINDOW_STATES.LIT) {
+      if (this.difficulty) this.difficulty.recordTap(true, 0, false)
       n.combo += 1; n.maxCombo = Math.max(n.maxCombo, n.combo); this.run.maxCombo = Math.max(this.run.maxCombo, n.combo)
       n.warmth += LIT_RETAP_GAIN
       this.ui.floatText('+' + LIT_RETAP_GAIN, x, y, '#ffe7b0')
@@ -1321,6 +1528,7 @@ export class Game {
     }
 
     if (w.state === WINDOW_STATES.DARK) {
+      if (this.difficulty) this.difficulty.recordTap(false, 0, false)
       n.warmth += DARK_TAP_GAIN
       this.ui.floatText('+' + DARK_TAP_GAIN, x, y, '#9fb4d8')
       this.ui.shockwave(x, y)
@@ -1354,10 +1562,14 @@ export class Game {
     }
 
     const wasBeacon = w.state === WINDOW_STATES.STORY_BEACON
+    if (this.difficulty) this.difficulty.recordTap(true, 0, false)
     n.combo += 1; n.maxCombo = Math.max(n.maxCombo, n.combo); this.run.maxCombo = Math.max(this.run.maxCombo, n.combo)
     const gain = wasBeacon ? STORY_BEACON_GAIN : gainForCombo(n.combo)
     n.warmth += gain
     this._lightWindow(w, gain, x, y)
+    if (this.tutorial && this.tutorial.isActive()) {
+      this.tutorial.onTap(w)
+    }
     if (this.audio) this.audio.tap(n.combo)
     this.ui.combo(n.combo)
     this.scene.pulseCameraFov(n.combo >= 8 ? 0.8 : 0.35)
@@ -1380,6 +1592,35 @@ export class Game {
       if (this.audio) this.audio.setLitCount(n.litCount)
       this.ui.floatText('+' + gain, x, y, '#ffe7b0', 'big')
       if (this.audio) this.audio.lit(w.roomId)
+
+      // C3 Floor Clear check
+      const floor = Math.floor(w.roomId / 100)
+      if (floor >= 1 && (!n.clearedFloors || !n.clearedFloors.has(floor))) {
+        if (!n.clearedFloors) n.clearedFloors = new Set()
+        const dormDefObj = dormDef(this.dormId)
+        const cols = dormDefObj ? dormDefObj.cols : 6
+        if (floorCleared(this.scene.windows, floor, cols)) {
+          n.clearedFloors.add(floor)
+          n.warmth += 18
+          this.run.totalWarmth += 18
+          if (this.scene && typeof this.scene.sweepFloor === 'function') {
+            this.scene.sweepFloor(w.r ?? (floor - 1))
+          }
+          if (this.audio && typeof this.audio.floorClear === 'function') {
+            this.audio.floorClear()
+          }
+          this.ui.banner('🌟 ' + floor + 'F 整层制霸！', '整层宿舍彻夜明亮 · 温暖 +18')
+          this.ui.floatText('+18 👑', x, y - 28, '#ffd700', 'big')
+          if (this.replay) {
+            this.replay.record(performance.now() - n.startedAt, 'floor_clear', w.idx, x, y, w.roomId)
+          }
+        }
+      }
+
+      // C5 Replay recording
+      if (this.replay) {
+        this.replay.record(performance.now() - n.startedAt, REPLAY_EVENT_TYPES.LIT, w.idx, x, y, w.roomId)
+      }
     }
   }
 
@@ -1487,15 +1728,29 @@ export class Game {
     if (w.state !== WINDOW_STATES.GLIMMER && w.state !== WINDOW_STATES.STORY_BEACON) return
 
     n.chain.count += 1; n.chain.ids.add(w.idx); n.bestChain = Math.max(n.bestChain, n.chain.count)
+    if (this.difficulty) this.difficulty.recordTap(true, 0, true)
+    if (this.replay) this.replay.record(performance.now() - n.startedAt, REPLAY_EVENT_TYPES.CHAIN, w.idx, x, y, w.roomId)
     const wasBeacon = w.state === WINDOW_STATES.STORY_BEACON
     const gain = gainForDragChain(n.combo, n.chain.count)
     n.combo += 1; n.maxCombo = Math.max(n.maxCombo, n.combo); this.run.maxCombo = Math.max(this.run.maxCombo, n.combo)
     n.warmth += gain
     this._lightWindow(w, gain, x, y)
+    if (this.tutorial && this.tutorial.isActive()) {
+      this.tutorial.onTap(w)
+    }
     this.ui.combo(n.combo); this.ui.shockwave(x, y)
     if (n.chain.count === 2) this.ui.floatText('连光 2/3 · 再划 1 扇!', x, y - 24, '#ffd48a')
     if (this.ribbon) this.ribbon.pulse(x, y)
-    if (this.audio) this.audio.tap(n.combo)
+    if (this.audio) {
+      this.audio.tap(n.combo)
+      if (this.audio.chainNote) this.audio.chainNote(n.chain.count)
+    }
+    if (this.ui && this.ui.showSequenceBadge) {
+      this.ui.showSequenceBadge(x, y, n.chain.count)
+    }
+    if (this.tutorial && this.tutorial.isActive()) {
+      this.tutorial.onDrag(n.chain.count)
+    }
     if (wasBeacon) this._openChoice(w.roomId)
     if (isChainCallout(n.chain.count)) this.ui.flash('combo')
     this._maybeSurprise(w, performance.now())
@@ -1508,6 +1763,9 @@ export class Game {
     const wb = this.scene.windows.find(w => w.roomId === pair.b)
     if (!wa || !wb) return
     this.scene.clearResonancePair()
+    if (this.tutorial && this.tutorial.isActive()) {
+      this.tutorial.onResonance()
+    }
     this._lightWindow(wa, RESONANCE_GAIN, x, y); this._lightWindow(wb, RESONANCE_GAIN, x, y)
     n.warmth += RESONANCE_GAIN; n.combo += RESONANCE_COMBO_BONUS; n.maxCombo = Math.max(n.maxCombo, n.combo)
     n.resonanceCount += 1; this.run.resonanceCount += 1
@@ -1516,6 +1774,7 @@ export class Game {
     if (this.audio) this.audio.resonance()
     this.ui.flash('golden'); this.scene.pulseCameraFov(1.1)
     this._events.resonance = (this._events.resonance || 0) + 1
+    if (this.replay) this.replay.record(performance.now() - n.startedAt, REPLAY_EVENT_TYPES.RESONANCE, wa.idx, x, y, wa.roomId)
     const free = this._neighbourOf(new Set([wa.idx, wb.idx]))
     if (free) this.scene.setWindowState(free, WINDOW_STATES.GLIMMER)
     this._afterScore()
@@ -1595,6 +1854,11 @@ export class Game {
     n.allDone = out.allDone
     if (!wasPassed && n.minPassed) {
       this.ui.toast('🎉 本夜过关标准已达成！', '可继续冲满章或随时点左下角进下一夜')
+    }
+    const rowLit = (n.data.commissions || []).find(c => c.type === 'row_lit')
+    if (rowLit && this.scene && this.scene.highlightFloorSign) {
+      const f = Number(rowLit.floor) || 3
+      this.scene.highlightFloorSign(f, true)
     }
     this.ui.updateCommissions(out.items, { minPassed: n.minPassed, allDone: n.allDone, isLastNight: n.index + 1 >= NIGHT_COUNT })
   }
@@ -1680,10 +1944,46 @@ export class Game {
       const left = Math.max(0, n.endsAt - now)
       n.timeLeft = left / 1000
       this.ui.tick(this)
-      this._expireGlimmers(now)
-      this._scheduleSpawns(now)
-      this._maybeBeacon(now)
-      this._maybeResonance(now)
+
+      if (this.tutorial && this.tutorial.isActive()) {
+        n.endsAt = now + (n.timeLeft || NIGHT_SECONDS) * 1000
+        const tickRes = this.tutorial.tick(16.7)
+        if (tickRes.timeoutHint) {
+          this.ui.pulseTutorialInactivity('林阿姨提示：试着轻触或滑动发光窗户！')
+        }
+        if (this.tutorial.getState() === TUTORIAL_STATES.STEP2_DRAG) {
+          const wins = this._tutorialTargetRooms.map(r => this.scene.windows.find(w => w.roomId === r)).filter(Boolean)
+          const pts = wins.map(w => this.scene.windowScreenRect(w)).filter(Boolean)
+          this.ui.updateTutorialGesture(pts, now / 1000)
+        }
+      } else {
+        const dda = this.difficulty.tick(now)
+        if (this.ui && typeof this.ui.setFlowState === 'function') {
+          this.ui.setFlowState(dda.flowState)
+        }
+
+        if (this.crisis) {
+          const elapsedSec = (now - n.startedAt) / 1000
+          const isSpecialActive = this._choiceOpen || Boolean(this.scene && this.scene.resonancePair)
+          const crisis = this.crisis.tick(elapsedSec, now, isSpecialActive)
+          if (crisis) {
+            if (crisis.expired) {
+              if (this.ui.hideCrisisPrompt) this.ui.hideCrisisPrompt()
+              this.ui.toast('⏰ 突发危机已平息，错过了奖励')
+              if (this.replay) this.replay.record(now - n.startedAt, 'crisis_expire', 0)
+            } else if (crisis.remainingSec >= crisis.durationSec - 0.05 && crisis.currentTaps === 0) {
+              if (this.ui.showCrisisPrompt) this.ui.showCrisisPrompt(crisis)
+            } else {
+              if (this.ui.updateCrisisPrompt) this.ui.updateCrisisPrompt(crisis)
+            }
+          }
+        }
+
+        this._expireGlimmers(now)
+        this._scheduleSpawns(now)
+        this._maybeBeacon(now)
+        this._maybeResonance(now)
+      }
       if (n.combo > 0 && now > this._comboFreezeUntil && now - this._lastTap > n.cfg.comboWindowMs) {
         n.combo = 0; this.ui.combo(0); this.ui.setStats(this)
       }
@@ -1724,6 +2024,7 @@ export class Game {
     const n = this.night
     if (!n || n.ended) return
     n.ended = true; this.state = 'settle'; cancelAnimationFrame(this._raf)
+    if (this.ui && this.ui.hideTutorialOverlay) this.ui.hideTutorialOverlay()
     this.scene.setPaused(true)
     if (this.audio) this.audio.setLitCount(0)
 
@@ -1811,6 +2112,9 @@ export class Game {
     this.ui.showResult({
       run: this.run, records: this.records, postcard, ending: meta, letter: this.run.letter,
       rank: synced ? synced.rank : 0, aiSource: this.aiSource, suggestedWhisper: this.run.whisperSuggestion,
+      replayEvents: this.replay ? this.replay.getEvents() : [],
+      scene: this.scene,
+      audio: this.audio,
       onSealWhisper: payload => this.sealWhisper(payload),
       onLikeWhisper: id => this.likeWhisper(id),
       onLeaderboard: () => this.openLeaderboard(() => this.showHub(), 'star_sweep'),
