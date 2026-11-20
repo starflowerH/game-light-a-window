@@ -37,6 +37,7 @@ import {
   BGM_TRACKS, adaptCommissionsForDorm, adaptResonancePairForDorm,
   dormDef, gameModeDef, endingMeta
 } from '../shared/constants.js'
+import { evaluateRunTier } from '../shared/ranks.js'
 import { RESIDENT_BY_ROOM, chapterMeta } from './narrative-graph.js'
 import { pickRandomEvent } from './random-events.js'
 import {
@@ -116,6 +117,7 @@ export class Game {
     this._tutorialTargetRooms = []
     /** @type {string|null} */
     this._pendingModeLaunch = null
+    this._lastTierCode = 'D'
 
     // P2: Difficulty Director, Random Crisis Manager, Replay Recorder
     this.difficulty = new DifficultyDirector()
@@ -150,13 +152,36 @@ export class Game {
     return id
   }
 
+  _cleanupTutorialUi() {
+    this._tutorialActive = false
+    this._tutorialTargetRooms = []
+    this._pendingRes = null
+    cancelAnimationFrame(this._coachRaf)
+    if (this.scene && this.scene.clearResonancePair) this.scene.clearResonancePair()
+    if (this.ui) {
+      if (this.ui.hideTutorialOverlay) this.ui.hideTutorialOverlay()
+      if (this.ui.hideCoach) this.ui.hideCoach()
+      if (this.ui.hideHintBubble) this.ui.hideHintBubble()
+      if (this.ui.clearWindowTags) this.ui.clearWindowTags()
+    }
+  }
+
+  _maybeToastTierPromotion(gameMode, score, stageReached, accuracyPct = 100) {
+    const tier = evaluateRunTier({ gameMode, score, stageReached, accuracyPct })
+    if (tier.code !== this._lastTierCode && tier.tierIndex > 0) {
+      this._lastTierCode = tier.code
+      if (this.ui && this.ui.toast) {
+        this.ui.toast(`⬆ 段位晋升：${tier.icon} ${tier.code} · ${tier.title}`, tier.milestoneText)
+      }
+    }
+  }
+
   _clearMinigame() {
     for (const id of this._mgTimers) clearTimeout(id)
     this._mgTimers.clear()
     cancelAnimationFrame(this._raf)
-    cancelAnimationFrame(this._coachRaf)
     this.mg = null
-    if (this.ui && this.ui.hideTutorialOverlay) this.ui.hideTutorialOverlay()
+    this._cleanupTutorialUi()
   }
 
   toggleOrbitLock() {
@@ -472,7 +497,7 @@ export class Game {
     saveRecords(this.records)
 
     if (this.tutorial && !this.tutorial.isCompleted()) {
-      this._pendingModeLaunch = this.gameMode
+      this._pendingModeLaunch = this.gameMode !== 'star_sweep' ? this.gameMode : null
       this.start()
       return
     }
@@ -505,6 +530,7 @@ export class Game {
     this.orbitLocked = true
     this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
+    this._lastTierCode = 'D'
 
     const dorm = dormDef(this.dormId)
     const modeMeta = gameModeDef(mode)
@@ -512,8 +538,8 @@ export class Game {
     this.mg = {
       kind: mode,
       stage: 1,
-      maxStage: 6,
-      phase: 'observe', // 'observe' | 'recall' | 'settled'
+      maxStage: 10,
+      phase: 'observe', // 'observe' | 'blackout' | 'recall' | 'settled'
       score: 0,
       correctCount: 0,
       totalExpected: 0,
@@ -521,6 +547,7 @@ export class Game {
       shield: 1,
       scoreMult: 1,
       extraObserveMs: 0,
+      recallEndsAt: 0,
       litHistory: new Set(),
       memState: null,
       aiPattern: '星灯序列',
@@ -587,76 +614,161 @@ export class Game {
     const aiTargets = aiRes?.payload?.targets
     const aiName = aiRes?.payload?.patternName || `第${stage}关巡灯阵`
     const round = generateMemoryRound(stage, dorm.windowCount, aiTargets, aiName)
-    mg.aiPattern = round.patternName
+    mg.aiPattern = diff.decoyCount ? `${round.patternName} · 干扰×${diff.decoyCount}` : round.patternName
     mg.round = round
     mg.memState = createMemoryState(mg.kind, round)
     mg.totalExpected += round.targets.length
 
+    const obsSec = ((mg.kind === 'memory_sequence' ? diff.stepShowMs : diff.snapshotShowMs) / 1000).toFixed(2)
     this.ui.updateMinigameHud({
-      aiPattern: round.patternName,
-      bottomText: (aiRes?.payload?.flavorHint) || `本关需记住 ${round.targets.length} 扇窗${round.decoys.length ? '（注意避开蓝色干扰灯）' : ''}`
+      aiPattern: mg.aiPattern,
+      phaseText: `👀 第 ${stage}/${mg.maxStage} 关 · 记住 ${round.targets.length} 窗`,
+      bottomText: (aiRes?.payload?.flavorHint) || `第 ${stage}/${mg.maxStage} 关 · ${round.targets.length} 窗 · 闪现 ${obsSec}s${round.decoys.length ? ` · 避开 ${round.decoys.length} 盏蓝灯` : ''}（容错 ${diff.maxMistakes} 次）`
     })
 
     const obsBoost = mg.extraObserveMs || 0
     mg.extraObserveMs = 0
 
+    const enterRecall = () => {
+      if (this.state !== 'minigame' || !this.mg) return
+      this.mg.phase = 'recall'
+      this.mg.recallEndsAt = performance.now() + diff.recallSeconds * 1000
+      this.ui.updateMinigameHud({
+        phaseText: mg.kind === 'memory_sequence' ? '✨ 按顺序依次点亮！' : `✨ 找出 ${round.targets.length} 扇窗！`,
+        timeLeftSec: diff.recallSeconds,
+        bottomText: mg.kind === 'memory_sequence'
+          ? `第 ${stage}/${mg.maxStage} 关：限 ${diff.recallSeconds}s 内按先后顺序点出 ${round.targets.length} 扇窗！`
+          : `第 ${stage}/${mg.maxStage} 关：限 ${diff.recallSeconds}s 内找出刚才暖金亮过的 ${round.targets.length} 扇窗！`
+      })
+      this._startMemoryRecallTicker()
+    }
+
     // Play observe choreography
     if (mg.kind === 'memory_sequence') {
       const eachMs = diff.stepShowMs + Math.round(obsBoost * 0.4)
-      let delay = 550
-      round.targets.forEach((winIdx, step) => {
+      let delay = 520
+
+      /** @type {Array<{ isDecoy: boolean, winIdx: number, step: number }>} */
+      const timeline = []
+      const decoys = round.decoys.slice()
+      if (diff.interleaveDecoys && decoys.length > 0) {
+        const decoysPerGap = Math.max(1, Math.floor(round.targets.length / (decoys.length + 1)))
+        let dCursor = 0
+        round.targets.forEach((winIdx, step) => {
+          timeline.push({ isDecoy: false, winIdx, step })
+          if (dCursor < decoys.length && (step + 1) % decoysPerGap === 0 && step < round.targets.length - 1) {
+            timeline.push({ isDecoy: true, winIdx: decoys[dCursor++], step })
+          }
+        })
+        while (dCursor < decoys.length) {
+          timeline.push({ isDecoy: true, winIdx: decoys[dCursor++], step: round.targets.length })
+        }
+      } else {
+        round.targets.forEach((winIdx, step) => timeline.push({ isDecoy: false, winIdx, step }))
+      }
+
+      timeline.forEach(ev => {
+        const showDur = ev.isDecoy ? Math.min(540, Math.round(eachMs * 0.85)) : eachMs
         this._mgTimeout(() => {
           if (this.state !== 'minigame') return
-          this.scene.setWindowState(winIdx, WINDOW_STATES.TARGET_HINT)
-          if (this.audio) this.audio.cue(step)
+          this.scene.setWindowState(ev.winIdx, ev.isDecoy ? WINDOW_STATES.DECOY_BLUE : WINDOW_STATES.TARGET_HINT)
+          if (!ev.isDecoy && this.audio) this.audio.cue(ev.step)
         }, delay)
         this._mgTimeout(() => {
           if (this.state !== 'minigame') return
-          this.scene.setWindowState(winIdx, WINDOW_STATES.DARK)
-        }, delay + eachMs)
-        delay += eachMs + diff.stepGapMs
+          this.scene.setWindowState(ev.winIdx, WINDOW_STATES.DARK)
+        }, delay + showDur)
+        delay += showDur + diff.stepGapMs
       })
 
-      if (round.decoys.length) {
+      if (!diff.interleaveDecoys && decoys.length) {
         this._mgTimeout(() => {
           if (this.state !== 'minigame') return
-          for (const d of round.decoys) this.scene.setWindowState(d, WINDOW_STATES.DECOY_BLUE)
+          for (const d of decoys) this.scene.setWindowState(d, WINDOW_STATES.DECOY_BLUE)
           this.ui.toast('小心蓝色熬夜干扰灯，不需要记住它！', '')
         }, delay)
         this._mgTimeout(() => {
           if (this.state !== 'minigame') return
-          for (const d of round.decoys) this.scene.setWindowState(d, WINDOW_STATES.DARK)
-        }, delay + 650)
-        delay += 750
+          for (const d of decoys) this.scene.setWindowState(d, WINDOW_STATES.DARK)
+        }, delay + 620)
+        delay += 700
       }
 
-      this._mgTimeout(() => {
-        if (this.state !== 'minigame' || !this.mg) return
-        this.mg.phase = 'recall'
-        this.ui.updateMinigameHud({
-          phaseText: '✨ 按顺序依次点亮！',
-          bottomText: `第 ${stage} 关：请按刚才亮起的先后顺序点出这 ${round.targets.length} 扇窗`
-        })
-      }, delay + 120)
+      this._mgTimeout(enterRecall, delay + 120)
     } else {
-      // memory_snapshot: all flash together
+      // memory_snapshot: all flash together (+ optional blackout pause at high stages)
       this._mgTimeout(() => {
         if (this.state !== 'minigame') return
         for (const t of round.targets) this.scene.setWindowState(t, WINDOW_STATES.TARGET_HINT)
         for (const d of round.decoys) this.scene.setWindowState(d, WINDOW_STATES.DECOY_BLUE)
         if (this.audio) this.audio.cue(2)
-      }, 450)
+      }, 420)
 
       const holdMs = diff.snapshotShowMs + obsBoost
       this._mgTimeout(() => {
         if (this.state !== 'minigame' || !this.mg) return
         this.scene.resetWindows()
-        this.mg.phase = 'recall'
-        this.ui.updateMinigameHud({
-          phaseText: `✨ 找出 ${round.targets.length} 扇窗！`,
-          bottomText: `第 ${stage} 关：位置不分先后，把刚才暖金亮过的 ${round.targets.length} 扇窗点亮！`
-        })
-      }, 450 + holdMs)
+        if (diff.blackoutMs > 0) {
+          this.mg.phase = 'blackout'
+          this.ui.updateMinigameHud({ phaseText: '🧠 保持记忆… 稍等解锁！' })
+          this._mgTimeout(enterRecall, diff.blackoutMs)
+        } else {
+          enterRecall()
+        }
+      }, 420 + holdMs)
+    }
+  }
+
+  _startMemoryRecallTicker() {
+    cancelAnimationFrame(this._raf)
+    const tick = () => {
+      const mg = this.mg
+      if (!mg || this.state !== 'minigame' || mg.phase !== 'recall') return
+      const remSec = Math.max(0, (mg.recallEndsAt - performance.now()) / 1000)
+      this.ui.updateMinigameHud({ timeLeftSec: remSec })
+      if (remSec <= 0) {
+        this._settleMemoryStage(true)
+        return
+      }
+      this._raf = requestAnimationFrame(tick)
+    }
+    this._raf = requestAnimationFrame(tick)
+  }
+
+  _settleMemoryStage(timedOut = false) {
+    const mg = this.mg
+    if (!mg || mg.phase === 'settled') return
+    mg.phase = 'settled'
+    cancelAnimationFrame(this._raf)
+    const remSec = timedOut ? 0 : Math.max(0, (mg.recallEndsAt - performance.now()) / 1000)
+    const stageSum = summarizeMemoryStage(mg.memState, remSec)
+    const diff = mg.round ? mg.round.config : computeMemoryDifficulty(mg.stage)
+    const speedBonus = (!timedOut && stageSum.passed) ? Math.round(remSec * 4 * (diff.difficultyMult || 1)) : 0
+    const bonus = Math.round(stageSum.scoreGained * (mg.scoreMult || 1)) + speedBonus
+    mg.score += bonus
+    mg.scoreMult = 1
+
+    const acc = this._calcAcc(mg.correctCount, mg.correctCount + mg.totalMistakes)
+    this.ui.updateMinigameHud({
+      score: mg.score,
+      accuracyPct: acc,
+      timeLeftSec: null
+    })
+    this._maybeToastTierPromotion(mg.kind, mg.score, mg.stage, acc)
+
+    if (stageSum.passed && !timedOut) {
+      if (this.audio) this.audio.victory()
+      const speedTag = speedBonus >= 20 ? ` · ⚡极速+${speedBonus}` : ''
+      this.ui.banner(`第 ${mg.stage}/${mg.maxStage} 关通过！`, `准确率 ${stageSum.accuracyPct}% · +${bonus} 分${speedTag}`)
+      if (mg.stage < mg.maxStage) {
+        this._maybeRandomEvent()
+        this._mgTimeout(() => this._runMemoryStage(mg.stage + 1), 1300)
+      } else {
+        this._mgTimeout(() => this._finishMinigame(), 1200)
+      }
+    } else {
+      this.ui.banner(timedOut ? '⏰ 超时记分！' : '巡楼暂停记分', timedOut ? '时间到啦，来结算你的战绩！' : '错步超出本关容错，来结算成绩吧！')
+      this._mgTimeout(() => this._finishMinigame(), 1200)
     }
   }
 
@@ -686,6 +798,7 @@ export class Game {
       if (this.audio) this.audio.correct(res.progress)
       this.ui.floatText('+' + stepGain, x, y, '#92f4bc', 'big')
       this.ui.shockwave(x, y)
+      this._maybeToastTierPromotion(mg.kind, mg.score, mg.stage, this._calcAcc(mg.correctCount, mg.correctCount + mg.totalMistakes))
     } else {
       mg.combo = 0
       if (mg.shield > 0) {
@@ -718,25 +831,7 @@ export class Game {
     })
 
     if (mg.memState.finished) {
-      mg.phase = 'settled'
-      const stageSum = summarizeMemoryStage(mg.memState)
-      const bonus = Math.round(stageSum.scoreGained * (mg.scoreMult || 1))
-      mg.score += bonus
-      mg.scoreMult = 1
-
-      if (stageSum.passed) {
-        if (this.audio) this.audio.victory()
-        this.ui.banner(`第 ${mg.stage} 关通过！`, `本关准确率 ${stageSum.accuracyPct}% · +${bonus} 分`)
-        if (mg.stage < mg.maxStage) {
-          this._maybeRandomEvent()
-          this._mgTimeout(() => this._runMemoryStage(mg.stage + 1), 1350)
-        } else {
-          this._mgTimeout(() => this._finishMinigame(), 1200)
-        }
-      } else {
-        this.ui.banner('巡楼暂停记分', '错步较多，先来结算成绩吧！')
-        this._mgTimeout(() => this._finishMinigame(), 1200)
-      }
+      this._settleMemoryStage(false)
     }
   }
 
@@ -750,6 +845,7 @@ export class Game {
     this.orbitLocked = true
     this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
+    this._lastTierCode = 'D'
 
     const dorm = dormDef(this.dormId)
     this.mg = {
@@ -758,6 +854,7 @@ export class Game {
       score: 0,
       correctCount: 0,
       mistakes: 0,
+      missedOwls: 0,
       combo: 0,
       shield: 1,
       litHistory: new Set(),
@@ -771,7 +868,7 @@ export class Game {
     this.ui.startMinigameHud({
       modeMeta: gameModeDef('patrol_reflex'),
       dormMeta: dorm,
-      aiPattern: '夜猫子查寝中',
+      aiPattern: '第1/5波 · 热身查寝',
       bgmState: this.getBgmState(),
       onCycleBgm: () => this.cycleBgmTrack(),
       orbitLocked: this.orbitLocked,
@@ -785,7 +882,7 @@ export class Game {
     this.ui.updateMinigameHud({
       phaseText: '🔦 灭蓝灯 · 留暖灯 · 助晚归',
       timeLeftSec: PATROL_DURATION_SEC,
-      bottomText: '过关目标：守住 45s！点灭【蓝紫熬夜窗】、点亮【淡金晚归门灯】，别误点【浅绿学习灯】'
+      bottomText: '过关目标：守住 60s 冲刺 5 大波次！点灭【蓝紫熬夜窗】、点亮【淡金晚归门灯】，别误点【浅绿学习灯】'
     })
 
     const loop = () => {
@@ -795,21 +892,39 @@ export class Game {
       const elapsed = PATROL_DURATION_SEC - left
       const waveCfg = patrolWaveConfig(elapsed)
 
-      // Expire old targets
+      let activeCount = 0
+      // Expire old targets; untreated DECOY_BLUE owl escapes break combo
       for (const w of this.scene.windows) {
         if (w.state !== WINDOW_STATES.DARK && w.expiresAt && now > w.expiresAt) {
+          if (w.state === WINDOW_STATES.DECOY_BLUE) {
+            this.mg.missedOwls = (this.mg.missedOwls || 0) + 1
+            if (this.mg.combo > 0) this.mg.combo = 0
+          }
           this.scene.setWindowState(w, WINDOW_STATES.DARK)
           w.expiresAt = 0
+        } else if (w.state === WINDOW_STATES.DECOY_BLUE || w.state === WINDOW_STATES.SAFE_WARM || w.state === WINDOW_STATES.GLIMMER) {
+          activeCount += 1
         }
       }
 
-      if (now >= this.mg.nextWaveAt) {
+      if (now >= this.mg.nextWaveAt && activeCount < waveCfg.maxActive) {
         const picked = pickPatrolSpawn(this.scene.windows)
         if (picked) {
           const targetWin = this.scene.windows[picked.idx]
           if (targetWin) {
             this.scene.setWindowState(targetWin, picked.state)
             targetWin.expiresAt = now + waveCfg.ttlMs
+            activeCount += 1
+          }
+        }
+        if (waveCfg.doubleSpawnChance && Math.random() < waveCfg.doubleSpawnChance && activeCount < waveCfg.maxActive) {
+          const second = pickPatrolSpawn(this.scene.windows)
+          if (second) {
+            const w2 = this.scene.windows[second.idx]
+            if (w2) {
+              this.scene.setWindowState(w2, second.state)
+              w2.expiresAt = now + waveCfg.ttlMs
+            }
           }
         }
         this.mg.nextWaveAt = now + waveCfg.spawnIntervalMs
@@ -820,13 +935,19 @@ export class Game {
         this._maybeRandomEvent()
       }
 
-      this.mg.stage = elapsed > 30 ? 3 : elapsed > 15 ? 2 : 1
+      if (waveCfg.wave !== this.mg.stage) {
+        this.ui.toast(`🔥 第 ${waveCfg.wave}/5 波 · ${waveCfg.waveName}`, '夜猫出没速度加快！')
+      }
+      this.mg.stage = waveCfg.wave
+      const acc = this._calcAcc(this.mg.correctCount, this.mg.correctCount + this.mg.mistakes)
+      this._maybeToastTierPromotion('patrol_reflex', this.mg.score, this.mg.stage, acc)
       this.ui.updateMinigameHud({
         stage: this.mg.stage,
+        aiPattern: `第${waveCfg.wave}/5波 · ${waveCfg.waveName}`,
         timeLeftSec: left,
         score: this.mg.score,
         correctCount: this.mg.correctCount,
-        accuracyPct: this._calcAcc(this.mg.correctCount, this.mg.correctCount + this.mg.mistakes),
+        accuracyPct: acc,
         shield: this.mg.shield
       })
 
@@ -880,17 +1001,20 @@ export class Game {
     this.orbitLocked = true
     this.scene.setOrbitLocked(true)
     this.scene.resetWindows()
+    this._lastTierCode = 'D'
 
     const dorm = dormDef(this.dormId)
     const board = generateSolvableBoard(dorm.rows, dorm.cols, 1)
+    const stageLimitSec = Math.max(28, 52)
     this.mg = {
       kind: 'lights_out_puzzle',
       stage: 1,
-      maxStage: 5,
+      maxStage: 8,
       score: 0,
       correctCount: 0,
       moves: 0,
       shield: 2,
+      stageEndsAt: performance.now() + stageLimitSec * 1000,
       litHistory: new Set(),
       grid: board.grid,
       parMoves: board.parMoves,
@@ -917,6 +1041,24 @@ export class Game {
     })
 
     this._paintLightsOutBoard()
+    this._startLightsOutTicker()
+  }
+
+  _startLightsOutTicker() {
+    cancelAnimationFrame(this._raf)
+    const loop = () => {
+      const mg = this.mg
+      if (!mg || this.state !== 'minigame' || mg.kind !== 'lights_out_puzzle' || mg.settled) return
+      const left = Math.max(0, (mg.stageEndsAt - performance.now()) / 1000)
+      this.ui.updateMinigameHud({ timeLeftSec: left })
+      if (left <= 0) {
+        this.ui.banner('⏰ 熄灯关限时已到', '已进入本局战绩结算！')
+        this._finishMinigame()
+        return
+      }
+      this._raf = requestAnimationFrame(loop)
+    }
+    this._raf = requestAnimationFrame(loop)
   }
 
   _paintLightsOutBoard() {
@@ -935,7 +1077,7 @@ export class Game {
       correctCount: mg.correctCount,
       accuracyPct: 100,
       shield: mg.shield,
-      bottomText: `第 ${mg.stage} 关（已走 ${mg.moves} 步 · 标准 ${mg.parMoves || 3} 步）：点一扇窗翻转十字四邻，让全楼熄灭入睡！`
+      bottomText: `第 ${mg.stage}/${mg.maxStage} 关（已走 ${mg.moves} 步 · 标准 ${mg.parMoves || 3} 步）：点一扇窗翻转十字四邻，${mg.parMoves || 3} 步内破关得最优奖励！`
     })
   }
 
@@ -951,9 +1093,10 @@ export class Game {
     const w = this.scene.windows[idx]
     if (w) {
       this.scene.setWindowState(w, WINDOW_STATES.TARGET_HINT)
-      const pos = this.scene.windowScreenPos(w)
-      if (pos) {
-        this.ui.coach('林阿姨提示：点这扇窗！', pos.x, pos.y - 46)
+      const rect = this.scene.windowScreenRect(w)
+      if (rect) {
+        const diam = Math.round(Math.max(54, Math.max(rect.w, rect.h) + 16))
+        this.ui.coach('林阿姨提示：点这扇窗！', rect.x, rect.y, diam)
         this._mgTimeout(() => this.ui.hideCoach(), 2400)
       }
       if (this.audio) this.audio.cue(0)
@@ -976,10 +1119,14 @@ export class Game {
 
     if (isAllLightsOut(mg.grid)) {
       mg.correctCount += mg.rows * mg.cols
-      const clearScore = Math.max(80, 260 + mg.stage * 80 - mg.moves * 6)
+      const isPar = mg.moves <= (mg.parMoves || 3)
+      const parBonus = isPar ? 120 : 0
+      const clearScore = Math.max(80, 260 + mg.stage * 90 - mg.moves * 6) + parBonus
       mg.score += clearScore
+      this._maybeToastTierPromotion('lights_out_puzzle', mg.score, mg.stage, 100)
       if (this.audio) this.audio.victory()
-      this.ui.banner(`第 ${mg.stage} 关全楼安睡！`, `用时 ${mg.moves} 步 (+${clearScore} 分 · +${flipped} 联动)`)
+      const parMsg = isPar ? ` · ★★★ 最优解 +${parBonus}` : ''
+      this.ui.banner(`第 ${mg.stage}/${mg.maxStage} 关全楼安睡！`, `用时 ${mg.moves} 步 (+${clearScore} 分 · +${flipped} 联动${parMsg})`)
       if (mg.stage < mg.maxStage) {
         this._maybeRandomEvent()
         mg.stage += 1
@@ -989,6 +1136,7 @@ export class Game {
           mg.moves = 0
           mg.grid = nextBoard.grid
           mg.parMoves = nextBoard.parMoves
+          mg.stageEndsAt = performance.now() + Math.max(28, 52 - (mg.stage - 1) * 3) * 1000
           this._paintLightsOutBoard()
         }, 1250)
       } else {
@@ -1172,6 +1320,7 @@ export class Game {
     }
     this.nightIndex = index
     this.state = 'night'
+    this._lastTierCode = 'D'
     this._choiceOpen = false
     this._choicePausedAt = 0
     this.ui.hideAll()
@@ -1274,20 +1423,33 @@ export class Game {
 
   _onTutorialStateChange(nextState, prevState) {
     if (nextState === TUTORIAL_STATES.DONE) {
-      this._tutorialActive = false
-      this.ui.hideTutorialOverlay()
-      this.ui.toast('太棒了！已掌握夜巡基本功', '现在开始自由点亮夜晚')
+      this._cleanupTutorialUi()
+      if (this._pendingModeLaunch) {
+        const mode = this._pendingModeLaunch
+        this._pendingModeLaunch = null
+        cancelAnimationFrame(this._raf)
+        this.night = null
+        this.scene.resetWindows()
+        this.launchGame(mode)
+        return
+      }
       if (this.night) {
+        this.scene.resetWindows()
+        this.night.litCount = 0
+        this.night.litRooms = []
+        this.night.clearedFloors = new Set()
+        this.night.chain = { active: false, count: 0, ids: new Set(), startRoom: 0 }
+        this._chain = this.night.chain
+        this.scene.setLitCount(0)
+        for (let i = 0; i < this.night.cfg.initialGlimmer; i++) this._wakeRandom(false)
         const now = performance.now()
         this.night.startedAt = now
         this.night.endsAt = now + NIGHT_SECONDS * 1000
         this.night.timeLeft = NIGHT_SECONDS
+        this.ui.setStats(this)
+        this._checkCommissions()
       }
-      if (this._pendingModeLaunch) {
-        const mode = this._pendingModeLaunch
-        this._pendingModeLaunch = null
-        this.launchGame(mode)
-      }
+      this.ui.toast('太棒了！已掌握夜巡基本功', '现在开始正式点亮第 1 夜')
     } else {
       this._setupTutorialStep(nextState)
     }
@@ -1295,6 +1457,10 @@ export class Game {
 
   _setupTutorialStep(step) {
     if (!this.night) return
+    if (this.ui) {
+      if (this.ui.hideHintBubble) this.ui.hideHintBubble()
+      if (this.ui.hideCoach) this.ui.hideCoach()
+    }
     this.scene.resetWindows()
     this.scene.clearResonancePair()
 
@@ -1345,7 +1511,11 @@ export class Game {
   }
 
   skipTutorial() {
-    this.tutorial.skip()
+    if (this.tutorial.isActive()) {
+      this.tutorial.skip()
+    } else {
+      this._cleanupTutorialUi()
+    }
   }
 
   replayTutorial() {
@@ -1562,12 +1732,13 @@ export class Game {
     }
 
     const wasBeacon = w.state === WINDOW_STATES.STORY_BEACON
+    const wasTut = Boolean(this.tutorial && this.tutorial.isActive())
     if (this.difficulty) this.difficulty.recordTap(true, 0, false)
     n.combo += 1; n.maxCombo = Math.max(n.maxCombo, n.combo); this.run.maxCombo = Math.max(this.run.maxCombo, n.combo)
     const gain = wasBeacon ? STORY_BEACON_GAIN : gainForCombo(n.combo)
     n.warmth += gain
     this._lightWindow(w, gain, x, y)
-    if (this.tutorial && this.tutorial.isActive()) {
+    if (wasTut) {
       this.tutorial.onTap(w)
     }
     if (this.audio) this.audio.tap(n.combo)
@@ -1575,7 +1746,7 @@ export class Game {
     this.scene.pulseCameraFov(n.combo >= 8 ? 0.8 : 0.35)
     this.ui.shockwave(x, y)
     if (wasBeacon) this._openChoice(w.roomId)
-    this._maybeSurprise(w, now)
+    if (!wasTut) this._maybeSurprise(w, now)
     this._afterScore()
   }
 
@@ -1640,6 +1811,9 @@ export class Game {
     const n = this.night
     const total = this.scene.windows.length || 24
     if (!n) return
+    if (!this._tutorialActive) {
+      this._maybeToastTierPromotion('star_sweep', (this.run ? this.run.totalWarmth : 0) + n.warmth, n.index + 1, 100)
+    }
     this._checkCommissions()
     this.ui.setStats(this)
     if (n.litCount >= total && !n.allLit) this._allLit()
@@ -1685,6 +1859,24 @@ export class Game {
       if (n.litCount >= total && !n.allLit) this._allLit()
     }
     n.chain.active = false; n.chain.ids = new Set(); n.chain.count = 0
+    if (this.state === 'night' && this.tutorial && this.tutorial.getState() === TUTORIAL_STATES.STEP2_DRAG && this._tutorialTargetRooms.length) {
+      const broken = this._tutorialTargetRooms.some(r => {
+        const win = this.scene.windows.find(item => item.roomId === r)
+        return win && win.state !== WINDOW_STATES.GLIMMER
+      })
+      if (broken) {
+        for (const r of this._tutorialTargetRooms) {
+          const win = this.scene.windows.find(item => item.roomId === r)
+          if (win) {
+            this.scene.setWindowState(win, WINDOW_STATES.GLIMMER)
+            win.expiresAt = Infinity
+          }
+        }
+        n.litCount = this.scene.windows.filter(win => win.state === WINDOW_STATES.LIT).length
+        this.scene.setLitCount(n.litCount)
+        this.ui.toast('差一点！按住不松手一口气划过 3 扇窗～', '')
+      }
+    }
   }
 
   _resolvePendingResonanceTap() {
@@ -1727,6 +1919,7 @@ export class Game {
     }
     if (w.state !== WINDOW_STATES.GLIMMER && w.state !== WINDOW_STATES.STORY_BEACON) return
 
+    const tutState = this.tutorial && this.tutorial.isActive() ? this.tutorial.getState() : null
     n.chain.count += 1; n.chain.ids.add(w.idx); n.bestChain = Math.max(n.bestChain, n.chain.count)
     if (this.difficulty) this.difficulty.recordTap(true, 0, true)
     if (this.replay) this.replay.record(performance.now() - n.startedAt, REPLAY_EVENT_TYPES.CHAIN, w.idx, x, y, w.roomId)
@@ -1735,8 +1928,10 @@ export class Game {
     n.combo += 1; n.maxCombo = Math.max(n.maxCombo, n.combo); this.run.maxCombo = Math.max(this.run.maxCombo, n.combo)
     n.warmth += gain
     this._lightWindow(w, gain, x, y)
-    if (this.tutorial && this.tutorial.isActive()) {
+    if (tutState === TUTORIAL_STATES.STEP1_TAP) {
       this.tutorial.onTap(w)
+      n.chain.active = false; n.chain.ids = new Set(); n.chain.count = 0
+      return
     }
     this.ui.combo(n.combo); this.ui.shockwave(x, y)
     if (n.chain.count === 2) this.ui.floatText('连光 2/3 · 再划 1 扇!', x, y - 24, '#ffd48a')
@@ -1748,12 +1943,16 @@ export class Game {
     if (this.ui && this.ui.showSequenceBadge) {
       this.ui.showSequenceBadge(x, y, n.chain.count)
     }
-    if (this.tutorial && this.tutorial.isActive()) {
+    if (tutState === TUTORIAL_STATES.STEP2_DRAG) {
       this.tutorial.onDrag(n.chain.count)
+      if (this.tutorial.getState() !== TUTORIAL_STATES.STEP2_DRAG) {
+        n.chain.active = false; n.chain.ids = new Set(); n.chain.count = 0
+        return
+      }
     }
     if (wasBeacon) this._openChoice(w.roomId)
     if (isChainCallout(n.chain.count)) this.ui.flash('combo')
-    this._maybeSurprise(w, performance.now())
+    if (!tutState) this._maybeSurprise(w, performance.now())
     this._afterScore()
   }
 
@@ -1762,10 +1961,17 @@ export class Game {
     const wa = this.scene.windows.find(w => w.roomId === pair.a)
     const wb = this.scene.windows.find(w => w.roomId === pair.b)
     if (!wa || !wb) return
-    this.scene.clearResonancePair()
-    if (this.tutorial && this.tutorial.isActive()) {
+    const wasTut = Boolean(this.tutorial && this.tutorial.isActive())
+    if (wasTut) {
+      this.scene.clearResonancePair()
+      this.scene.burstAt(wa, 0x8ef2ff)
+      this.scene.burstAt(wb, 0x8ef2ff)
+      if (this.audio) this.audio.resonance()
+      this.ui.flash('golden')
       this.tutorial.onResonance()
+      return
     }
+    this.scene.clearResonancePair()
     this._lightWindow(wa, RESONANCE_GAIN, x, y); this._lightWindow(wb, RESONANCE_GAIN, x, y)
     n.warmth += RESONANCE_GAIN; n.combo += RESONANCE_COMBO_BONUS; n.maxCombo = Math.max(n.maxCombo, n.combo)
     n.resonanceCount += 1; this.run.resonanceCount += 1
@@ -2024,7 +2230,8 @@ export class Game {
     const n = this.night
     if (!n || n.ended) return
     n.ended = true; this.state = 'settle'; cancelAnimationFrame(this._raf)
-    if (this.ui && this.ui.hideTutorialOverlay) this.ui.hideTutorialOverlay()
+    this._cleanupTutorialUi()
+    if (this.tutorial && this.tutorial.isActive()) this.tutorial.abort()
     this.scene.setPaused(true)
     if (this.audio) this.audio.setLitCount(0)
 
@@ -2102,7 +2309,14 @@ export class Game {
     saveRecords(this.records)
 
     const postcard = await drawPostcard({ run: this.run, nights: this.nights, records: this.records, ending: meta })
-    const synced = await syncRun({ ...this.run, litTotal: this.run.litTotal, score: this.run.totalWarmth }, { uid: this.records.uid, nickname: this.nickname })
+    const synced = await syncRun({
+      ...this.run,
+      litTotal: this.run.litTotal,
+      score: this.run.totalWarmth,
+      stageReached: Math.max(1, this.run.nights.length || NIGHT_COUNT),
+      correctCount: this.run.litTotal,
+      accuracyPct: Math.min(100, Math.round(((this.run.stampsEarned || 0) / 9) * 100))
+    }, { uid: this.records.uid, nickname: this.nickname })
     if (synced && synced.player) {
       this.records = mergeRunAdopted(this.records, synced.player)
       saveRecords(this.records)
@@ -2156,7 +2370,9 @@ export class Game {
   }
 
   _abandon() {
+    this._pendingModeLaunch = null
     this._clearMinigame()
+    if (this.tutorial && this.tutorial.isActive()) this.tutorial.abort()
     this.night = null
     this.scene.setPaused(false)
     this.scene.resetCamera()

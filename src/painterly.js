@@ -23,9 +23,10 @@ export const PainterlyShader = {
     uDawn: { value: 0 },
     uKuwaharaRadius: { value: 0.95 },
     uComboVignette: { value: 0 },
-    uTiltShiftAmount: { value: 1.0 },
+    uTiltShiftAmount: { value: 0.55 },
     uTiltShiftCenter: { value: 0.46 },
-    uTiltShiftRange: { value: 0.18 }
+    uTiltShiftRange: { value: 0.24 },
+    uFastMode: { value: 0.0 }
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -52,6 +53,7 @@ export const PainterlyShader = {
     uniform float uTiltShiftAmount;
     uniform float uTiltShiftCenter;
     uniform float uTiltShiftRange;
+    uniform float uFastMode;
 
     const vec3 INK_COLD = vec3(0.0784, 0.0941, 0.1804); // #14182e deep ultramarine
     const vec3 INK_WARM = vec3(0.2196, 0.1333, 0.0784); // #382214 warm burnt tea
@@ -90,68 +92,9 @@ export const PainterlyShader = {
       return vnoise(p) * 0.62 + vnoise(p * 2.07 + vec2(11.3, 5.7)) * 0.38;
     }
 
-    // three octaves normalised back to 0..1 -- broad paper tone
-    float fbm3(vec2 p) {
-      float s = 0.0;
-      float a = 0.5;
-      for (int i = 0; i < 3; i++) {
-        s += a * vnoise(p);
-        p *= 2.03;
-        a *= 0.5;
-      }
-      return s * 1.1428;
-    }
-
-    float lumAt(sampler2D tex, vec2 uv) {
-      return lum(texture2D(tex, uv).rgb);
-    }
-
-    // --- 1. 4-sector Kuwahara --------------------------------------------
-    // 4 quadrants, 2x2 taps each (16 reads). The quadrant with the lowest
-    // summed variance wins, which is what turns digital gradients into flat
-    // palette-knife strokes without any moire.
-    vec3 kuwahara(sampler2D tex, vec2 uv, vec2 px, float radius) {
-      vec3 mean[4];
-      vec3 sq[4];
-      for (int k = 0; k < 4; k++) { mean[k] = vec3(0.0); sq[k] = vec3(0.0); }
-
-      vec2 offsets[4];
-      offsets[0] = vec2(-1.0, -1.0);
-      offsets[1] = vec2(0.0, -1.0);
-      offsets[2] = vec2(-1.0, 0.0);
-      offsets[3] = vec2(0.0, 0.0);
-
-      for (int k = 0; k < 4; k++) {
-        for (int j = 0; j <= 1; j++) {
-          for (int i = 0; i <= 1; i++) {
-            vec2 sampleOffset = (offsets[k] + vec2(float(i), float(j))) * px * radius;
-            vec3 c = texture2D(tex, uv + sampleOffset).rgb;
-            mean[k] += c;
-            sq[k] += c * c;
-          }
-        }
-        mean[k] /= 4.0;
-        sq[k] = abs(sq[k] / 4.0 - mean[k] * mean[k]);
-      }
-
-      float minVar = 1e6;
-      vec3 best = mean[0];
-      for (int k = 0; k < 4; k++) {
-        float v = sq[k].r + sq[k].g + sq[k].b;
-        if (v < minVar) { minVar = v; best = mean[k]; }
-      }
-      return best;
-    }
-
-    // --- 3a. woven linen height field ------------------------------------
-    // H(u,v) = sin(u*wx)*cos(v*wy)*0.4 + fbm(uv*160)*0.6
-    float canvasHeight(vec2 uv) {
-      float fibre = fbm2(uv * (160.0 * paperScale));
-      // the fibre phase warps the weave so the threads never read as a plaid
-      float warpX = sin(uv.x * (430.0 * paperScale) + fibre * 2.2);
-      float warpY = cos(uv.y * (497.0 * paperScale) + fibre * 1.7);
-      float weave = warpX * warpY * (0.35 + 0.65 * fibre);
-      return weave * 0.4 + fibre * 0.6;
+    // fast 2-octave paper grain
+    float fbmPaper(vec2 p) {
+      return vnoise(p) * 0.65 + vnoise(p * 2.07 + vec2(4.1, 8.9)) * 0.35;
     }
 
     // --- 4b. one Voronoi layer -------------------------------------------
@@ -179,83 +122,122 @@ export const PainterlyShader = {
       vec2 uv = vUv;
       vec2 px = 1.0 / max(resolution, vec2(1.0));
 
-      vec3 baseCol = texture2D(tDiffuse, uv).rgb;
+      vec3 c11 = texture2D(tDiffuse, uv).rgb;
+      vec3 baseCol = c11;
       float baseLum = lum(baseCol);
 
-      // ---- 1. brush clustering with tilt-shift depth-of-field -----------
-      // Modulate radius by vertical distance from building center (|uv.y - 0.46|)
+      // ---- 1. tilt-shift radius + fused Kuwahara + Sobel ---------------
       float distFromFocal = abs(uv.y - uTiltShiftCenter);
       float dof = smoothstep(uTiltShiftRange * 0.5, uTiltShiftRange * 2.2, distFromFocal);
       float tiltRadius = uKuwaharaRadius * (1.0 + dof * 2.2 * uTiltShiftAmount);
-      // Radius shrinks on glowing window cores so silhouettes stay readable.
+      // Shrink radius on glowing window cores so interior silhouettes stay sharp
       float kr = max(0.6, tiltRadius * (1.0 - 0.62 * smoothstep(0.72, 0.96, baseLum)));
-      vec3 paint = kuwahara(tDiffuse, uv, px, kr);
+      vec2 stepK = px * kr;
 
-      // ---- 2. dual-scale hand-wobbled ink ------------------------------
-      vec2 wob = vec2(
-        fbm2(uv * 18.0),
-        fbm2(uv * 18.0 + vec2(19.7, 7.3))
-      ) - 0.5;
-      vec2 brushUv = uv + wob * px * 1.6;
+      vec3 paint;
+      float gFine;
+      float gBroad;
+      float nPeak;
 
-      float fL = lumAt(tDiffuse, brushUv - vec2(px.x, 0.0));
-      float fR = lumAt(tDiffuse, brushUv + vec2(px.x, 0.0));
-      float fD = lumAt(tDiffuse, brushUv - vec2(0.0, px.y));
-      float fU = lumAt(tDiffuse, brushUv + vec2(0.0, px.y));
-      float bL = lumAt(tDiffuse, brushUv - vec2(px.x * 2.2, 0.0));
-      float bR = lumAt(tDiffuse, brushUv + vec2(px.x * 2.2, 0.0));
-      float bD = lumAt(tDiffuse, brushUv - vec2(0.0, px.y * 2.2));
-      float bU = lumAt(tDiffuse, brushUv + vec2(0.0, px.y * 2.2));
+      if (uFastMode > 0.5) {
+        // High-60fps 5-tap cross (4 reads + center = 5 total texel reads)
+        vec3 c01 = texture2D(tDiffuse, uv - vec2(stepK.x, 0.0)).rgb;
+        vec3 c21 = texture2D(tDiffuse, uv + vec2(stepK.x, 0.0)).rgb;
+        vec3 c10 = texture2D(tDiffuse, uv - vec2(0.0, stepK.y)).rgb;
+        vec3 c12 = texture2D(tDiffuse, uv + vec2(0.0, stepK.y)).rgb;
 
-      float gFine = length(vec2(fR - fL, fU - fD));
-      float gBroad = length(vec2(bR - bL, bU - bD));
+        float l01 = lum(c01), l21 = lum(c21), l10 = lum(c10), l12 = lum(c12);
+        gFine = length(vec2(l21 - l01, l12 - l10));
+        gBroad = gFine * 0.85;
+        nPeak = max(max(l01, l21), max(l10, l12));
+        vec3 crossAvg = (c11 + c01 + c21 + c10 + c12) * 0.2;
+        paint = mix(c11, crossAvg, 0.65 * (1.0 - smoothstep(0.18, 0.55, gFine)));
+      } else {
+        // Exact 4-sector 2x2 Kuwahara & Sobel fused into 9 shared taps (8 reads + center)
+        vec3 c00 = texture2D(tDiffuse, uv + vec2(-stepK.x, -stepK.y)).rgb;
+        vec3 c10 = texture2D(tDiffuse, uv + vec2(0.0,      -stepK.y)).rgb;
+        vec3 c20 = texture2D(tDiffuse, uv + vec2( stepK.x, -stepK.y)).rgb;
+        vec3 c01 = texture2D(tDiffuse, uv + vec2(-stepK.x,  0.0)).rgb;
+        vec3 c21 = texture2D(tDiffuse, uv + vec2( stepK.x,  0.0)).rgb;
+        vec3 c02 = texture2D(tDiffuse, uv + vec2(-stepK.x,  stepK.y)).rgb;
+        vec3 c12 = texture2D(tDiffuse, uv + vec2(0.0,       stepK.y)).rgb;
+        vec3 c22 = texture2D(tDiffuse, uv + vec2( stepK.x,  stepK.y)).rgb;
+
+        vec3 m0 = (c00 + c10 + c01 + c11) * 0.25;
+        vec3 m1 = (c10 + c20 + c11 + c21) * 0.25;
+        vec3 m2 = (c01 + c11 + c02 + c12) * 0.25;
+        vec3 m3 = (c11 + c21 + c12 + c22) * 0.25;
+
+        vec3 s0 = (c00*c00 + c10*c10 + c01*c01 + c11*c11) * 0.25 - m0*m0;
+        vec3 s1 = (c10*c10 + c20*c20 + c11*c11 + c21*c21) * 0.25 - m1*m1;
+        vec3 s2 = (c01*c01 + c11*c11 + c02*c02 + c12*c12) * 0.25 - m2*m2;
+        vec3 s3 = (c11*c11 + c21*c21 + c12*c12 + c22*c22) * 0.25 - m3*m3;
+
+        float v0 = dot(abs(s0), vec3(1.0));
+        float v1 = dot(abs(s1), vec3(1.0));
+        float v2 = dot(abs(s2), vec3(1.0));
+        float v3 = dot(abs(s3), vec3(1.0));
+
+        float minVar = v0;
+        paint = m0;
+        if (v1 < minVar) { minVar = v1; paint = m1; }
+        if (v2 < minVar) { minVar = v2; paint = m2; }
+        if (v3 < minVar) { paint = m3; }
+
+        float l00 = lum(c00), l20 = lum(c20), l02 = lum(c02), l22 = lum(c22);
+        float l01 = lum(c01), l21 = lum(c21), l10 = lum(c10), l12 = lum(c12);
+        gFine = length(vec2(l21 - l01, l12 - l10));
+        gBroad = length(vec2((l20 + l22) - (l00 + l02), (l02 + l22) - (l00 + l20))) * 0.5;
+        nPeak = max(max(l01, l21), max(l10, l12));
+      }
+
+      // ---- 2. hand-wobbled ink & gold rim ------------------------------
       float edgeFine = smoothstep(0.16, 0.45, gFine);
       float edgeBroad = smoothstep(0.16, 0.45, gBroad);
 
-      // dry-brush break-up: contours must look pulled by a hand, not a filter
-      float inkNoise = fbm2(brushUv * 26.0);
+      // dry-brush break-up: single vnoise pass saves ~70% ALU noise cost
+      float inkNoise = vnoise(uv * 26.0);
       float inkAmt = clamp(max(edgeFine * 0.86, edgeBroad * 0.68) * (0.58 + 0.8 * inkNoise), 0.0, 1.0);
-      inkAmt *= 1.0 - smoothstep(0.72, 0.95, baseLum); // never ink a lit window core
+      inkAmt *= 1.0 - smoothstep(0.72, 0.95, baseLum);
 
-      // ink colour follows local colour temperature, never pure black
       float warmth = clamp((baseCol.r - baseCol.b) * 2.6 + 0.42, 0.0, 1.0);
       vec3 inkCol = mix(INK_COLD, INK_WARM, warmth);
-      // grazing gold rim: keyed on the brightest tap so the moonlit side of an
-      // edge gilds the shadow side too, the way a lamp rims a silhouette
-      float nPeak = max(max(fL, fR), max(fD, fU));
       float rimBand = smoothstep(0.46, 0.80, nPeak) * (1.0 - smoothstep(0.90, 1.0, nPeak));
       inkCol = mix(inkCol, INK_GOLD, rimBand * (0.22 + 0.40 * edgeFine));
       paint = mix(paint, inkCol, inkAmt * 0.85);
 
-      // ---- 3. impasto relief on the linen canvas -----------------------
-      // 0.75px step keeps the tooth from aliasing into a hard screen door
-      vec2 hp = px * 0.75;
-      float h0 = canvasHeight(uv);
-      float hx = canvasHeight(uv + vec2(hp.x, 0.0));
-      float hy = canvasHeight(uv + vec2(0.0, hp.y));
-      vec3 N = normalize(vec3((h0 - hx) * RELIEF, (h0 - hy) * RELIEF, 1.0));
+      // ---- 3. analytic impasto relief on the linen canvas --------------
+      float fibre = vnoise(uv * (160.0 * paperScale));
+      float wx = uv.x * (430.0 * paperScale) + fibre * 2.2;
+      float wy = uv.y * (497.0 * paperScale) + fibre * 1.7;
+      float sinX = sin(wx);
+      float cosX = cos(wx);
+      float sinY = sin(wy);
+      float cosY = cos(wy);
+      float weaveGain = 0.35 + 0.65 * fibre;
+      float h0 = sinX * cosY * weaveGain * 0.4 + fibre * 0.6;
+      float dHx = cosX * cosY * weaveGain * 0.4 * (430.0 * paperScale * px.x * 0.75);
+      float dHy = -sinX * sinY * weaveGain * 0.4 * (497.0 * paperScale * px.y * 0.75);
+      vec3 N = normalize(vec3(-dHx * RELIEF, -dHy * RELIEF, 1.0));
       vec3 Lg = normalize(STUDIO_LIGHT);
       float ndl = dot(N, Lg);
-      // paint tooth bites in mid-tones; lit glass keeps its clarity
       float tooth = 1.0 - 0.55 * smoothstep(0.55, 0.95, lum(paint));
-      paint *= 1.0 + (ndl - 0.5025) * 0.20 * tooth; // 0.5025 = flat-normal baseline
+      paint *= 1.0 + (ndl - 0.5025) * 0.20 * tooth;
 
-      // grazing specular: thick paint only catches light where it is lit
       vec3 Hv = normalize(Lg + vec3(0.0, 0.0, 1.0));
-      // only the ridges of the weave catch the lamp -> sparse paint glints
       float ridge = 0.25 + 0.75 * smoothstep(0.05, 0.95, h0);
       float spec = max(pow(max(dot(N, Hv), 0.0), 40.0) - 0.006, 0.0) * ridge;
       paint += vec3(1.0, 0.93, 0.80) * spec * (0.05 + 0.26 * smoothstep(0.15, 0.85, lum(paint)));
 
-      // warm gouache paper undertone so shadows read as paint, not void
-      float paperTone = fbm3(uv * (3.2 * paperScale) + vec2(time * 0.006, 0.0));
-      vec3 creamPaper = vec3(0.93, 0.86, 0.71);   // rice-cream drawing paper
-      vec3 parchment = vec3(0.40, 0.41, 0.49);    // warm parchment grey-blue
+      // warm gouache paper undertone
+      float paperTone = fbmPaper(uv * (3.2 * paperScale) + vec2(time * 0.006, 0.0));
+      vec3 creamPaper = vec3(0.93, 0.86, 0.71);
+      vec3 parchment = vec3(0.40, 0.41, 0.49);
       vec3 under = mix(parchment, creamPaper, 0.35 + 0.5 * paperTone) * 0.55 + tint * 0.45;
       float shade = 1.0 - smoothstep(0.02, 0.42, lum(paint));
       paint += under * 0.085 * shade;
 
-      // watercolour pooling: pigment settles and darkens along every edge
+      // watercolour pooling
       float pool = smoothstep(0.05, 0.20, max(gFine, gBroad)) * (1.0 - inkAmt);
       paint *= 1.0 - pool * 0.13;
 

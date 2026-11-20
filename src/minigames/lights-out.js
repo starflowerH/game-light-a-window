@@ -50,7 +50,7 @@ export function toggleCross(grid, idx, rows, cols) {
  */
 export function generateSolvableBoard(rows, cols, level = 1, rng = Math.random) {
   const n = rows * cols
-  const movesCount = Math.min(Math.floor(n * 0.65), 2 + Math.floor(level * 1.1))
+  const movesCount = Math.min(Math.floor(n * 0.72), 2 + Math.ceil(level * 1.45))
   let grid = Array(n).fill(false)
   const chosen = []
   const pool = Array.from({ length: n }, (_, i) => i)

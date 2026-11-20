@@ -15,6 +15,9 @@
  *   stepGapMs: number,
  *   snapshotShowMs: number,
  *   decoyCount: number,
+ *   interleaveDecoys: boolean,
+ *   blackoutMs: number,
+ *   maxMistakes: number,
  *   recallSeconds: number,
  *   difficultyMult: number
  * }}
@@ -22,14 +25,17 @@
 export function computeMemoryDifficulty(level, totalWindows = 24) {
   const L = Math.max(1, Math.floor(Number(level) || 1))
   const W = Math.max(6, Math.floor(Number(totalWindows) || 24))
-  const maxTargets = Math.max(3, Math.floor(W * 0.65))
-  const targetCount = Math.min(maxTargets, 3 + Math.floor((L - 1) * 0.85))
-  const stepShowMs = Math.max(320, 850 - (L - 1) * 45)
-  const stepGapMs = Math.max(90, 260 - (L - 1) * 15)
-  const snapshotShowMs = Math.max(950, 3000 - (L - 1) * 170)
-  const decoyCount = L >= 8 ? 2 : L >= 4 ? 1 : 0
-  const recallSeconds = Math.round(14 + targetCount * 2.5)
-  const difficultyMult = Number((1 + (L - 1) * 0.15).toFixed(2))
+  const maxTargets = Math.min(W - 1, Math.max(4, Math.floor(W * 0.72)))
+  const targetCount = Math.min(maxTargets, 3 + Math.floor((L - 1) * 0.95))
+  const stepShowMs = Math.max(210, Math.round(740 - (L - 1) * 62))
+  const stepGapMs = Math.max(65, Math.round(210 - (L - 1) * 18))
+  const snapshotShowMs = Math.max(650, Math.round(2400 - (L - 1) * 210))
+  const decoyCount = L >= 9 ? 4 : L >= 7 ? 3 : L >= 5 ? 2 : L >= 3 ? 1 : 0
+  const interleaveDecoys = L >= 4
+  const blackoutMs = L >= 6 ? Math.min(900, 350 + (L - 6) * 140) : 0
+  const maxMistakes = L >= 7 ? 1 : L >= 4 ? 2 : 3
+  const recallSeconds = Math.max(8, Math.round(12 + targetCount * 1.9 - (L - 1) * 0.45))
+  const difficultyMult = Number((1 + (L - 1) * 0.22).toFixed(2))
 
   return {
     level: L,
@@ -38,6 +44,9 @@ export function computeMemoryDifficulty(level, totalWindows = 24) {
     stepGapMs,
     snapshotShowMs,
     decoyCount,
+    interleaveDecoys,
+    blackoutMs,
+    maxMistakes,
     recallSeconds,
     difficultyMult
   }
@@ -107,6 +116,7 @@ export function createMemoryState(mode, round) {
     cursor: 0,
     matched: /** @type {number[]} */ ([]),
     wrongClicks: 0,
+    maxMistakes: Number.isFinite(round.config.maxMistakes) ? round.config.maxMistakes : 3,
     attempts: 0,
     scoreMultiplier: 1,
     finished: false
@@ -156,8 +166,9 @@ export function stepMemoryTap(state, idx) {
       }
     }
     state.wrongClicks += 1
-    // Allow soft error recovery: if player makes 3 mistakes in one stage, end stage gracefully
-    const finished = state.wrongClicks >= Math.max(3, Math.ceil(total * 0.6))
+    // Stage-tightened mistake allowance: 3 in early stages, 2 mid-game, 1 at stage 7+
+    const mistakeLimit = Number.isFinite(state.maxMistakes) ? state.maxMistakes : Math.max(3, Math.ceil(total * 0.6))
+    const finished = state.wrongClicks >= mistakeLimit
     state.finished = finished
     return {
       outcome: 'wrong',
@@ -188,7 +199,8 @@ export function stepMemoryTap(state, idx) {
     }
   }
   state.wrongClicks += 1
-  const finished = state.wrongClicks >= Math.max(3, Math.ceil(total * 0.6))
+  const mistakeLimit = Number.isFinite(state.maxMistakes) ? state.maxMistakes : Math.max(3, Math.ceil(total * 0.6))
+  const finished = state.wrongClicks >= mistakeLimit
   state.finished = finished
   return {
     outcome: 'wrong',
@@ -211,7 +223,7 @@ export function summarizeMemoryStage(state, timeLeftSec = 0) {
   const attempts = Math.max(1, correctCount + state.wrongClicks)
   const accuracyPct = Number(((correctCount / Math.max(attempts, totalTargets)) * 100).toFixed(1))
   const orderPerfect = correctCount === totalTargets && state.wrongClicks === 0
-  const mult = (1 + (state.level - 1) * 0.15) * (state.scoreMultiplier || 1)
+  const mult = (1 + (state.level - 1) * 0.22) * (state.scoreMultiplier || 1)
   const perfectBonus = orderPerfect ? 150 : 0
   const timeBonus = correctCount === totalTargets ? Math.round(Math.max(0, timeLeftSec) * 15) : 0
   const scoreGained = Math.round((correctCount * 100 + perfectBonus + timeBonus) * mult)

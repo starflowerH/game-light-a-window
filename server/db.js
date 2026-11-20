@@ -536,7 +536,7 @@ function buildRepository(db, dataDir) {
         const mine = db.prepare(`${cte} SELECT * FROM ranked WHERE player_uid = ?`).get(...params, String(uid))
         if (mine) {
           const r = num(mine.rank) || 1
-          const above = r > 1 ? db.prepare(`${cte} SELECT nickname, eff_score FROM ranked WHERE rank = ?`).get(...params, r - 1) : null
+          const above = r > 1 ? db.prepare(`${cte} SELECT nickname, eff_score, stage_reached, accuracy_pct FROM ranked WHERE rank = ?`).get(...params, r - 1) : null
           const total = Math.max(1, totalEntries)
           myRank = {
             rank: r,
@@ -549,7 +549,9 @@ function buildRepository(db, dataDir) {
             gameMode: String(mine.game_mode || 'star_sweep'),
             dormType: String(mine.dorm_type || 'university'),
             nextGap: above ? Math.max(1, num(above.eff_score) - num(mine.eff_score)) : 0,
-            nextNickname: above ? String(above.nickname || '') : ''
+            nextNickname: above ? String(above.nickname || '') : '',
+            nextStage: above ? (num(above.stage_reached) || 1) : 0,
+            nextAccuracy: above ? (Number(above.accuracy_pct) || 0) : 0
           }
         }
       }

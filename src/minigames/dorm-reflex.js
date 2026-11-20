@@ -9,17 +9,23 @@ import { WINDOW_STATES } from '../../shared/constants.js'
 
 export const PATROL_DURATION_SEC = 60
 
+export const PATROL_WAVE_NAMES = ['热身查寝', '熄灯突击', '宿舍躁动', '宿管暴走', '零点极限']
+
 /**
- * Compute wave pacing based on elapsed seconds.
+ * Compute wave pacing based on elapsed seconds across 5 escalating 12s waves.
  * @param {number} elapsedSec
  */
 export function patrolWaveConfig(elapsedSec) {
   const t = Math.max(0, Number(elapsedSec) || 0)
   const progress = Math.min(1, t / PATROL_DURATION_SEC)
+  const wave = Math.min(5, Math.floor(t / 12) + 1)
   return {
-    spawnIntervalMs: Math.round(1150 - progress * 520),
-    ttlMs: Math.round(3100 - progress * 1050),
-    maxActive: Math.min(8, 3 + Math.floor(progress * 5))
+    wave,
+    waveName: PATROL_WAVE_NAMES[wave - 1] || PATROL_WAVE_NAMES[0],
+    spawnIntervalMs: Math.round(960 - progress * 600),
+    ttlMs: Math.round(2550 - progress * 1350),
+    maxActive: Math.min(10, 3 + Math.floor(progress * 7)),
+    doubleSpawnChance: wave >= 4 ? 0.35 : 0
   }
 }
 

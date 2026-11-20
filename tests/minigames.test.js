@@ -30,13 +30,24 @@ import { RANDOM_EVENTS, pickRandomEvent } from '../src/random-events.js'
 import { buildOfflineDialogue, renderNpcPortraitSvg } from '../src/npc-portraits.js'
 
 describe('memory-patrol minigame (sequence & snapshot)', () => {
-  it('scales targetCount upward and timing tighter with stage level', () => {
+  it('scales targetCount upward and timing tighter with stage level up to 10 stages', () => {
     const s1 = computeMemoryDifficulty(1, 24)
+    const s4 = computeMemoryDifficulty(4, 24)
     const s6 = computeMemoryDifficulty(6, 24)
+    const s10 = computeMemoryDifficulty(10, 24)
     expect(s6.targetCount).toBeGreaterThan(s1.targetCount)
+    expect(s10.targetCount).toBeGreaterThanOrEqual(s6.targetCount)
     expect(s6.stepShowMs).toBeLessThan(s1.stepShowMs)
+    expect(s10.stepShowMs).toBeLessThanOrEqual(s6.stepShowMs)
     expect(s6.snapshotShowMs).toBeLessThan(s1.snapshotShowMs)
+    expect(s10.snapshotShowMs).toBeLessThanOrEqual(s6.snapshotShowMs)
     expect(s6.decoyCount).toBeGreaterThan(0)
+    expect(s1.interleaveDecoys).toBe(false)
+    expect(s4.interleaveDecoys).toBe(true)
+    expect(s1.blackoutMs).toBe(0)
+    expect(s6.blackoutMs).toBeGreaterThan(0)
+    expect(s10.maxMistakes).toBeLessThan(s1.maxMistakes)
+    expect(s10.difficultyMult).toBeGreaterThan(s1.difficultyMult)
   })
 
   it('caps targetCount sensibly for 12-window staff dorm', () => {
@@ -89,8 +100,15 @@ describe('memory-patrol minigame (sequence & snapshot)', () => {
 })
 
 describe('dorm-reflex minigame', () => {
-  it('speeds up wave pacing toward the end of the 60s patrol', () => {
-    const start = patrolWaveConfig(0)
+  it('speeds up wave pacing across all 5 escalating waves of the 60s patrol', () => {
+    const waves = [0, 12, 24, 36, 48].map(t => patrolWaveConfig(t))
+    expect(waves.map(w => w.wave)).toEqual([1, 2, 3, 4, 5])
+    expect(waves.map(w => w.waveName)).toEqual(['热身查寝', '熄灯突击', '宿舍躁动', '宿管暴走', '零点极限'])
+    expect(waves[0].doubleSpawnChance).toBe(0)
+    expect(waves[3].doubleSpawnChance).toBe(0.35)
+    expect(waves[4].doubleSpawnChance).toBe(0.35)
+
+    const start = waves[0]
     const end = patrolWaveConfig(PATROL_DURATION_SEC)
     expect(end.spawnIntervalMs).toBeLessThan(start.spawnIntervalMs)
     expect(end.ttlMs).toBeLessThan(start.ttlMs)
@@ -124,21 +142,24 @@ describe('lights-out-puzzle & GF(2) exact solver across all 4 dormitories', () =
     expect(crossIndices(5, 3, 4).sort((a, b) => a - b)).toEqual([1, 4, 5, 6, 9])
   })
 
-  it('generates 100% GF(2) solvable boards for staff(12), highschool(18), university(24), grad(30)', () => {
+  it('generates 100% GF(2) solvable boards across stages 1..8 for staff(12), highschool(18), university(24), grad(30)', () => {
     for (const d of DORM_TYPES) {
-      const board = generateSolvableBoard(d.rows, d.cols, 3)
-      expect(board.grid).toHaveLength(d.windowCount)
-      expect(isAllLightsOut(board.grid)).toBe(false)
+      for (const stage of [1, 4, 8]) {
+        const board = generateSolvableBoard(d.rows, d.cols, stage)
+        expect(board.grid).toHaveLength(d.windowCount)
+        expect(board.parMoves).toBeGreaterThanOrEqual(1)
+        expect(isAllLightsOut(board.grid)).toBe(false)
 
-      const solution = solveLightsOutGF2(board.grid, d.rows, d.cols)
-      expect(solution).not.toBeNull()
-      expect((solution || []).length).toBeGreaterThan(0)
+        const solution = solveLightsOutGF2(board.grid, d.rows, d.cols)
+        expect(solution).not.toBeNull()
+        expect((solution || []).length).toBeGreaterThan(0)
 
-      let cur = board.grid.slice()
-      for (const clickIdx of solution || []) {
-        cur = toggleCross(cur, clickIdx, d.rows, d.cols)
+        let cur = board.grid.slice()
+        for (const clickIdx of solution || []) {
+          cur = toggleCross(cur, clickIdx, d.rows, d.cols)
+        }
+        expect(isAllLightsOut(cur)).toBe(true)
       }
-      expect(isAllLightsOut(cur)).toBe(true)
     }
   })
 

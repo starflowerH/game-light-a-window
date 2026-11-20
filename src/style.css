@@ -931,9 +931,7 @@ b.urgent { color: #ff9a7a; }
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 12px;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
   white-space: nowrap;
   animation: winTagFadeIn 0.25s ease-out;
   line-height: 1.4;
@@ -1305,5 +1303,114 @@ b.urgent { color: #ff9a7a; }
 .replay-skip {
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------------------
+   v5.1: Intuitive Patrol Tier Badges & Stage Milestones
+--------------------------------------------------------------------------- */
+.tier-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(18, 24, 42, 0.78);
+  color: #e6ecf8;
+  white-space: nowrap;
+}
+.tier-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.tier-d { background: rgba(130, 145, 175, 0.22); color: #c8d2e8; border-color: rgba(160, 175, 210, 0.35); }
+.tier-c { background: rgba(86, 178, 160, 0.22); color: #9ff4e0; border-color: rgba(96, 210, 185, 0.45); }
+.tier-b { background: rgba(78, 152, 242, 0.24); color: #b5daff; border-color: rgba(110, 180, 255, 0.5); }
+.tier-a { background: rgba(168, 114, 255, 0.24); color: #e2c8ff; border-color: rgba(190, 145, 255, 0.55); }
+.tier-s { background: rgba(255, 196, 72, 0.26); color: #ffe799; border-color: rgba(255, 212, 108, 0.65); }
+.tier-ss { background: linear-gradient(135deg, rgba(255, 170, 64, 0.36), rgba(255, 105, 130, 0.34)); color: #fff2c4; border-color: rgba(255, 200, 110, 0.8); }
+.tier-sss { background: linear-gradient(135deg, rgba(255, 215, 0, 0.42), rgba(255, 92, 168, 0.42)); color: #fffbe6; border-color: rgba(255, 235, 150, 0.95); box-shadow: 0 0 12px rgba(255, 210, 90, 0.45); }
+
+.tier-medal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 10px 0 12px;
+  border-radius: 14px;
+  background: rgba(16, 22, 40, 0.72);
+  border: 1px solid rgba(255, 218, 150, 0.28);
+}
+.tmc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tmc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tmc-code {
+  font-size: 20px;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+.tmc-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff6e0;
+}
+.tmc-stage {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ffd996;
+}
+.tmc-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.tmc-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffba5a, #ffe89e);
+}
+.tmc-next {
+  font-size: 12px;
+  color: rgba(226, 236, 252, 0.86);
+}
+.board-milestone {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 212, 130, 0.14);
+  border: 1px solid rgba(255, 212, 130, 0.3);
+  color: #ffe2a4;
+}
+@media (max-width: 860px) {
+  .tier-pill { font-size: 10px; padding: 1px 6px; }
+  .tier-medal-card { padding: 10px 11px; }
+}
+
 
 

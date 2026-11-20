@@ -155,6 +155,15 @@ export class TutorialStateMachine {
     this._hintEmitted = false
   }
 
+  /**
+   * Abort the active tutorial session cleanly without marking storage completed.
+   */
+  abort() {
+    this._state = TUTORIAL_STATES.IDLE
+    this._inactivityMs = 0
+    this._hintEmitted = false
+  }
+
   /** Reset inactivity timer on any user interaction. */
   resetInactivity() {
     this._inactivityMs = 0

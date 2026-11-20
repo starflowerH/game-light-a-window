@@ -488,6 +488,7 @@ const VIEW_PRESETS = {
  * @typedef {{
  *   idx: number, roomId: number, r: number, c: number,
  *   state: string, lit: boolean,
+ *   winW: number, winH: number,
  *   group: THREE.Group, glass: THREE.Mesh, silhouette: THREE.Mesh, backPanel: THREE.Mesh,
  *   frame?: THREE.Mesh, glow: THREE.Sprite, halo: THREE.Sprite, beacon: THREE.Sprite,
  *   pulse: number, world: THREE.Vector3, home: { x: number, y: number, z: number },
@@ -555,13 +556,15 @@ export class Scene {
     this._harmonyUntil = 0
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
-    this._pixelRatioCap = matchMedia('(pointer: coarse)').matches ? 1.5 : 2
+    this._pixelRatioCap = matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this._pixelRatioCap))
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.18
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    this.renderer.shadowMap.autoUpdate = false
+    this.renderer.shadowMap.needsUpdate = true
     host.appendChild(this.renderer.domElement)
     this.renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;touch-action:none'
 
@@ -600,14 +603,24 @@ export class Scene {
     this._floorSigns = new Map()
     this._pings = []
 
-    // Adaptive quality controller state (Features A1/A6)
+    // Adaptive quality controller state (Features A1/A6 · 60fps target)
+    this._targetFps = 60
     this._quality = 3
-    this._frameTimes = new Float32Array(90)
+    this._frameTimes = new Float32Array(60)
     this._frameTimeIdx = 0
     this._frameCount = 0
     this._degradeTimer = 0
     this._upgradeTimer = 0
     this._tempLocalCam = new THREE.Vector3()
+    this._lastCamPos = new THREE.Vector3(Infinity, Infinity, Infinity)
+    this._raycaster = new THREE.Raycaster()
+    this._ndcVec = new THREE.Vector2()
+    this._tmpProj = new THREE.Vector3()
+    this._tmpProj2 = new THREE.Vector3()
+    this._spillDummy = new THREE.Object3D()
+    this._spillColor = new THREE.Color()
+    this._glassMeshes = []
+    this._canvasRect = null
 
     // Shared procedural interior mapping atlas (Feature A1)
     this._interiorAtlas = createInteriorAtlas()
@@ -796,6 +809,13 @@ export class Scene {
     }
     this.setSeason(this.season)
     this._syncSnowVisibility()
+    this._bakeShadows()
+  }
+
+  _bakeShadows() {
+    if (this.renderer && this.renderer.shadowMap) {
+      this.renderer.shadowMap.needsUpdate = true
+    }
   }
 
   /** @param {THREE.Object3D} sceneSrc @param {string} dormId @param {string[]} [prevStates] */
@@ -871,12 +891,15 @@ export class Scene {
       }
     })
 
+    this._glassMeshes = this.windows.map(w => w.glass)
+    this._lastCamPos.set(Infinity, Infinity, Infinity)
     this._buildFloorSigns(def)
     this._attachDormAtmosphereLights()
     this._buildSpillDecals()
     this.setSeason(this.season)
     this._syncSnowVisibility()
     this.setLitCount(this.windows.filter(w => w.state === WINDOW_STATES.LIT).length)
+    this._bakeShadows()
   }
 
   _createInteriorMaterial(idx, winW, winH) {
@@ -1028,8 +1051,8 @@ export class Scene {
 
   _syncSpillDecals() {
     if (!this.spillMesh || !this.spillMesh.instanceColor) return
-    const dummy = new THREE.Object3D()
-    const color = new THREE.Color()
+    const dummy = this._spillDummy
+    const color = this._spillColor
     const warmHex = this._target ? this._target.warm : 0xffc06a
 
     for (let i = 0; i < this.windows.length; i++) {
@@ -1067,7 +1090,8 @@ export class Scene {
     if (this._quality === level) return
     this._quality = level
 
-    const dpr = level === 3 ? (matchMedia('(pointer: coarse)').matches ? 1.5 : 2.0) : level === 2 ? 1.5 : level === 1 ? 1.25 : 1.0
+    const coarse = matchMedia('(pointer: coarse)').matches
+    const dpr = level === 3 ? (coarse ? 1.25 : 1.5) : level === 2 ? (coarse ? 1.15 : 1.25) : level === 1 ? 1.1 : 1.0
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, dpr))
     this._resize()
 
@@ -1075,26 +1099,33 @@ export class Scene {
       this.spillMesh.visible = level >= 2
     }
 
+    if (this.bloom) {
+      this.bloom.enabled = level >= 2
+    }
+
     if (this.painterly) {
-      this.painterly.material.uniforms.strength.value = (level === 0) ? 0.0 : 0.40
-      this.painterly.material.uniforms.uKuwaharaRadius.value = (level <= 1) ? 0.6 : 0.95
+      const u = this.painterly.material.uniforms
+      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.35 : 0.40
+      u.uKuwaharaRadius.value = level >= 3 ? 0.95 : level === 2 ? 0.75 : 0.60
+      if (u.uFastMode) u.uFastMode.value = level <= 2 ? 1.0 : 0.0
     }
 
     if (this.mistGroup) {
       this.mistGroup.visible = (level >= 2) && (this._fogStrength > 0.015)
     }
 
+    // Keep Interior Mapping enabled across tiers 1-3 to avoid shader recompile spikes; only downgrade at tier 0
     for (const w of this.windows) {
       const isShader = Boolean(w.glass.material && /** @type {any} */ (w.glass.material).uniforms)
-      if (level >= 2 && !isShader) {
-        const winW = /** @type {any} */ (w.glass.geometry).parameters?.width || 34
-        const winH = /** @type {any} */ (w.glass.geometry).parameters?.height || 44
+      if (level >= 1 && !isShader) {
+        const winW = w.winW || 34
+        const winH = w.winH || 44
         const oldMat = /** @type {any} */ (w.glass.material)
         if (oldMat && oldMat.dispose) oldMat.dispose()
         w.glass.material = this._createInteriorMaterial(w.idx, winW, winH)
         w.texKey = ''
         this._paintWindow(w)
-      } else if (level < 2 && isShader) {
+      } else if (level === 0 && isShader) {
         const oldMat = /** @type {any} */ (w.glass.material)
         if (oldMat && oldMat.dispose) oldMat.dispose()
         w.glass.material = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
@@ -1130,9 +1161,13 @@ export class Scene {
     silhouette.position.z = 0.8
     group.add(silhouette)
 
-    const glassMat = this._quality >= 2
+    const glassMat = this._quality >= 1
       ? this._createInteriorMaterial(idx, winW, winH)
       : new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
+    if (this._quality >= 1) {
+      backPanel.visible = false
+      silhouette.visible = false
+    }
 
     const glass = new THREE.Mesh(
       new THREE.PlaneGeometry(winW, winH),
@@ -1148,6 +1183,7 @@ export class Scene {
     }))
     glow.scale.setScalar(winW * 1.6)
     glow.position.set(x, y, z + 2)
+    glow.visible = false
     this.dorm.add(glow)
 
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -1156,6 +1192,7 @@ export class Scene {
     }))
     halo.scale.setScalar(winW * 2.15)
     halo.position.set(x, y, z + 5)
+    halo.visible = false
     this.dorm.add(halo)
 
     const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -1164,12 +1201,14 @@ export class Scene {
     }))
     beacon.scale.setScalar(22)
     beacon.position.set(x, y + winH / 2 + 12, z + 7)
+    beacon.visible = false
     this.dorm.add(beacon)
 
     return /** @type {WindowRecord} */ ({
       idx, roomId, r, c,
       state: WINDOW_STATES.DARK,
       lit: false,
+      winW, winH,
       group, glass, silhouette, backPanel,
       glow, halo, beacon,
       pulse: 0,
@@ -1288,9 +1327,12 @@ export class Scene {
       this.windows.push(rec)
       this._paintWindow(rec)
     }
+    this._glassMeshes = this.windows.map(w => w.glass)
+    this._lastCamPos.set(Infinity, Infinity, Infinity)
     this._buildFloorSigns(def)
     this._attachDormAtmosphereLights()
     this._buildSpillDecals()
+    this._bakeShadows()
   }
 
   _buildFloorSigns(def) {
@@ -1633,7 +1675,7 @@ export class Scene {
       `
     })
 
-    const depths = [-140, -60, 40, 110, 175, 240, 310, 390]
+    const depths = [-80, 60, 190, 330]
     for (let i = 0; i < depths.length; i++) {
       const m = new THREE.Mesh(
         new THREE.PlaneGeometry(1560, 210),
@@ -1858,6 +1900,7 @@ export class Scene {
   _syncSnowVisibility() {
     const showSnow = this.season === 'winter' || this.weather === 'snow'
     for (const mesh of this._snowNodes) mesh.visible = showSnow
+    this._bakeShadows()
   }
 
   /**
@@ -2014,25 +2057,16 @@ export class Scene {
 
   _paintWindow(w) {
     const warm = this._target ? this._target.warm : 0xffc06a
-    const sil = RESIDENT_SILHOUETTES[w.roomId] || ['person', 'plant', 'cat', 'laundry', 'lamp', 'shelf', 'chat'][w.variant % 7]
-    const key = w.state + '|' + warm + '|' + sil + '|' + w.variant
-    if (w.texKey === key) return
-    let tex = this._textures.get(key)
-    if (!tex) {
-      tex = windowTexture(192, w.state, warm, sil, w.variant)
-      this._textures.set(key, tex)
-      if (this._textures.size > 260) {
-        const oldest = this._textures.keys().next().value
-        const dead = this._textures.get(oldest)
-        this._textures.delete(oldest)
-        if (dead && dead.dispose) dead.dispose()
-      }
-    }
-    w.texKey = key
-
     const lit = w.state !== WINDOW_STATES.DARK
+    const isShader = Boolean(w.glass.material && /** @type {any} */ (w.glass.material).uniforms)
 
-    if (w.glass.material && /** @type {any} */ (w.glass.material).uniforms) {
+    if (isShader) {
+      const key = w.state + '|' + warm
+      if (w.texKey === key) return
+      w.texKey = key
+      w.backPanel.visible = false
+      w.silhouette.visible = false
+
       const u = /** @type {any} */ (w.glass.material).uniforms
       let stateNum = 0.0
       if (w.state === WINDOW_STATES.LIT) stateNum = 1.0
@@ -2048,28 +2082,54 @@ export class Scene {
       u.uState.value = stateNum
       u.uPaletteRow.value = (w.state === WINDOW_STATES.DECOY_BLUE) ? 1.0 : 0.0
       u.uWarmColor.value.set(warm)
+      if (this.camera && u.uCamLocal) {
+        w.group.worldToLocal(this._tempLocalCam.copy(this.camera.position))
+        u.uCamLocal.value.copy(this._tempLocalCam)
+      }
     } else {
+      const sil = RESIDENT_SILHOUETTES[w.roomId] || ['person', 'plant', 'cat', 'laundry', 'lamp', 'shelf', 'chat'][w.variant % 7]
+      const key = w.state + '|' + warm + '|' + sil + '|' + w.variant
+      if (w.texKey === key) return
+      let tex = this._textures.get(key)
+      if (!tex) {
+        tex = windowTexture(192, w.state, warm, sil, w.variant)
+        this._textures.set(key, tex)
+        if (this._textures.size > 260) {
+          const oldest = this._textures.keys().next().value
+          const dead = this._textures.get(oldest)
+          this._textures.delete(oldest)
+          if (dead && dead.dispose) dead.dispose()
+        }
+      }
+      w.texKey = key
+
       const glassMat = /** @type {THREE.MeshBasicMaterial} */ (w.glass.material)
       glassMat.map = tex
       glassMat.needsUpdate = true
       glassMat.color.set(lit ? 0xffffff : 0xa9c6ee)
+
+      w.backPanel.visible = true
+      const silMat = /** @type {THREE.MeshBasicMaterial} */ (w.silhouette.material)
+      const backMat = /** @type {THREE.MeshBasicMaterial} */ (w.backPanel.material)
+      w.silhouette.visible = lit && w.state !== WINDOW_STATES.DECOY_BLUE
+      silMat.color.set(lit ? 0x2a1408 : 0x120e18)
+      silMat.opacity = lit ? 0.85 : 0
+
+      let backHex = warm
+      if (w.state === WINDOW_STATES.DECOY_BLUE) backHex = 0x5288ff
+      else if (w.state === WINDOW_STATES.SAFE_WARM) backHex = 0x7fd49a
+      else if (w.state === WINDOW_STATES.CORRECT_GREEN) backHex = 0x4fd98c
+      else if (w.state === WINDOW_STATES.WRONG_AMBER) backHex = 0xff7050
+      else if (w.state === WINDOW_STATES.TARGET_HINT) backHex = 0xffe468
+      backMat.color.set(lit ? backHex : 0x141020)
     }
 
-    const silMat = /** @type {THREE.MeshBasicMaterial} */ (w.silhouette.material)
-    const backMat = /** @type {THREE.MeshBasicMaterial} */ (w.backPanel.material)
-    w.silhouette.visible = lit && w.state !== WINDOW_STATES.DECOY_BLUE
-    silMat.color.set(lit ? 0x2a1408 : 0x120e18)
-    silMat.opacity = lit ? 0.85 : 0
-
-    let backHex = warm
     let glowHex = warm
-    if (w.state === WINDOW_STATES.DECOY_BLUE) { backHex = 0x5288ff; glowHex = 0x62a2ff }
-    else if (w.state === WINDOW_STATES.SAFE_WARM) { backHex = 0x7fd49a; glowHex = 0x90e4aa }
-    else if (w.state === WINDOW_STATES.CORRECT_GREEN) { backHex = 0x4fd98c; glowHex = 0x5ae696 }
-    else if (w.state === WINDOW_STATES.WRONG_AMBER) { backHex = 0xff7050; glowHex = 0xff8866 }
-    else if (w.state === WINDOW_STATES.TARGET_HINT) { backHex = 0xffe468; glowHex = 0xffee88 }
-
-    backMat.color.set(lit ? backHex : 0x141020)
+    if (w.state === WINDOW_STATES.DECOY_BLUE) glowHex = 0x62a2ff
+    else if (w.state === WINDOW_STATES.SAFE_WARM) glowHex = 0x90e4aa
+    else if (w.state === WINDOW_STATES.CORRECT_GREEN) glowHex = 0x5ae696
+    else if (w.state === WINDOW_STATES.WRONG_AMBER) glowHex = 0xff8866
+    else if (w.state === WINDOW_STATES.TARGET_HINT) glowHex = 0xffee88
     w.glow.material.color.set(glowHex)
 
     w.target.glow = lit ? (w.state === WINDOW_STATES.LIT || w.state === WINDOW_STATES.TARGET_HINT ? 0.62 : 0.48) : 0
@@ -2227,12 +2287,16 @@ export class Scene {
 
   // ----------------------------------------------------------------- input
 
+  _getRect() {
+    if (this._canvasRect && this._canvasRect.width > 0) return this._canvasRect
+    this._canvasRect = this.renderer.domElement.getBoundingClientRect()
+    return this._canvasRect
+  }
+
   _screenToNdc(x, y) {
-    const r = this.renderer.domElement.getBoundingClientRect()
-    return {
-      ndc: new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1),
-      rect: r
-    }
+    const r = this._getRect()
+    this._ndcVec.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1)
+    return { ndc: this._ndcVec, rect: r }
   }
 
   /**
@@ -2244,14 +2308,15 @@ export class Scene {
   windowAt(x, y, slack = 0) {
     if (!this.windows.length) return null
     const ndc = this._screenToNdc(x, y).ndc
-    const ray = new THREE.Raycaster()
-    ray.setFromCamera(ndc, this.camera)
-    const hits = ray.intersectObjects(this.windows.map(w => w.glass), false)
+    this._raycaster.setFromCamera(ndc, this.camera)
+    const meshes = this._glassMeshes.length === this.windows.length ? this._glassMeshes : (this._glassMeshes = this.windows.map(w => w.glass))
+    const hits = this._raycaster.intersectObjects(meshes, false)
     if (!hits.length) {
       if (slack <= 0) return null
       let best = null
       let bestD = Infinity
-      for (const w of this.windows) {
+      for (let i = 0; i < this.windows.length; i++) {
+        const w = this.windows[i]
         const p = this.windowScreenRect(w)
         if (!p) continue
         const hitR = Math.max(slack, Math.max(p.w, p.h) * 0.58)
@@ -2268,23 +2333,32 @@ export class Scene {
   windowScreenPos(w) {
     if (!w || !w.glass) return null
     w.glass.getWorldPosition(w.world)
-    const v = w.world.clone().project(this.camera)
+    const v = this._tmpProj.copy(w.world).project(this.camera)
     if (v.z > 1) return null
-    const r = this.renderer.domElement.getBoundingClientRect()
+    const r = this._getRect()
     return { x: (v.x * 0.5 + 0.5) * r.width + r.left, y: (-v.y * 0.5 + 0.5) * r.height + r.top }
   }
 
   /** Projected center + approximate screen width/height of a window glass mesh. @param {WindowRecord} w */
   windowScreenRect(w) {
-    const center = this.windowScreenPos(w)
-    if (!center || !w.glass) return null
-    const box = new THREE.Box3().setFromObject(w.glass)
-    const min = box.min.clone().project(this.camera)
-    const max = box.max.clone().project(this.camera)
-    const r = this.renderer.domElement.getBoundingClientRect()
-    const pw = Math.max(28, Math.abs(max.x - min.x) * 0.5 * r.width)
-    const ph = Math.max(32, Math.abs(max.y - min.y) * 0.5 * r.height)
-    return { x: center.x, y: center.y, w: pw, h: ph }
+    if (!w || !w.glass) return null
+    w.glass.getWorldPosition(w.world)
+    const v = this._tmpProj.copy(w.world).project(this.camera)
+    if (v.z > 1) return null
+    const r = this._getRect()
+    const cx = (v.x * 0.5 + 0.5) * r.width + r.left
+    const cy = (-v.y * 0.5 + 0.5) * r.height + r.top
+    const m = this.camera.matrixWorld.elements
+    const hw = (w.winW || 34) * 0.5
+    const hh = (w.winH || 44) * 0.5
+    const v2 = this._tmpProj2.set(
+      w.world.x + m[0] * hw + m[4] * hh,
+      w.world.y + m[1] * hw + m[5] * hh,
+      w.world.z + m[2] * hw + m[6] * hh
+    ).project(this.camera)
+    const pw = Math.max(28, Math.abs(v2.x - v.x) * r.width)
+    const ph = Math.max(32, Math.abs(v2.y - v.y) * r.height)
+    return { x: cx, y: cy, w: pw, h: ph }
   }
 
   magnetPoints() {
@@ -2569,6 +2643,10 @@ export class Scene {
     const h = this.host.clientHeight || innerHeight
     this.renderer.setSize(w, h)
     this.composer.setSize(w, h)
+    if (this.bloom) {
+      this.bloom.setSize(Math.max(1, Math.floor(w * 0.5)), Math.max(1, Math.floor(h * 0.5)))
+    }
+    this._canvasRect = this.renderer.domElement.getBoundingClientRect()
     if (this.painterly) {
       this.painterly.material.uniforms.resolution.value.set(w, h)
       this.painterly.material.uniforms.paperScale.value = Math.min(2, Math.max(0.7, w / 1400))
@@ -2589,28 +2667,28 @@ export class Scene {
     const dt = Math.min((now - this._lastNow) / 1000, 0.05)
     this._lastNow = now
 
-    // Adaptive quality controller: rolling 90-frame window averaging delta frame times (Feature A6)
+    // Adaptive quality controller targeting 60+ FPS over a 60-frame rolling window (Features A1/A6)
     const dtMs = dt * 1000
     this._frameTimes[this._frameTimeIdx] = dtMs
-    this._frameTimeIdx = (this._frameTimeIdx + 1) % 90
-    this._frameCount = Math.min(90, this._frameCount + 1)
+    this._frameTimeIdx = (this._frameTimeIdx + 1) % 60
+    this._frameCount = Math.min(60, this._frameCount + 1)
 
-    if (this._frameCount >= 90) {
+    if (this._frameCount >= 60) {
       let sum = 0
-      for (let i = 0; i < 90; i++) sum += this._frameTimes[i]
-      const avgMs = sum / 90
+      for (let i = 0; i < 60; i++) sum += this._frameTimes[i]
+      const avgMs = sum / 60
 
-      if (avgMs > 24.0) {
+      if (avgMs > 18.8) {
         this._degradeTimer += dt
         this._upgradeTimer = 0
-        if (this._degradeTimer >= 2.0 && this._quality > 0) {
+        if (this._degradeTimer >= 1.2 && this._quality > 0) {
           this.setQuality(this._quality - 1)
           this._degradeTimer = 0
         }
-      } else if (avgMs < 12.0) {
+      } else if (avgMs < 13.5) {
         this._upgradeTimer += dt
         this._degradeTimer = 0
-        if (this._upgradeTimer >= 6.0 && this._quality < 3) {
+        if (this._upgradeTimer >= 5.0 && this._quality < 3) {
           this.setQuality(this._quality + 1)
           this._upgradeTimer = 0
         }
@@ -2620,13 +2698,16 @@ export class Scene {
       }
     }
 
-    // Facade bloom, exposure & puddle glow easing linked to lit window ratio (Feature A2)
+    // Facade bloom, exposure & puddle glow easing linked to lit window ratio (zero alloc loop)
     const totalWins = Math.max(1, this.windows.length)
-    const litWins = this.windows.filter(w => w.state !== WINDOW_STATES.DARK).length
+    let litWins = 0
+    for (let i = 0; i < this.windows.length; i++) {
+      if (this.windows[i].state !== WINDOW_STATES.DARK) litWins += 1
+    }
     const pLit = litWins / totalWins
     const targetBloom = 0.45 + 0.17 * pLit
     const targetExposure = 1.18 + 0.10 * pLit
-    if (this.bloom) {
+    if (this.bloom && this.bloom.enabled) {
       this.bloom.strength += (targetBloom - this.bloom.strength) * Math.min(1, dt * 2.5)
     }
     if (this.renderer) {
@@ -2637,7 +2718,6 @@ export class Scene {
     }
 
     // Campus animated ecology details (Feature A5)
-    // 1. AC outdoor unit fan rotation
     if (this._acFans && this._acFans.length) {
       const fanDelta = dt * 9.0
       for (let i = 0; i < this._acFans.length; i++) {
@@ -2645,7 +2725,6 @@ export class Scene {
       }
     }
 
-    // 2. Night watch flashlight sweep at ground level
     if (this.flashlight) {
       if (this.flashlightMat) this.flashlightMat.uniforms.uTime.value = t
       const patrolCycle = t * (Math.PI * 2 / 18.0)
@@ -2654,22 +2733,27 @@ export class Scene {
       this.flashlight.rotation.z = sweepAngle
     }
 
-    // 3. Rooftop cat idle breathing/tail sway
     if (this.roofCat) {
       const breathe = 1.0 + 0.04 * Math.sin(t * 2.2)
       this.roofCat.scale.set(1.25, 0.9 * breathe, 1.0)
       this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 1.1) * 1.5
     }
 
-    // Update window interior mapping shader camera uniform uCamLocal efficiently (Feature A1)
-    if (this._quality >= 2) {
+    // Update Interior Mapping uniforms only when camera moved or window is lit
+    if (this._quality >= 1) {
       const camPos = this.camera.position
+      const camMoved = this._lastCamPos.distanceToSquared(camPos) > 1e-4
+      if (camMoved) this._lastCamPos.copy(camPos)
+
       for (let i = 0; i < this.windows.length; i++) {
         const w = this.windows[i]
         const mat = /** @type {any} */ (w.glass.material)
-        if (mat.uniforms && mat.uniforms.uCamLocal) {
+        if (!mat || !mat.uniforms) continue
+        if (camMoved && mat.uniforms.uCamLocal) {
           w.group.worldToLocal(this._tempLocalCam.copy(camPos))
           mat.uniforms.uCamLocal.value.copy(this._tempLocalCam)
+        }
+        if (w.state !== WINDOW_STATES.DARK && mat.uniforms.uTime) {
           mat.uniforms.uTime.value = t
         }
       }
@@ -2698,7 +2782,7 @@ export class Scene {
     if (this.mistUniforms) {
       this.mistUniforms.uTime.value = t
       this.mistUniforms.uOpacity.value = this._fogStrength
-      this.mistGroup.visible = this._fogStrength > 0.015
+      this.mistGroup.visible = (this._quality >= 2) && (this._fogStrength > 0.015)
     }
     if (this.puddleUniforms) {
       this.puddleUniforms.uTime.value = t
@@ -2765,41 +2849,57 @@ export class Scene {
       const parallaxX = s.x * 1.15
       const parallaxY = s.y * 0.75
       const harmony = this._harmonyUntil > performance.now()
-      for (const w of this.windows) {
+      const lerp8 = Math.min(1, dt * 8)
+      for (let i = 0; i < this.windows.length; i++) {
+        const w = this.windows[i]
         if (w.pulse > 0) w.pulse = Math.max(0, w.pulse - dt * 2.2)
         const pop = 1 + 0.28 * w.pulse * Math.cos(18 * (1 - w.pulse))
-        w.cur.glow += (w.target.glow - w.cur.glow) * Math.min(1, dt * 8)
-        w.cur.halo += (w.target.halo - w.cur.halo) * Math.min(1, dt * 8)
-        w.cur.beacon += (w.target.beacon - w.cur.beacon) * Math.min(1, dt * 8)
+        w.cur.glow += (w.target.glow - w.cur.glow) * lerp8
+        w.cur.halo += (w.target.halo - w.cur.halo) * lerp8
+        w.cur.beacon += (w.target.beacon - w.cur.beacon) * lerp8
 
+        let glowOp = 0
         if (harmony) {
           const wave = 0.5 + 0.5 * Math.sin(t * 6 - w.idx * 0.45)
-          w.glow.material.opacity = (w.lit ? 0.55 : 0) * (0.55 + wave * 0.9)
+          glowOp = (w.lit ? 0.55 : 0) * (0.55 + wave * 0.9)
           w.glass.scale.setScalar(1 + wave * 0.06)
         } else {
           const flicker = w.state === WINDOW_STATES.LIT ? 0.86 + Math.sin(t * 3 + w.idx) * 0.09 : 1
-          w.glow.material.opacity = w.cur.glow * flicker + w.pulse * 0.5
+          glowOp = w.cur.glow * flicker + w.pulse * 0.5
           w.glass.scale.setScalar(pop)
         }
+        w.glow.visible = glowOp > 0.008
+        if (w.glow.visible) w.glow.material.opacity = glowOp
 
-        w.halo.material.opacity = w.cur.halo * (0.55 + 0.45 * Math.sin(t * 2.8 + w.idx))
-        w.halo.material.rotation = t * 0.55 + w.idx * 0.3
-        w.beacon.material.opacity = w.cur.beacon
-        w.beacon.position.y = w.home.y + 34 + Math.sin(t * 2.2 + w.idx) * 2.2
+        const haloOp = w.cur.halo * (0.55 + 0.45 * Math.sin(t * 2.8 + w.idx))
+        w.halo.visible = haloOp > 0.008
+        if (w.halo.visible) {
+          w.halo.material.opacity = haloOp
+          w.halo.material.rotation = t * 0.55 + w.idx * 0.3
+        }
 
-        w.backPanel.position.x = -parallaxX * 0.45
-        w.silhouette.position.x = parallaxX * 0.35
+        w.beacon.visible = w.cur.beacon > 0.008
+        if (w.beacon.visible) {
+          w.beacon.material.opacity = w.cur.beacon
+          w.beacon.position.y = w.home.y + 34 + Math.sin(t * 2.2 + w.idx) * 2.2
+        }
+
+        if (w.silhouette.visible) {
+          w.backPanel.position.x = -parallaxX * 0.45
+          w.silhouette.position.x = parallaxX * 0.35
+          w.backPanel.position.y = -parallaxY * 0.30
+          w.silhouette.position.y = parallaxY * 0.22
+        }
         w.glass.position.x = parallaxX * 0.60
-        w.backPanel.position.y = -parallaxY * 0.30
-        w.silhouette.position.y = parallaxY * 0.22
         w.glass.position.y = parallaxY * 0.38
       }
 
+      const step60 = dt * 60
       if (this.snow.visible) {
         const arr = this.snow.geometry.attributes.position.array
         for (let i = 0; i < arr.length; i += 3) {
-          arr[i + 1] -= 0.75 + (i % 7) * 0.06
-          arr[i] += Math.sin(t + i) * 0.35 + this._windStrength * 0.14
+          arr[i + 1] -= (0.75 + (i % 7) * 0.06) * step60
+          arr[i] += (Math.sin(t + i) * 0.35 + this._windStrength * 0.14) * step60
           if (arr[i + 1] < -210) arr[i + 1] = 400
           if (arr[i] > 600) arr[i] = -600
         }
@@ -2809,8 +2909,8 @@ export class Scene {
       if (this.rain.visible) {
         const arr = this.rain.geometry.attributes.position.array
         for (let i = 0; i < arr.length; i += 3) {
-          arr[i + 1] -= 9.5
-          arr[i] -= 1.2
+          arr[i + 1] -= 9.5 * step60
+          arr[i] -= 1.2 * step60
           if (arr[i + 1] < -210) { arr[i + 1] = 400; arr[i] = (Math.random() - 0.5) * 1200 }
         }
         this.rain.geometry.attributes.position.needsUpdate = true

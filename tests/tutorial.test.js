@@ -205,6 +205,18 @@ describe('TutorialStateMachine', () => {
       expect(sm.isCompleted()).toBe(false)
       expect(storage.removeItem).toHaveBeenCalledWith(TUTORIAL_STORAGE_KEY)
     })
+
+    it('abort() stops an active tutorial cleanly without marking completion in storage', () => {
+      const storage = createMockStorage()
+      const sm = new TutorialStateMachine({ storage })
+      sm.start()
+      expect(sm.isActive()).toBe(true)
+      sm.abort()
+      expect(sm.getState()).toBe(TUTORIAL_STATES.IDLE)
+      expect(sm.isActive()).toBe(false)
+      expect(sm.isCompleted()).toBe(false)
+      expect(storage.setItem).not.toHaveBeenCalled()
+    })
   })
 
   describe('Inactivity Hint & Inactivity Reset', () => {

@@ -27,6 +27,7 @@ import {
 import { NPC_CATALOG, OUTFIT_LABELS, renderNpcPortraitSvg } from './npc-portraits.js'
 import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
 import { ReplayPlayer } from './replay.js'
+import { MODE_MAX_STAGE, evaluateRunTier, formatStageMilestone } from '../shared/ranks.js'
 
 const qs = (root, sel) => root.querySelector(sel)
 const qsa = (root, sel) => root.querySelectorAll(sel)
@@ -59,6 +60,13 @@ export class UI {
     }
     this._tutOverlayEl = null
     this._tutGestureRaf = 0
+    this._tutSvgKey = ''
+    /** @type {Element|null} */ this._tutHandEl = null
+    /** @type {Array<HTMLElement>} */ this._tagPool = []
+    /** @type {any} */ this._hintBubbleTimer = 0
+    /** @type {((e: Event) => void) | null} */ this._hintBubbleDismiss = null
+    /** @type {ReplayPlayer|null} */ this._replayPlayer = null
+    this._lastTierCode = ''
   }
 
   _layer() {
@@ -71,18 +79,25 @@ export class UI {
 
   hideAll() {
     clearTimeout(this._dlgTimer)
+    clearTimeout(this._toastTimer)
     for (const n of qsa(this.el, '.screen')) n.remove()
     this.hideChoice()
     this.hidePause()
     this.hideCoach()
+    this.hideTutorialOverlay()
+    this.hideHintBubble()
+    this.clearWindowTags()
+    this.hideCrisisPrompt(true)
+    this.stopReplay()
     this._cur = null
     this.el.innerHTML = ''
-    for (const id of ['hud', 'hud-v4', 'hub', 'dialogue-box', 'hv4-bottom']) {
+    for (const id of ['hud', 'hud-v4', 'hub', 'dialogue-box', 'hv4-bottom', 'toast', 'tut-overlay', 'hint-bubble', 'crisis-card', 'replay-dock']) {
       const node = document.getElementById(id)
       if (node) node.remove()
     }
     this.hudEl = null
     this._hv4 = null
+    this._nightTierEl = null
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
@@ -571,6 +586,9 @@ export class UI {
     this.hideAll()
     const bgmMeta = bgmTrackDef(opts.bgmState?.mode || 'auto')
     const locked = opts.orbitLocked !== false
+    const modeId = opts.modeMeta?.id || 'memory_sequence'
+    const maxStage = MODE_MAX_STAGE[modeId] || 10
+    const initTier = evaluateRunTier({ gameMode: modeId, score: 0, stageReached: 1, accuracyPct: 100 })
     const bar = document.createElement('div')
     bar.id = 'hud-v4'
     bar.innerHTML =
@@ -578,9 +596,10 @@ export class UI {
         '<span class="hv4-phase" data-phase>准备中…</span>' +
         '<span style="font-size:12px;color:#dbe4f8;">' + esc(opts.dormMeta.shortName) + ' · <b>' + esc(opts.modeMeta.shortName) + '</b></span>' +
         '<span class="mode-tag" data-pattern>' + esc(opts.aiPattern || '夜巡模式') + '</span>' +
+        '<span class="tier-pill ' + initTier.cssClass + '" data-tier>' + initTier.icon + ' ' + initTier.code + ' · ' + esc(initTier.title) + '</span>' +
       '</div>' +
       '<div class="hv4-stats">' +
-        '<span>关卡<b data-stage>1</b></span>' +
+        '<span>进度<b data-stage>1/' + maxStage + '</b></span>' +
         '<span>正确数<b data-correct>0</b></span>' +
         '<span>准确率<b data-acc>100%</b></span>' +
         '<span>积分<b data-score>0</b></span>' +
@@ -604,6 +623,12 @@ export class UI {
     this.el.appendChild(bot)
 
     this._hv4 = {
+      modeId,
+      maxStage,
+      stageNum: 1,
+      scoreNum: 0,
+      accNum: 100,
+      tier: qs(bar, '[data-tier]'),
       phase: qs(bar, '[data-phase]'),
       pattern: qs(bar, '[data-pattern]'),
       stage: qs(bar, '[data-stage]'),
@@ -634,10 +659,27 @@ export class UI {
     const h = this._hv4
     if (p.phaseText !== undefined) h.phase.textContent = p.phaseText
     if (p.aiPattern !== undefined) h.pattern.textContent = p.aiPattern
-    if (p.stage !== undefined) h.stage.textContent = String(p.stage)
+    if (p.stage !== undefined) {
+      h.stageNum = Number(p.stage) || 1
+      h.stage.textContent = String(h.stageNum) + '/' + h.maxStage
+    }
     if (p.correctCount !== undefined) h.correct.textContent = String(p.correctCount)
-    if (p.accuracyPct !== undefined) h.acc.textContent = String(Math.round(p.accuracyPct)) + '%'
-    if (p.score !== undefined) h.score.textContent = String(p.score)
+    if (p.accuracyPct !== undefined) {
+      h.accNum = Math.round(p.accuracyPct)
+      h.acc.textContent = String(h.accNum) + '%'
+    }
+    if (p.score !== undefined) {
+      h.scoreNum = Math.round(p.score)
+      h.score.textContent = String(h.scoreNum)
+    }
+    if (h.tier && (p.score !== undefined || p.stage !== undefined)) {
+      const tier = evaluateRunTier({ gameMode: h.modeId, score: h.scoreNum, stageReached: h.stageNum, accuracyPct: h.accNum })
+      const nextText = tier.icon + ' ' + tier.code + ' · ' + tier.title
+      if (h.tier.textContent !== nextText) {
+        h.tier.textContent = nextText
+        h.tier.className = 'tier-pill ' + tier.cssClass
+      }
+    }
     if (p.shield !== undefined) h.shield.textContent = String(p.shield)
     if (p.timeLeftSec !== undefined) {
       if (p.timeLeftSec === null) h.timeWrap.style.display = 'none'
@@ -660,16 +702,35 @@ export class UI {
   showMinigameResult(opts) {
     this.hideAll()
     const { modeMeta, dormMeta, summary, debrief, aiSource, postcard, rank, myRank } = opts
+    const tier = evaluateRunTier({
+      gameMode: summary.gameMode || modeMeta?.id,
+      score: summary.score || 0,
+      stageReached: summary.stageReached || 1,
+      accuracyPct: summary.accuracyPct ?? 100
+    })
+    const stageProgText = tier.milestoneText + ' · 准确率 ' + (summary.accuracyPct ?? 100) + '%'
+    const nextHint = tier.nextTier
+      ? '距 <b>' + tier.nextTier.icon + ' ' + tier.nextTier.code + ' · ' + esc(tier.nextTier.title) + '</b> 仅差 <b>' + tier.pointsToNext + '</b> 分'
+      : '👑 已达最高段位「全校熄灯传说」！'
+
     const s = this._layer()
     s.classList.add('result-screen')
     s.innerHTML = '<div class="result-scroll">' +
       '<div class="panel glass result-panel">' +
         '<div class="kicker">' + esc(dormMeta.name + ' · ' + modeMeta.name) + '</div>' +
         '<h2 class="h2">' + esc(debrief?.rankTitle || debrief?.verdictTitle || '夜间巡查完成') + '</h2>' +
+        '<div class="tier-medal-card">' +
+          '<div class="tmc-top">' +
+            '<div class="tmc-badge"><span class="tmc-code ' + tier.cssClass + '">' + tier.icon + ' ' + tier.code + '</span><span class="tmc-title">' + esc(tier.title) + '</span></div>' +
+            '<div class="tmc-stage">' + esc(stageProgText) + '</div>' +
+          '</div>' +
+          '<div class="tmc-bar"><i style="width:' + Math.round(tier.stageRatio * 100) + '%"></i></div>' +
+          '<div class="tmc-next">' + nextHint + '</div>' +
+        '</div>' +
         '<div class="statgrid">' +
           '<div class="cell"><b>' + (summary.score || 0) + '</b><span>夜巡积分</span></div>' +
           '<div class="cell"><b>' + (summary.accuracyPct ?? 100) + '%</b><span>准确率</span></div>' +
-          '<div class="cell"><b>第 ' + (summary.stageReached || 1) + ' 关</b><span>通关进度</span></div>' +
+          '<div class="cell"><b>第 ' + (summary.stageReached || 1) + '/' + tier.maxStage + ' ' + (summary.gameMode === 'patrol_reflex' ? '波' : '关') + '</b><span>挑战深度</span></div>' +
           '<div class="cell"><b>' + (summary.correctCount || 0) + '</b><span>正确点亮</span></div>' +
         '</div>' +
         (rank || (myRank && myRank.rank)
@@ -886,6 +947,7 @@ export class UI {
           '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
           '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/' + totalWindows + '</span></div>' +
           '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
+          '<span class="tier-pill tier-d" data-tier>🕯️ D · 见习点灯生</span>' +
           '<div class="flow-pill flow-state-flow" id="flow-pill" title="夜巡心流状态"><i class="flow-dot"></i><span data-flow-text>心流</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
@@ -971,6 +1033,7 @@ export class UI {
     this._ledger = qs(hud, '#ledger')
     this._passStatus = qs(hud, '[data-pass-status]')
     this._nextNightBtn = nextNightBtn
+    this._nightTierEl = qs(hud, '[data-tier]')
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
@@ -993,6 +1056,15 @@ export class UI {
       this._dirty.warmth = n.warmth
       this._warmEl.textContent = String(n.warmth)
       if (this._barEl) this._barEl.style.setProperty('--p', String(Math.min(1, n.warmth / 460)))
+      if (this._nightTierEl) {
+        const totalWarmth = (game.run?.totalWarmth || 0) + n.warmth
+        const tier = evaluateRunTier({ gameMode: 'star_sweep', score: totalWarmth, stageReached: (n.index || 0) + 1 })
+        const nextText = tier.icon + ' ' + tier.code + ' · ' + tier.title
+        if (this._nightTierEl.textContent !== nextText) {
+          this._nightTierEl.textContent = nextText
+          this._nightTierEl.className = 'tier-pill ' + tier.cssClass
+        }
+      }
     }
     if (this._comboEl && n.combo !== this._dirty.combo) {
       this._dirty.combo = n.combo
@@ -1136,6 +1208,17 @@ export class UI {
     this._toastTimer = setTimeout(() => d.remove(), 2400)
   }
 
+  hideHintBubble() {
+    clearTimeout(this._hintBubbleTimer)
+    this._hintBubbleTimer = 0
+    if (this._hintBubbleDismiss) {
+      window.removeEventListener('pointerdown', this._hintBubbleDismiss)
+      this._hintBubbleDismiss = null
+    }
+    const old = document.getElementById('hint-bubble')
+    if (old) old.remove()
+  }
+
   /**
    * Show contextual tooltip speech bubble pointing at a target button/element.
    * @param {string|HTMLElement} target
@@ -1146,8 +1229,7 @@ export class UI {
   showHintBubble(target, text, subtext = '', durationMs = 3200) {
     const el = typeof target === 'string' ? document.querySelector(target) : target
     if (!el) return
-    const old = document.getElementById('hint-bubble')
-    if (old) old.remove()
+    this.hideHintBubble()
 
     const r = el.getBoundingClientRect()
     const bubble = document.createElement('div')
@@ -1177,12 +1259,18 @@ export class UI {
     requestAnimationFrame(() => bubble.classList.add('show'))
 
     const dismiss = () => {
+      clearTimeout(this._hintBubbleTimer)
+      this._hintBubbleTimer = 0
+      if (this._hintBubbleDismiss) {
+        window.removeEventListener('pointerdown', this._hintBubbleDismiss)
+        this._hintBubbleDismiss = null
+      }
       bubble.classList.remove('show')
       setTimeout(() => bubble.remove(), 260)
-      window.removeEventListener('pointerdown', dismiss)
     }
+    this._hintBubbleDismiss = dismiss
     window.addEventListener('pointerdown', dismiss, { once: true })
-    setTimeout(dismiss, durationMs)
+    this._hintBubbleTimer = setTimeout(dismiss, durationMs)
   }
 
   banner(text, sub) {
@@ -1312,6 +1400,16 @@ export class UI {
     const { run, records, postcard, ending, letter, rank, aiSource, suggestedWhisper } = opts
     const dorm = dormDef(run.dormType || 'university')
     const gridWindows = buildWindowIds(dorm.rows, dorm.cols)
+    const stageReached = Math.max(1, (run.nights && run.nights.length) || 3)
+    const tier = evaluateRunTier({
+      gameMode: 'star_sweep',
+      score: run.totalWarmth || 0,
+      stageReached,
+      stampsEarned: run.stampsEarned || 0
+    })
+    const storyNext = tier.nextTier
+      ? '距 <b>' + tier.nextTier.icon + ' ' + tier.nextTier.code + ' · ' + esc(tier.nextTier.title) + '</b> 还差 <b>' + tier.pointsToNext + '</b> 温暖'
+      : '👑 已达成三夜传奇守灯传说！'
 
     const s = this._layer()
     s.classList.add('result-screen')
@@ -1319,6 +1417,14 @@ export class UI {
       '<div class="panel glass result-panel">' +
         '<div class="kicker">今晚的明信片 · ' + esc(dorm.shortName) + '</div>' +
         '<h2 class="h2">你点亮了 <span class="accent">' + run.litTotal + '</span> 扇窗</h2>' +
+        '<div class="tier-medal-card">' +
+          '<div class="tmc-top">' +
+            '<div class="tmc-badge"><span class="tmc-code ' + tier.cssClass + '">' + tier.icon + ' ' + tier.code + '</span><span class="tmc-title">' + esc(tier.title) + '</span></div>' +
+            '<div class="tmc-stage">' + esc(tier.milestoneText) + ' · ' + (run.stampsEarned || 0) + ' 枚火漆印</div>' +
+          '</div>' +
+          '<div class="tmc-bar"><i style="width:' + Math.round(tier.stageRatio * 100) + '%"></i></div>' +
+          '<div class="tmc-next">' + storyNext + '</div>' +
+        '</div>' +
         '<div class="ending-chip"><span class="badge" data-icon="star"></span><span>' + esc(ending.name) + '</span><em>' + esc(run.archetype) + '</em></div>' +
         '<img class="postcard" alt="今晚的明信片" src="' + postcard + '"/>' +
         '<a class="btn ghost" data-act="save" download="light-a-window-' + Date.now() + '.png" href="' + postcard + '"><span data-icon="download"></span>保存明信片</a>' +
@@ -1485,20 +1591,39 @@ export class UI {
       const data = await fetchLeaderboardWithRank({ scope, limit: 20, mode, dormType, uid })
       if (data.myRank) {
         const mr = data.myRank
+        const myTier = evaluateRunTier({
+          gameMode: mr.gameMode || mode || 'memory_sequence',
+          score: mr.bestScore,
+          stageReached: mr.bestStage,
+          accuracyPct: mr.bestAccuracy
+        })
+        const myMilestone = formatStageMilestone(mr.gameMode || mode || 'memory_sequence', mr.bestStage, mr.bestAccuracy)
+        const aheadTier = mr.rank > 1 ? evaluateRunTier({
+          gameMode: mr.gameMode || mode || 'memory_sequence',
+          score: mr.bestScore + (mr.nextGap || 0),
+          stageReached: mr.nextStage || mr.bestStage
+        }) : null
+        const aheadMilestone = mr.rank > 1 && mr.nextStage
+          ? formatStageMilestone(mr.gameMode || mode || 'memory_sequence', mr.nextStage, mr.nextAccuracy || 0)
+          : ''
+        const gapHtml = mr.rank === 1
+          ? '👑 当前榜首'
+          : ('距 #' + (mr.rank - 1) + (aheadTier ? ' [' + aheadTier.code + (aheadMilestone ? ' · ' + esc(aheadMilestone) : '') + ']' : '') + ' 差 ' + mr.nextGap + ' 分')
+
         myRankEl.innerHTML = '<div class="my-rank-card">' +
           '<div class="mrc-num">#' + mr.rank + '</div>' +
           '<div class="mrc-meta">' +
-            '<b>📌 我的当前排名 · ' + esc(mr.nickname || curNick) + '（第 ' + mr.rank + ' / ' + mr.total + ' 名）</b>' +
-            '<span>最高分 ' + mr.bestScore + ' · 准确率 ' + mr.bestAccuracy + '% · 最高第 ' + mr.bestStage + ' 关 · 领先 ' + mr.percentile + '% 同学</span>' +
+            '<b>📌 我的当前排名 · <span class="tier-chip ' + myTier.cssClass + '">' + myTier.icon + ' ' + myTier.code + '</span> ' + esc(mr.nickname || curNick) + '（第 ' + mr.rank + ' / ' + mr.total + ' 名）</b>' +
+            '<span>' + esc(myTier.title) + ' · ' + esc(myMilestone) + ' · 最高 ' + mr.bestScore + ' 分 · 准 ' + mr.bestAccuracy + '% · 领先 ' + mr.percentile + '% 同学</span>' +
           '</div>' +
-          '<div class="mrc-gap">' + (mr.rank === 1 ? '👑 当前榜首' : ('距 #' + (mr.rank - 1) + ' 差 ' + mr.nextGap + ' 分')) + '</div>' +
+          '<div class="mrc-gap">' + gapHtml + '</div>' +
         '</div>'
       } else {
         myRankEl.innerHTML = '<div class="my-rank-card">' +
           '<div class="mrc-num">—</div>' +
           '<div class="mrc-meta">' +
             '<b>📌 我的当前排名 · ' + esc(curNick) + '（暂无此筛选成绩）</b>' +
-            '<span>完成一局当前玩法或切换筛选条件后，这里会立刻显示你的准确排名</span>' +
+            '<span>完成一局当前玩法或切换筛选条件后，这里会立刻显示你的段位、关数与排名</span>' +
           '</div>' +
           '<div class="mrc-gap">共 ' + data.totalEntries + ' 条成绩</div>' +
         '</div>'
@@ -1513,10 +1638,19 @@ export class UI {
         const mName = gameModeDef(it.gameMode).shortName
         const dName = dormDef(it.dormType).shortName
         const isMe = it.rank && data.myRank && it.rank === data.myRank.rank && it.nickname === data.myRank.nickname
+        const rowScore = Number(it.score || it.total_warmth || 0)
+        const rowTier = evaluateRunTier({
+          gameMode: it.gameMode,
+          score: rowScore,
+          stageReached: it.stageReached || 1,
+          accuracyPct: it.accuracyPct || 0
+        })
+        const rowMilestone = formatStageMilestone(it.gameMode, it.stageReached || 1, it.accuracyPct || 0)
         return '<div class="row ' + (rk <= 3 ? 'top' : '') + (isMe ? ' me' : '') + '">' +
           '<span class="rk">#' + rk + '</span>' +
+          '<span class="tier-chip ' + rowTier.cssClass + '" title="' + esc(rowTier.title) + '">' + rowTier.code + '</span>' +
           '<span class="nm">' + esc(it.nickname) + ' <em style="color:#8f9ebe;font-style:normal;font-size:11px;">[' + esc(mName) + ' · ' + esc(dName) + ']</em></span>' +
-          '<span class="sc"><b>' + Number(it.score || it.total_warmth) + '</b> 分<em>' + (it.accuracyPct ? (it.accuracyPct + '% · 第' + it.stageReached + '关') : esc(it.archetype || '')) + '</em></span>' +
+          '<span class="sc"><span class="board-milestone">' + esc(rowMilestone) + (it.accuracyPct ? (' · 准 ' + Math.round(it.accuracyPct) + '%') : '') + '</span><b>' + rowScore + '</b> 分</span>' +
         '</div>'
       }).join('')
     }
@@ -1621,13 +1755,16 @@ export class UI {
   /**
    * Show or update the tutorial overlay card and gesture visualization.
    * @param {Object} options
-   * @param {string} options.step
+   * @param {string|number} options.step
    * @param {string} options.title
-   * @param {string} options.desc
+   * @param {string} [options.desc]
+   * @param {string} [options.text]
    * @param {() => void} [options.onSkip]
    */
-  showTutorialOverlay({ step, title, desc, onSkip }) {
-    if (!this._tutOverlayEl) {
+  showTutorialOverlay({ step, title, desc, text, onSkip }) {
+    const existing = document.getElementById('tut-overlay')
+    if (existing && existing !== this._tutOverlayEl) existing.remove()
+    if (!this._tutOverlayEl || !this._tutOverlayEl.parentNode) {
       this._tutOverlayEl = document.createElement('div')
       this._tutOverlayEl.id = 'tut-overlay'
       this._tutOverlayEl.className = 'tut-overlay'
@@ -1640,6 +1777,8 @@ export class UI {
         '</div>' +
         '<svg class="tut-gesture-svg" id="tut-gesture-svg"></svg>'
       this.root.appendChild(this._tutOverlayEl)
+      this._tutSvgKey = ''
+      this._tutHandEl = null
     }
 
     const card = qs(this._tutOverlayEl, '.tut-card')
@@ -1648,16 +1787,24 @@ export class UI {
     const titleEl = qs(card, '.tut-title')
     const descEl = qs(card, '.tut-desc')
     const skipBtn = qs(card, '.tut-skip-btn')
+    const svg = qs(this._tutOverlayEl, '#tut-gesture-svg')
+
+    // Never leave Step 2's SVG path/hand frozen on screen during Step 1 or Step 3
+    if (svg && step !== 'step2_drag' && step !== 2) {
+      svg.innerHTML = ''
+      this._tutSvgKey = ''
+      this._tutHandEl = null
+    }
 
     if (badgeEl) {
       let badgeText = '新手教学'
-      if (step === 'step1_tap') badgeText = '新手教学 1/3 · 点亮'
-      else if (step === 'step2_drag') badgeText = '新手教学 2/3 · 拖连'
-      else if (step === 'step3_bridge') badgeText = '新手教学 3/3 · 星桥'
+      if (step === 'step1_tap' || step === 1) badgeText = '新手教学 1/3 · 点亮'
+      else if (step === 'step2_drag' || step === 2) badgeText = '新手教学 2/3 · 拖连'
+      else if (step === 'step3_bridge' || step === 3) badgeText = '新手教学 3/3 · 星桥'
       badgeEl.textContent = badgeText
     }
     if (titleEl) titleEl.textContent = title || ''
-    if (descEl) descEl.textContent = desc || ''
+    if (descEl) descEl.textContent = desc || text || ''
     if (skipBtn && onSkip) {
       skipBtn.onclick = (e) => {
         e.stopPropagation()
@@ -1683,6 +1830,7 @@ export class UI {
 
   /**
    * Render or update SVG trajectory demonstration for step 2 (drag ①->②->③).
+   * Reuses the static SVG path & badges across frames, updating only the hand <g> transform/opacity.
    * @param {Array<{ x: number, y: number, w?: number, h?: number }>} points
    * @param {number} [timeSec=0]
    */
@@ -1692,17 +1840,43 @@ export class UI {
     if (!svg) return
 
     if (!Array.isArray(points) || points.length < 2) {
-      svg.innerHTML = ''
+      if (this._tutSvgKey) {
+        svg.innerHTML = ''
+        this._tutSvgKey = ''
+        this._tutHandEl = null
+      }
       return
     }
 
     const p0 = points[0]
     const p1 = points[1]
     const p2 = points[2] || points[points.length - 1]
+    const key = points.map(p => Math.round(p.x) + ',' + Math.round(p.y)).join('|')
+
+    if (key !== this._tutSvgKey) {
+      this._tutSvgKey = key
+      const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`).join(' ')
+      const badgesHtml = points.map((p, i) => {
+        const num = ['①', '②', '③', '④'][i] || (i + 1)
+        return `<g transform="translate(${Math.round(p.x)}, ${Math.round(p.y)})">` +
+          `<circle r="18" fill="rgba(18, 14, 32, 0.82)" stroke="rgba(255, 215, 120, 0.85)" stroke-width="2"/>` +
+          `<text text-anchor="middle" dominant-baseline="central" fill="#fff5d0" font-size="14" font-weight="bold">${num}</text>` +
+        `</g>`
+      }).join('')
+
+      svg.innerHTML =
+        `<path d="${pathD}" fill="none" stroke="rgba(255, 215, 120, 0.30)" stroke-width="7" stroke-linecap="round"/>` +
+        `<path d="${pathD}" fill="none" stroke="rgba(255, 224, 140, 0.88)" stroke-width="3" stroke-dasharray="6,4" stroke-linecap="round"/>` +
+        badgesHtml +
+        `<g transform="translate(${Math.round(p0.x)}, ${Math.round(p0.y)}) scale(1)" opacity="1">` +
+          `<circle r="24" fill="rgba(255, 220, 130, 0.16)" stroke="rgba(255, 230, 150, 0.85)" stroke-width="2"/>` +
+          `<path d="M 0 0 L 8 22 L 3 20 L 0 27 L -3 20 L -8 22 Z" fill="#fff" stroke="#ffcc66" stroke-width="1.5" transform="rotate(-25) translate(0, -6)" />` +
+        `</g>`
+      this._tutHandEl = svg.querySelector('g:last-child')
+    }
 
     const period = 2.2
     const phase = (timeSec % period) / period
-
     let handX = p0.x
     let handY = p0.y
     let handScale = 1.0
@@ -1710,8 +1884,6 @@ export class UI {
 
     if (phase < 0.2) {
       const sub = phase / 0.2
-      handX = p0.x
-      handY = p0.y
       handScale = 1.0 - 0.15 * Math.sin(sub * Math.PI)
     } else if (phase < 0.55) {
       const sub = (phase - 0.2) / 0.35
@@ -1730,92 +1902,106 @@ export class UI {
       handOpacity = Math.max(0, 1 - sub * 1.5)
     }
 
-    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`).join(' ')
-
-    const badgesHtml = points.map((p, i) => {
-      const num = ['①', '②', '③', '④'][i] || (i + 1)
-      return `
-        <g transform="translate(${Math.round(p.x)}, ${Math.round(p.y)})">
-          <circle r="18" fill="rgba(18, 14, 32, 0.75)" stroke="rgba(255, 215, 120, 0.8)" stroke-width="2"/>
-          <text text-anchor="middle" dominant-baseline="central" fill="#fff5d0" font-size="14" font-weight="bold">${num}</text>
-        </g>
-      `
-    }).join('')
-
-    svg.innerHTML = `
-      <defs>
-        <filter id="tut-glow" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="3" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-      <path d="${pathD}" fill="none" stroke="rgba(255, 215, 120, 0.75)" stroke-width="3" stroke-dasharray="6,4" filter="url(#tut-glow)"/>
-      ${badgesHtml}
-      <g transform="translate(${Math.round(handX)}, ${Math.round(handY)}) scale(${handScale})" opacity="${handOpacity.toFixed(2)}">
-        <circle r="22" fill="rgba(255, 220, 130, 0.25)" stroke="rgba(255, 230, 150, 0.8)" stroke-width="2"/>
-        <path d="M 0 0 L 8 22 L 3 20 L 0 27 L -3 20 L -8 22 Z" fill="#fff" stroke="#ffcc66" stroke-width="1.5" transform="rotate(-25) translate(0, -6)" />
-      </g>
-    `
+    if (this._tutHandEl) {
+      this._tutHandEl.setAttribute('transform', `translate(${Math.round(handX)}, ${Math.round(handY)}) scale(${handScale.toFixed(3)})`)
+      this._tutHandEl.setAttribute('opacity', handOpacity.toFixed(2))
+    }
   }
 
   /**
-   * Hide and remove tutorial overlay.
+   * Hide and remove tutorial overlay plus any orphaned DOM duplicates.
    */
   hideTutorialOverlay() {
     if (this._tutOverlayEl) {
       this._tutOverlayEl.remove()
       this._tutOverlayEl = null
     }
+    const orphan = document.getElementById('tut-overlay')
+    if (orphan) orphan.remove()
+    this._tutSvgKey = ''
+    this._tutHandEl = null
+  }
+
+  /** Immediately clear floating capsule tags & reset pool. */
+  clearWindowTags() {
+    if (this._tagPool && this._tagPool.length) {
+      for (const el of this._tagPool) el.remove()
+      this._tagPool = []
+    }
+    if (this.tagsEl) this.tagsEl.innerHTML = ''
   }
 
   /**
-   * Update floating smart capsule tags above special actionable windows (max 4 on screen).
+   * Update floating smart capsule tags above special actionable windows (max 4, DOM-pooled).
    * @param {any} game
    */
   updateWindowTags(game) {
     if (!this.tagsEl || !game || !game.scene || !Array.isArray(game.scene.windows)) {
-      if (this.tagsEl) this.tagsEl.innerHTML = ''
+      this.clearWindowTags()
       return
     }
 
-    /** @type {Array<{ w: any, text: string, type: string, priority: number }>} */
+    /** @type {Array<{ x: number, y: number, text: string, type: string, priority: number }>} */
     const candidates = []
-
     const wins = game.scene.windows
-    for (const w of wins) {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    for (let i = 0; i < wins.length; i++) {
+      const w = wins[i]
+      let text = ''
+      let type = ''
+      let priority = 0
       if (w.state === 'story_beacon' || w.state === 3) {
-        candidates.push({ w, text: '📖偷听', type: 'beacon', priority: 10 })
+        text = '📖偷听'; type = 'beacon'; priority = 10
       } else if (w.state === 'resonance_pair' || w.state === 4) {
         const isA = game.scene.resonancePair && w.roomId === game.scene.resonancePair.a
-        candidates.push({
-          w,
-          text: isA ? '🌉星桥①' : '🌉星桥②',
-          type: 'bridge',
-          priority: 9
-        })
+        text = isA ? '🌉星桥①' : '🌉星桥②'; type = 'bridge'; priority = 9
       } else if (w.crisis === 'cat' || w.state === 'crisis_cat') {
-        candidates.push({ w, text: '📱抓猫', type: 'crisis', priority: 12 })
+        text = '📱抓猫'; type = 'crisis'; priority = 12
       } else if (w.crisis === 'sleep' || w.state === 'sleep') {
-        candidates.push({ w, text: '💤安睡', type: 'sleep', priority: 8 })
+        text = '💤安睡'; type = 'sleep'; priority = 8
+      } else {
+        continue
       }
-    }
 
-    candidates.sort((a, b) => b.priority - a.priority)
-    const selected = candidates.slice(0, 4)
-
-    let html = ''
-    for (const item of selected) {
-      const rect = game.scene.windowScreenRect(item.w)
+      const rect = game.scene.windowScreenRect(w)
       if (!rect) continue
       const x = Math.round(rect.x)
       const y = Math.round(rect.y - rect.h / 2 - 12)
-      if (x < -40 || x > window.innerWidth + 40 || y < -40 || y > window.innerHeight + 40) continue
-      html += '<div class="win-tag ' + item.type + '" style="left:' + x + 'px;top:' + y + 'px">' + item.text + '</div>'
+      if (x < -40 || x > vw + 40 || y < -40 || y > vh + 40) continue
+      candidates.push({ x, y, text, type, priority })
     }
-    this.tagsEl.innerHTML = html
+
+    if (candidates.length > 1) candidates.sort((a, b) => b.priority - a.priority)
+    const count = Math.min(4, candidates.length)
+
+    // Remove stale pooled elements if external code cleared tagsEl
+    if (this._tagPool.length && !this.tagsEl.contains(this._tagPool[0])) {
+      this._tagPool = []
+    }
+
+    while (this._tagPool.length > count) {
+      const dead = this._tagPool.pop()
+      if (dead) dead.remove()
+    }
+
+    for (let i = 0; i < count; i++) {
+      const item = candidates[i]
+      let el = this._tagPool[i]
+      if (!el) {
+        el = document.createElement('div')
+        this.tagsEl.appendChild(el)
+        this._tagPool[i] = el
+      }
+      const cls = 'win-tag ' + item.type
+      if (el.className !== cls) el.className = cls
+      if (el.textContent !== item.text) el.textContent = item.text
+      const leftStr = item.x + 'px'
+      const topStr = item.y + 'px'
+      if (el.style.left !== leftStr) el.style.left = leftStr
+      if (el.style.top !== topStr) el.style.top = topStr
+    }
   }
 
   pause({ onResume, onHome }) {
@@ -1885,20 +2071,32 @@ export class UI {
     }
   }
 
-  hideCrisisPrompt() {
+  hideCrisisPrompt(immediate = false) {
     const card = document.getElementById('crisis-card')
     if (card) {
-      card.classList.remove('on')
-      setTimeout(() => card.remove(), 400)
+      if (immediate) {
+        card.remove()
+      } else {
+        card.classList.remove('on')
+        setTimeout(() => card.remove(), 400)
+      }
     }
+  }
+
+  stopReplay() {
+    if (this._replayPlayer) {
+      this._replayPlayer.stop()
+      this._replayPlayer = null
+    }
+    const dock = document.getElementById('replay-dock')
+    if (dock) dock.remove()
   }
 
   playAcceleratedReplay(events, scene, audio) {
     if (!Array.isArray(events) || events.length === 0) return
-    let dock = document.getElementById('replay-dock')
-    if (dock) dock.remove()
+    this.stopReplay()
 
-    dock = document.createElement('div')
+    const dock = document.createElement('div')
     dock.id = 'replay-dock'
     dock.className = 'replay-dock glass on'
     dock.innerHTML =
@@ -1908,6 +2106,7 @@ export class UI {
     this.el.appendChild(dock)
 
     const player = new ReplayPlayer(events, 75000, 6000)
+    this._replayPlayer = player
     const timeEl = dock.querySelector('#replay-time')
     const fillEl = /** @type {HTMLElement|null} */ (dock.querySelector('#replay-fill'))
     const skipBtn = /** @type {HTMLElement|null} */ (dock.querySelector('#btn-replay-skip'))
