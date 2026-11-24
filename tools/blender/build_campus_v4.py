@@ -328,8 +328,8 @@ def build_highschool(mats, rng):
     gable_prism('Season_Snow_Roof', (0, 0, body_h + 0.44), body_w + 1.32, body_d + 1.32, 3.38, mats['snow_cap'], bevel=0.04)
 
     # Entrance porch + school plaque + bulletin blackboard (clear of row 0 sills at z ~ 3.3)
-    box('Entrance_Frame', (0, front_y - 0.08, 1.25), (2.4, 0.22, 2.4), mats['brick_red'], bevel=0.03)
-    box('Entrance_Door', (0, front_y - 0.14, 1.18), (1.9, 0.14, 2.15), mats['door_glow'], bevel=0.02, tint=False)
+    box('Entrance_Frame', (0, front_y - 0.18, 1.25), (2.4, 0.24, 2.4), mats['brick_red'], bevel=0.03)
+    box('Entrance_Door', (0, front_y - 0.31, 1.18), (1.9, 0.14, 2.15), mats['door_glow'], bevel=0.02, tint=False)
     box('Entrance_Canopy', (0, front_y - 0.85, 2.60), (3.2, 1.6, 0.22), mats['roof_terracotta'], bevel=0.03)
     box('Season_Snow_Canopy', (0, front_y - 0.85, 2.74), (3.1, 1.55, 0.10), mats['snow_cap'], bevel=0.03, tint=False)
     # Bulletin board on left courtyard
@@ -401,8 +401,8 @@ def build_university(mats, rng):
         cylinder(f'Corridor_Col_{i}', (x, walk_y - 1.18, 1.54), 0.14, 2.6, mats['trim_cream'], verts=10)
     for i, x in enumerate((-5.4, 0.0, 5.4)):
         box(f'Porch_Lamp_{i}', (x, walk_y - 0.9, 2.72), (0.36, 0.22, 0.14), mats['lamp_glow'], bevel=0.02, tint=False)
-    box('Entrance_Frame', (0, front_y - 0.04, 1.62), (2.3, 0.14, 3.0), mats['frame_dark'], bevel=0.02)
-    box('Entrance_Door', (0, front_y - 0.10, 1.58), (1.9, 0.14, 2.68), mats['door_glow'], bevel=0.02, tint=False)
+    box('Entrance_Frame', (0, front_y - 0.24, 1.62), (2.3, 0.24, 3.0), mats['frame_dark'], bevel=0.02)
+    box('Entrance_Door', (0, front_y - 0.37, 1.58), (1.9, 0.14, 2.68), mats['door_glow'], bevel=0.02, tint=False)
     # Cat house + tiny orange cat beside steps
     box('Cat_House', (-2.8, walk_y - 0.65, 0.42), (0.62, 0.56, 0.48), mats['wood_warm'], bevel=0.02)
     gable_prism('Cat_House_Roof', (-2.8, walk_y - 0.65, 0.66), 0.72, 0.66, 0.32, mats['roof_terracotta'], bevel=0.015)
@@ -455,8 +455,8 @@ def build_grad(mats, rng):
         box(f'Balcony_Rail_{r}', (0, front_y - 0.92, z + 0.80), (body_w - 1.25, 0.08, 0.06), mats['metal_dark'])
 
     # Modern entrance lobby + awning (clear of row 0 sills at z ~ 3.25)
-    box('Entrance_Frame', (0, front_y - 0.12, 1.25), (3.4, 0.26, 2.35), mats['frame_dark'], bevel=0.02)
-    box('Entrance_Door', (0, front_y - 0.18, 1.22), (2.9, 0.14, 2.15), mats['door_glow'], bevel=0.02, tint=False)
+    box('Entrance_Frame', (0, front_y - 0.24, 1.25), (3.4, 0.26, 2.35), mats['frame_dark'], bevel=0.02)
+    box('Entrance_Door', (0, front_y - 0.38, 1.22), (2.9, 0.14, 2.15), mats['door_glow'], bevel=0.02, tint=False)
     box('Entrance_Awning', (0, front_y - 1.0, 2.55), (4.4, 1.9, 0.16), mats['metal_dark'], bevel=0.02)
     box('Season_Snow_Awning', (0, front_y - 1.0, 2.66), (4.3, 1.8, 0.09), mats['snow_cap'], bevel=0.03, tint=False)
 
@@ -511,8 +511,8 @@ def build_staff(mats, rng):
     box('Season_Snow_Chimney', (4.4, 1.2, body_h + 4.64), (1.3, 1.3, 0.12), mats['snow_cap'], bevel=0.03, tint=False)
 
     # Wide timber entrance porch (peak at z=3.2 < row 0 sills at z=3.58)
-    box('Entrance_Frame', (0, front_y - 0.10, 1.22), (2.4, 0.22, 2.3), mats['wood_warm'], bevel=0.03)
-    box('Entrance_Door', (0, front_y - 0.16, 1.18), (1.9, 0.14, 2.05), mats['door_glow'], bevel=0.02, tint=False)
+    box('Entrance_Frame', (0, front_y - 0.24, 1.22), (2.4, 0.24, 2.3), mats['wood_warm'], bevel=0.03)
+    box('Entrance_Door', (0, front_y - 0.37, 1.18), (1.9, 0.14, 2.05), mats['door_glow'], bevel=0.02, tint=False)
     gable_prism('Entrance_Porch_Roof', (0, front_y - 0.85, 2.42), 3.3, 1.8, 0.78, mats['roof_moss'], bevel=0.02)
     gable_prism('Season_Snow_Porch', (0, front_y - 0.85, 2.52), 3.32, 1.82, 0.76, mats['snow_cap'], bevel=0.03, tint=False)
 

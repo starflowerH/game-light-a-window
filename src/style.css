@@ -854,12 +854,16 @@ b.urgent { color: #ff9a7a; }
   padding: 14px 16px; border-radius: 16px; margin-bottom: 12px;
   background: linear-gradient(155deg, rgba(255, 206, 124, 0.18) 0%, rgba(28, 36, 62, 0.88) 100%);
   border: 1.5px solid rgba(255, 210, 128, 0.55);
-  display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto); gap: 12px; align-items: center;
 }
 .mrc-num { font-family: var(--serif); font-size: 28px; font-weight: 900; color: var(--gold); line-height: 1; }
-.mrc-meta b { display: block; font-size: 13.5px; color: #fff4df; }
-.mrc-meta span { font-size: 11.5px; color: #c7d1e8; }
-.mrc-gap { text-align: right; font-size: 11.5px; color: #ffe0a3; }
+.mrc-meta { min-width: 0; line-height: 1.5; }
+.mrc-meta b {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  font-size: 13.5px; color: #fff4df; margin-bottom: 3px;
+}
+.mrc-meta span { display: block; font-size: 11.5px; color: #c7d1e8; line-height: 1.55; }
+.mrc-gap { text-align: right; font-size: 11.5px; color: #ffe0a3; max-width: 220px; line-height: 1.45; }
 
 .filter-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
 .npc-cast-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 16px; }
@@ -1418,9 +1422,38 @@ b.urgent { color: #ff9a7a; }
   .tier-medal-card { padding: 10px 11px; }
 }
 @media (max-width: 640px) {
+  .panel {
+    padding: 20px 16px 18px;
+    border-radius: 18px;
+  }
+  .my-rank-card {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px 10px;
+    padding: 12px 13px;
+  }
+  .mrc-num {
+    font-size: 24px;
+    padding-top: 2px;
+  }
+  .mrc-meta b {
+    font-size: 13px;
+  }
+  .mrc-gap {
+    grid-column: 1 / -1;
+    text-align: left;
+    max-width: none;
+    padding-top: 8px;
+    margin-top: 2px;
+    border-top: 1px dashed rgba(255, 214, 150, 0.24);
+  }
   .row {
     grid-template-columns: 30px auto minmax(0, 1fr);
     row-gap: 6px;
+  }
+  .row .nm {
+    white-space: normal;
+    line-height: 1.4;
   }
   .row .sc {
     grid-column: 1 / -1;

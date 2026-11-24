@@ -570,7 +570,7 @@ export class Scene {
 
     this.scene = new THREE.Scene()
     this.scene.fog = new THREE.FogExp2(0x1b2b4d, 0.00017)
-    this.camera = new THREE.PerspectiveCamera(41, 1, 0.5, 4200)
+    this.camera = new THREE.PerspectiveCamera(41, 1, 5.0, 4200)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
@@ -763,6 +763,11 @@ export class Scene {
       if (matName === 'Mat_Lamp_Glow' || matName === 'Mat_Door_Glow') {
         mat.emissiveIntensity = isGrounds ? 1.5 : 1.15
       }
+      if (matName === 'Mat_Door_Glow') {
+        mat.polygonOffset = true
+        mat.polygonOffsetFactor = -1
+        mat.polygonOffsetUnits = -2
+      }
 
       mesh.material = mat
     })
@@ -838,9 +843,15 @@ export class Scene {
     const gridIds = buildWindowIds(def.rows, def.cols)
     /** @type {Map<string, THREE.Mesh>} */
     const glassNodes = new Map()
+    /** @type {THREE.Mesh | null} */
+    let doorNode = null
     glb.traverse(obj => {
       const m = /** @type {THREE.Mesh} */ (obj)
       if (!m.isMesh) return
+      if (m.name === 'Entrance_Door') {
+        doorNode = m
+        return
+      }
       const match = /^Window_Glass_(\d+)_(\d+)$/.exec(m.name)
       if (match) {
         glassNodes.set(`${match[1]}_${match[2]}`, m)
@@ -850,6 +861,24 @@ export class Scene {
     const worldBox = new THREE.Box3()
     const center = new THREE.Vector3()
     const size = new THREE.Vector3()
+
+    /** @type {{ x: number, y: number, z: number, w: number, h: number } | null} */
+    let doorMetrics = null
+    if (doorNode) {
+      /** @type {THREE.Mesh} */ (doorNode).updateWorldMatrix(true, false)
+      worldBox.setFromObject(doorNode)
+      worldBox.getCenter(center)
+      worldBox.getSize(size)
+      if (size.x > 8 && size.y > 8) {
+        doorMetrics = {
+          x: center.x,
+          y: center.y,
+          z: worldBox.max.z + 2.5,
+          w: Math.max(46, size.x * 1.08),
+          h: Math.max(54, size.y * 1.06)
+        }
+      }
+    }
 
     for (const meta of gridIds) {
       const key = `${meta.row}_${meta.col}`
@@ -894,7 +923,7 @@ export class Scene {
     this._glassMeshes = this.windows.map(w => w.glass)
     this._lastCamPos.set(Infinity, Infinity, Infinity)
     this._buildFloorSigns(def)
-    this._attachDormAtmosphereLights()
+    this._attachDormAtmosphereLights(doorMetrics)
     this._buildSpillDecals()
     this.setSeason(this.season)
     this._syncSnowVisibility()
@@ -1221,16 +1250,31 @@ export class Scene {
     })
   }
 
-  _attachDormAtmosphereLights() {
+  /** @param {{ x: number, y: number, z: number, w: number, h: number } | null} [doorMetrics] */
+  _attachDormAtmosphereLights(doorMetrics = null) {
+    const gw = doorMetrics ? doorMetrics.w : 52
+    const gh = doorMetrics ? doorMetrics.h : 62
+    const gx = doorMetrics ? doorMetrics.x : 0
+    const gy = doorMetrics ? doorMetrics.y : BASE_Y + 36
+    const gz = doorMetrics ? doorMetrics.z : 96
     this.doorGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(52, 62),
-      new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.12, toneMapped: false, depthWrite: false })
+      new THREE.PlaneGeometry(gw, gh),
+      new THREE.MeshBasicMaterial({
+        color: 0xffc46a,
+        transparent: true,
+        opacity: 0.12,
+        toneMapped: false,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -4
+      })
     )
-    this.doorGlow.position.set(0, BASE_Y + 36, 80)
+    this.doorGlow.position.set(gx, gy, gz)
     this.dorm.add(this.doorGlow)
 
     this.doorLight = new THREE.PointLight(0xffc46a, 45, 260, 1.8)
-    this.doorLight.position.set(0, BASE_Y + 46, 112)
+    this.doorLight.position.set(gx, gy + 10, gz + 28)
     this.dorm.add(this.doorLight)
 
     // Side street lamp volumetric beam kept for theme harmony
