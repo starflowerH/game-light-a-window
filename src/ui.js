@@ -118,9 +118,9 @@ export class UI {
    * @param {{ records: any, whispers: any[], stats: any, keyStatus: any, nickname: string,
    *   bgmState?: any, onBgmSelect?: Function, onBgmUpload?: Function, onMute?: Function,
    *   onEnterCampus?: Function, onStart: Function, onCollection: Function, onLeaderboard: Function,
-   *   onWhisperWall: Function, onKeyConfig: Function, onNpcGallery?: Function, onNicknameChange?: (name: string) => void }} opts
+   *   onWhisperWall: Function, onKeyConfig: Function, onNpcGallery?: Function, onDocs?: Function, onNicknameChange?: (name: string) => void }} opts
    */
-  showTitle({ records, whispers, stats, keyStatus, nickname, bgmState, onBgmSelect, onBgmUpload, onMute, onEnterCampus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig, onNpcGallery, onNicknameChange }) {
+  showTitle({ records, whispers, stats, keyStatus, nickname, bgmState, onBgmSelect, onBgmUpload, onMute, onEnterCampus, onStart, onCollection, onLeaderboard, onWhisperWall, onKeyConfig, onNpcGallery, onDocs, onNicknameChange }) {
     this.hideAll()
     this._onStart = onStart
     const unlocked = (records && records.unlockedEndings) ? records.unlockedEndings.length : 0
@@ -133,7 +133,7 @@ export class UI {
     s.classList.add('title-screen')
     s.innerHTML = '<div class="title-veil"></div>' +
       '<div class="title-wrap">' +
-        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V4.1</div>' +
+        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V5.1</div>' +
         '<h1 class="title-h1">今晚，<span class="accent">亮一盏灯</span></h1>' +
         '<p class="lede">星露谷写意 3D 校园物语：四栋实时建模宿舍楼、四季晴雨雾雪、<br/>悬疑三夜小说剧情、记忆熄灯闯关、查寝反应与全校排行榜。</p>' +
         '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
@@ -164,6 +164,7 @@ export class UI {
           '<button class="btn ghost" data-act="board">全校排行榜</button>' +
           '<button class="btn ghost" data-act="npcs">NPC 换装图鉴</button>' +
           '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
+          '<button class="btn ghost docs-btn" data-act="docs"><span data-icon="ledger"></span>作品说明 · 手册</button>' +
           '<button class="btn ghost icon" data-act="key" data-icon="key" title="DeepSeek AI 直连 Key"></button>' +
         '</div>' +
         '<div class="title-foot">' +
@@ -210,6 +211,7 @@ export class UI {
     qs(s, '[data-act="whispers"]').onclick = () => onWhisperWall()
     qs(s, '[data-act="key"]').onclick = () => onKeyConfig()
     if (onNpcGallery) qs(s, '[data-act="npcs"]').onclick = () => onNpcGallery()
+    if (onDocs) qs(s, '[data-act="docs"]').onclick = () => onDocs('overview')
   }
 
   updateBgmBadge(bgmState) {
@@ -363,6 +365,7 @@ export class UI {
    *   onLeaderboard: Function,
    *   onCollection: Function,
    *   onKeyConfig: Function,
+   *   onDocs?: Function,
    *   onTitle: Function
    * }} opts
    */
@@ -402,6 +405,7 @@ export class UI {
               '<button class="chip-sm" data-act="npcs">👘 NPC 换装图鉴</button>' +
               '<button class="chip-sm" data-act="collection">⭐ 结局与线索图鉴</button>' +
               '<button class="chip-sm" data-act="key">🔑 AI Key 设置</button>' +
+              '<button class="chip-sm" data-act="docs">📖 作品说明与手册</button>' +
               '<button class="chip-sm" data-act="title">🏠 返回标题页</button>' +
             '</div>' +
           '</div>' +
@@ -548,6 +552,7 @@ export class UI {
     qs(hub, '[data-act="dialogue"]').onclick = () => opts.onReplayDialogue()
     qs(hub, '[data-act="collection"]').onclick = () => opts.onCollection()
     qs(hub, '[data-act="key"]').onclick = () => opts.onKeyConfig()
+    if (opts.onDocs) qs(hub, '[data-act="docs"]').onclick = () => opts.onDocs('overview')
     qs(hub, '[data-act="title"]').onclick = () => opts.onTitle()
 
     for (const b of qsa(hub, '[data-dorm]')) {
@@ -1740,6 +1745,25 @@ export class UI {
         state.classList.add('on')
         input.value = ''
       }
+    }
+  }
+
+  /**
+   * Lazily load and present the in-app project specification & player manual modal.
+   * @param {{ initialTab?: 'overview' | 'spec' | 'manual', onClose?: () => void, onEnterGame?: () => void }} [opts]
+   */
+  async showDocsModal({ initialTab = 'overview', onClose, onEnterGame } = {}) {
+    const s = this._layer()
+    s.classList.add('docs-screen')
+    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">正在打开作品说明</h2><p class="lede center">载入评审白皮书与玩家完整手册</p></div>'
+    try {
+      const { mountDocsModal } = await import('./docs-modal.js')
+      if (!s.isConnected) return
+      mountDocsModal({ container: s, initialTab, onClose, onEnterGame })
+    } catch {
+      if (!s.isConnected) return
+      s.innerHTML = '<div class="panel glass small"><h2 class="h2">文档模块载入失败</h2><p class="lede small">请刷新页面后重试。</p><button class="btn ghost" data-act="back">返回</button></div>'
+      qs(s, '[data-act="back"]').onclick = () => { if (onClose) onClose() }
     }
   }
 

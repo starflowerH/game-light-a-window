@@ -322,6 +322,7 @@ export class Game {
       onCollection: () => this.ui.showCollection({ records: this.records, onClose: () => this.showTitle() }),
       onLeaderboard: () => this.openLeaderboard(() => this.showTitle()),
       onNpcGallery: () => this.openNpcGallery(() => this.showTitle()),
+      onDocs: tab => this.openDocs(tab, () => this.showTitle()),
       onWhisperWall: () => this.ui.showWhisperWall({ whispers: this.community.whispers, onLike: id => this.likeWhisper(id), onClose: () => this.showTitle() }),
       onKeyConfig: () => this.ui.showKeyDialog({
         status: getUserApiKeyStatus(),
@@ -425,7 +426,22 @@ export class Game {
         onVerify: (key, base) => this.verifyKey(key, base),
         onClose: () => this.showHub()
       }),
+      onDocs: tab => this.openDocs(tab, () => this.showHub()),
       onTitle: () => this.showTitle()
+    })
+  }
+
+  /**
+   * Open the lazily loaded project whitepaper & player manual modal.
+   * @param {'overview' | 'spec' | 'manual'} [initialTab]
+   * @param {() => void} [onReturn]
+   */
+  openDocs(initialTab = 'overview', onReturn = () => this.showTitle()) {
+    if (this.audio) this.audio.unlock()
+    this.ui.showDocsModal({
+      initialTab,
+      onClose: onReturn,
+      onEnterGame: this.state === 'title' ? () => this.enterCampus() : undefined
     })
   }
 
