@@ -115,7 +115,7 @@ src/
   painterly.js        9 采样合并 Kuwahara+Sobel / 墨线 / 解析亚麻 / Tilt-Shift / 雨滴后期
   vfx-pool.js         1024 容量单 Points 环形粒子池与星桥弧线（零 GC）
   ribbon-trail.js     Catmull-Rom 磁吸流体尾翼
-  audio-engine.js     四层自适应 WebAudio 合成器 + 3 套 8 小节总谱 + 本地音频支持
+  audio-engine.js     默认主题背景音乐懒加载 + 四层 WebAudio 交互音景与 3 套合成总谱 + 本地音频支持
   ai.js               双模 AI 调度（服务端代理 / 浏览器内存 Key 直连 DeepSeek）
   records.js          本地档案 + 云端通行证双向同步
   ui.js / icons.js    毛玻璃 UI、DOM 池化标签、段位徽章与 SVG 图标
@@ -204,7 +204,7 @@ tests/                295 条 Vitest 单测与 API 集成 + 217 条 Playwright E
 5. **Interior Mapping 室内视差 + 墙面溢光**：`512×512` 八房型程序化室内图集光线盒求交视差，`InstancedMesh` 批处理窗下砖墙溢光。
 6. **60 FPS 性能优化与结局镜头**：静态阴影烘焙（`shadowMap.autoUpdate = false`）、半分辨率 Bloom、暗窗精灵剔除；结局含天台拉升见银河、24 窗音律波浪、夜空渐变破晓、河灯升空。
 
-所有模型、纹理与音景均为项目原创代码与 Blender 脚本生成，**不依赖任何外部图片或音频**。
+全部 3D 模型、表面纹理、角色立绘、图标及交互音景/备选合成乐曲均由项目原创代码与 Blender 脚本生成（无外部图片依赖）；默认主题配乐为懒加载音频 `public/audio/bgm-default.mp3`（仅限非商业比赛演示），可随时一键切换回全原创 WebAudio 合成模式（详见 [ASSET_LICENSES.md](ASSET_LICENSES.md)）。
 
 ---
 
@@ -243,9 +243,9 @@ tests/                295 条 Vitest 单测与 API 集成 + 217 条 Playwright E
 
 - `npm run lint` —— ESLint 9，0 error 0 warning。
 - `npm run typecheck` —— `checkJs: true`，全部 `.js` 源码 0 错误。
-- `npm test` —— 12 个测试套件共 296 个单元与 API 集成用例。
+- `npm test` —— 14 个测试套件共 304 个单元与 API 集成用例。
 - `npm run test:e2e` —— 4 层 Playwright 端到端共 217 个实机用例。
-- `npm run build` —— Vite 生产分包构建（总包 ~4.46 MB）。
+- `npm run build` —— Vite 生产分包构建（全量含懒加载主题音乐与文档图 6.84 MB）。
 - `npm run verify` —— 静态检查 + 类型 + 单测 + 构建全链路门禁。
 
 ## 文档与赛用资产索引

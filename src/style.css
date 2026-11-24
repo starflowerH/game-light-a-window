@@ -117,7 +117,7 @@ body { overflow: hidden; }
   background: linear-gradient(180deg, rgba(6,9,20,0.10) 0%, rgba(6,9,20,0.55) 52%, rgba(4,7,16,0.92) 100%);
 }
 .title-wrap {
-  position: relative; width: min(94vw, 720px); padding: 0 6px 8px; text-align: center;
+  position: relative; width: min(94vw, 780px); padding: 0 6px 8px; text-align: center;
   animation: rise 0.7s cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 .title-h1 {
@@ -689,8 +689,9 @@ b.urgent { color: #ff9a7a; }
 }
 
 .bgm-strip {
-  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px;
-  margin: 0 auto 12px; padding: 7px 12px; border-radius: 16px; max-width: min(94vw, 640px);
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px;
+  width: fit-content; max-width: min(94vw, 760px);
+  margin: 0 auto 12px; padding: 7px 12px; border-radius: 16px;
   background: rgba(16, 22, 42, 0.72); border: 1px solid rgba(255, 214, 150, 0.24);
   backdrop-filter: blur(10px);
 }

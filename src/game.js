@@ -127,6 +127,13 @@ export class Game {
     addEventListener('keydown', e => {
       if (e.key === 'Escape' && (this.state === 'night' || this.state === 'paused')) this.togglePause()
     })
+    const unlockOnGesture = () => {
+      if (this.audio) this.audio.unlock()
+      removeEventListener('pointerdown', unlockOnGesture, true)
+      removeEventListener('keydown', unlockOnGesture, true)
+    }
+    addEventListener('pointerdown', unlockOnGesture, { capture: true, passive: true })
+    addEventListener('keydown', unlockOnGesture, { capture: true, passive: true })
     addEventListener('popstate', () => { if (this.state === 'night') this.togglePause() })
     addEventListener('error', e => reportClientError(e.message, { where: 'window' }))
     addEventListener('unhandledrejection', e => reportClientError('unhandled rejection', { reason: String(e.reason) }))
@@ -252,13 +259,13 @@ export class Game {
     this.showTitle()
     if (this.audio) {
       this.audio.setWeather(this.weather)
-      const savedBgm = this.records.preferredBgm || 'auto'
+      const savedBgm = this.records.preferredBgm || 'theme'
       this.audio.setBgmTrack(savedBgm)
     }
   }
 
   getBgmState() {
-    if (!this.audio) return { mode: 'auto', activeTrack: 'kataware', customTitle: '', muted: false }
+    if (!this.audio) return { mode: 'theme', activeTrack: 'theme', customTitle: '', muted: false }
     return this.audio.getBgmState()
   }
 
@@ -276,7 +283,7 @@ export class Game {
   }
 
   cycleBgmTrack() {
-    const order = ['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient']
+    const order = BGM_TRACKS.map(t => t.id)
     const cur = this.getBgmState().mode
     const next = order[(order.indexOf(cur) + 1) % order.length]
     this.setBgmTrack(next)

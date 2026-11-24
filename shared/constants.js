@@ -243,7 +243,8 @@ export const GAME_MODES = [
 ]
 
 export const BGM_TRACKS = [
-  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '按开场/剧情/闯关自动切换三套配乐' },
+  { id: 'theme', name: '黄昏之时 · 默认原声', shortName: '黄昏原声', desc: '默认校园夜巡主题背景音乐（循环播放 · 保留细雨与点灯交互音效）' },
+  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '按开场/剧情/闯关自动切换三套合成配乐' },
   { id: 'kataware', name: '黄昏之时 · 暮色星辰', shortName: '黄昏之时风', desc: '日系暮色钢琴弦乐 · 温柔悬念与怀旧感' },
   { id: 'bluedragon', name: '医龙 · 苍蓝脉搏', shortName: '医龙风', desc: '燃系弦乐律动与鼓点 · 高潮对峙与查寝张力' },
   { id: 'mysoul', name: 'My Soul · 子夜琴诗', shortName: 'My Soul风', desc: '标志性循环钢琴旋律与碎拍 · 深夜独行沉浸感' },

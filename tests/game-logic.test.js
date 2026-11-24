@@ -512,9 +512,9 @@ describe('dorm adaptation & BGM tracks', () => {
     }
   })
 
-  it('exposes all five BGM presets including kataware, bluedragon, and mysoul', () => {
+  it('exposes all six BGM presets with lazy default theme first plus procedural fallbacks', () => {
     const ids = BGM_TRACKS.map(t => t.id)
-    expect(ids).toEqual(['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'])
+    expect(ids).toEqual(['theme', 'auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'])
   })
 })
 

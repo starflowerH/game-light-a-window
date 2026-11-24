@@ -306,11 +306,11 @@ function buildOverviewTab() {
 
   const kpiHtml =
     '<div class="docs-kpi-grid">' +
-      '<div class="docs-kpi"><span class="dk-num">&lt; 5 MB</span><span class="dk-lab">全量前端包体 · 零商用外链</span></div>' +
+      '<div class="docs-kpi"><span class="dk-num">6.84 MB</span><span class="dk-lab">全量包体 · 主题配乐按需加载</span></div>' +
       '<div class="docs-kpi"><span class="dk-num">85+ FPS</span><span class="dk-lab">满画质实测 · 4 档自适应</span></div>' +
       '<div class="docs-kpi"><span class="dk-num">5 × 4</span><span class="dk-lab">5 大模式 × 4 栋 Blender 宿舍</span></div>' +
       '<div class="docs-kpi"><span class="dk-num">7-Agent</span><span class="dk-lab">双模 AI 导演 · Key 零落库</span></div>' +
-      '<div class="docs-kpi"><span class="dk-num">516 项</span><span class="dk-lab">299 单元 + 217 端到端全绿</span></div>' +
+      '<div class="docs-kpi"><span class="dk-num">521 项</span><span class="dk-lab">304 单元 + 217 端到端全绿</span></div>' +
     '</div>'
 
   const ctaBarHtml =

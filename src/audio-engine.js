@@ -1,11 +1,6 @@
-// Four-layer adaptive WebAudio synth. Everything is generated at runtime from
-// oscillators and noise buffers, so the game ships with no audio files.
-//
-//   L1  weather bed  pink + brown noise through bandpass filters, wind LFO
-//   L2  warm pad     detuned triangle/sine stack, Fmaj7 -> G6 -> Em7 -> Am9,
-//                    faded in by the number of lit windows
-//   L3  lead         pentatonic marimba / harp glissando
-//   L4  foley        per-resident easter eggs, resonance, stamp and endings
+// Hybrid Campus Audio Engine: lazy-loaded default theme BGM + four-layer adaptive
+// WebAudio synth (L1 weather bed, L2 warm pad, L3 pentatonic lead, L4 foley).
+// Switches cleanly between the bundled theme track, procedural scores, and custom local audio.
 //
 // The context is created lazily on the first unlock() (which must run inside a
 // user gesture). Every public method is a safe no-op before that point.
@@ -14,6 +9,8 @@ const MASTER_LEVEL = 0.62
 const MAX_VOICES = 64
 const LOOKAHEAD = 0.20
 const CHORD_BEATS = 16
+const DEFAULT_THEME_URL = './audio/bgm-default.mp3'
+const DEFAULT_THEME_VOL = 0.42
 
 const midiHz = m => 440 * Math.pow(2, (m - 69) / 12)
 
@@ -140,11 +137,13 @@ export class AudioEngine {
     this._chainStep = 0
     this._nextChord = 0
     this._chordIndex = 0
-    this._bgmMode = 'auto'
+    this._bgmMode = 'theme'
     this._sceneContext = 'title'
     this._activeTrack = 'kataware'
     this._stepIndex = 0
     this._nextStepTime = 0
+    this._themeAudioEl = null
+    this._themeFailed = false
     this._customAudioEl = null
     this._customUrl = ''
     this._customTitle = ''
@@ -202,6 +201,9 @@ export class AudioEngine {
         if (p && p.catch) p.catch(() => {})
       }
     } catch {}
+    if (this._bgmMode === 'theme' && !this._customUrl && !this._themeFailed) {
+      this._ensureThemeAudio(!this._muted)
+    }
     return this.ready
   }
 
@@ -209,6 +211,15 @@ export class AudioEngine {
     this._muted = !!flag
     if (this.ready) {
       this.master.gain.setTargetAtTime(this._muted ? 0 : MASTER_LEVEL, this.ctx.currentTime, 0.08)
+    }
+    if (this._themeAudioEl) {
+      this._themeAudioEl.muted = this._muted
+      if (!this._muted && this._bgmMode === 'theme' && !this._customUrl && !this._themeFailed && this._themeAudioEl.paused) {
+        try {
+          const p = this._themeAudioEl.play()
+          if (p && typeof p.catch === 'function') p.catch(() => {})
+        } catch {}
+      }
     }
     if (this._customAudioEl) {
       this._customAudioEl.muted = this._muted
@@ -219,11 +230,18 @@ export class AudioEngine {
     return this._muted
   }
 
-  /** @param {'auto'|'kataware'|'bluedragon'|'mysoul'|'ambient'} trackId */
+  /** @param {'theme'|'auto'|'kataware'|'bluedragon'|'mysoul'|'ambient'} trackId */
   setBgmTrack(trackId) {
-    const id = ['auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'].includes(trackId) ? trackId : 'auto'
+    const id = ['theme', 'auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'].includes(trackId) ? trackId : 'theme'
     this._bgmMode = id
     this.clearCustomAudio()
+    if (id === 'theme') {
+      this._themeFailed = false
+      this._ensureThemeAudio(this.ready && !this._muted)
+      this._applyLit()
+      return
+    }
+    this._pauseThemeAudio()
     this._syncActiveTrack(true)
   }
 
@@ -236,15 +254,67 @@ export class AudioEngine {
   getBgmState() {
     return {
       mode: this._bgmMode,
-      activeTrack: this._customUrl ? 'custom' : this._activeTrack,
+      activeTrack: this._customUrl
+        ? 'custom'
+        : (this._bgmMode === 'theme' && !this._themeFailed ? 'theme' : this._activeTrack),
       customTitle: this._customTitle,
       muted: this._muted
     }
   }
 
+  _hasExternalBgm() {
+    return Boolean(this._customUrl || (this._bgmMode === 'theme' && !this._themeFailed))
+  }
+
+  _ensureThemeAudio(shouldPlay = false) {
+    if (this._themeFailed || this._customUrl) return null
+    if (!this._themeAudioEl) {
+      if (typeof window === 'undefined' || !window.Audio) return null
+      try {
+        const audio = new window.Audio(DEFAULT_THEME_URL)
+        audio.preload = shouldPlay ? 'auto' : 'none'
+        audio.loop = true
+        audio.volume = DEFAULT_THEME_VOL
+        audio.muted = this._muted
+        audio.onerror = () => {
+          this._themeFailed = true
+          this._clearThemeAudio()
+          this._syncActiveTrack(true)
+        }
+        this._themeAudioEl = audio
+      } catch {
+        this._themeFailed = true
+        return null
+      }
+    } else if (shouldPlay && this._themeAudioEl.preload === 'none') {
+      this._themeAudioEl.preload = 'auto'
+    }
+    this._themeAudioEl.muted = this._muted
+    if (shouldPlay && !this._muted && this._themeAudioEl.paused) {
+      try {
+        const p = this._themeAudioEl.play()
+        if (p && typeof p.catch === 'function') p.catch(() => {})
+      } catch {}
+    }
+    return this._themeAudioEl
+  }
+
+  _pauseThemeAudio() {
+    if (!this._themeAudioEl) return
+    try { this._themeAudioEl.pause() } catch {}
+  }
+
+  _clearThemeAudio() {
+    if (!this._themeAudioEl) return
+    try { this._themeAudioEl.pause() } catch {}
+    try { this._themeAudioEl.src = '' } catch {}
+    this._themeAudioEl = null
+  }
+
   /** Allow player to load a local .mp3/.wav/.ogg file on top of WebAudio SFX. */
   loadCustomAudioFile(file) {
     if (!file || typeof URL === 'undefined' || typeof window === 'undefined' || !window.Audio) return false
+    this._pauseThemeAudio()
     this.clearCustomAudio()
     try {
       const url = URL.createObjectURL(file)
@@ -275,7 +345,7 @@ export class AudioEngine {
   }
 
   _syncActiveTrack(resetPhrase = false) {
-    const next = this._bgmMode === 'auto'
+    const next = (this._bgmMode === 'auto' || this._bgmMode === 'theme')
       ? (SCENE_AUTO_TRACK[this._sceneContext] || 'kataware')
       : this._bgmMode
     if (next === this._activeTrack && !resetPhrase) return
@@ -604,6 +674,7 @@ export class AudioEngine {
   }
 
   dispose() {
+    this._clearThemeAudio()
     this.clearCustomAudio()
     if (this._timer) {
       clearInterval(this._timer)
@@ -817,7 +888,7 @@ export class AudioEngine {
     if (!this.ready) return
     const t = this.ctx.currentTime
     const n = this._litCount
-    const isAmbient = this._activeTrack === 'ambient' && !this._customUrl
+    const isAmbient = this._activeTrack === 'ambient' && !this._hasExternalBgm()
     let pad = 0
     if (isAmbient) {
       if (n > 2) pad = Math.sqrt(Math.min(1, n / 12)) * 0.55
@@ -840,7 +911,7 @@ export class AudioEngine {
       this._chordIndex = (this._chordIndex + 1) % CHORDS.length
     }
 
-    const score = (!this._customUrl && this._activeTrack !== 'ambient') ? SCORES[this._activeTrack] : null
+    const score = (!this._hasExternalBgm() && this._activeTrack !== 'ambient') ? SCORES[this._activeTrack] : null
     if (score && !this._muted) {
       const stepDur = 60 / score.bpm / 4
       if (this._nextStepTime < now - 0.25) this._nextStepTime = now + 0.04
@@ -1093,7 +1164,7 @@ export class AudioEngine {
     this._padFilter.frequency.setTargetAtTime(base * 0.65, t + 0.9, 0.9)
     this._shimmerOscs[0].frequency.setTargetAtTime(chord[2] * 4, t, 0.5)
     this._shimmerOscs[1].frequency.setTargetAtTime(chord[3] * 4, t, 0.5)
-    if (this._muted || (this._activeTrack !== 'ambient' && !this._customUrl)) return
+    if (this._muted || this._hasExternalBgm() || this._activeTrack !== 'ambient') return
     for (let i = 0; i < 3; i++) {
       this._softTone(chord[(i + 1) % 4] * 2, t + i * 0.9, 0.024, 1.8, 'sine', 0.05)
     }

@@ -127,7 +127,7 @@ export class UI {
     const total = stats && stats.totalLit ? stats.totalLit.toLocaleString('zh-CN') : '0'
     const firstWhisper = whispers && whispers.length ? whispers[0] : null
     const aiDirect = Boolean(keyStatus && keyStatus.enabled)
-    const curMode = bgmState ? bgmState.mode : 'auto'
+    const curMode = bgmState ? bgmState.mode : 'theme'
 
     const s = this._layer()
     s.classList.add('title-screen')
@@ -215,7 +215,7 @@ export class UI {
   }
 
   updateBgmBadge(bgmState) {
-    const tMeta = bgmTrackDef(bgmState?.mode || 'auto')
+    const tMeta = bgmTrackDef(bgmState?.mode || 'theme')
     const txt = bgmState?.customTitle ? ('🎵 ' + bgmState.customTitle) : ('🎵 ' + tMeta.shortName)
     for (const el of document.querySelectorAll('[data-bgmbadge]')) {
       el.textContent = txt
@@ -375,7 +375,7 @@ export class UI {
     const season = seasonDef(opts.season)
     const weatherMeta = WEATHER_CATALOG.find(w => w.id === opts.weather) || WEATHER_CATALOG[0]
     const aiActive = opts.keyEnabled || opts.aiSource === 'ai' || opts.aiSource === 'direct' || opts.aiSource === 'cache'
-    const bgmMode = opts.bgmState ? opts.bgmState.mode : 'auto'
+    const bgmMode = opts.bgmState ? opts.bgmState.mode : 'theme'
     const bgmMeta = bgmTrackDef(bgmMode)
     const activeTab = this._hubTab || 'dorm'
 
@@ -591,7 +591,7 @@ export class UI {
    */
   startMinigameHud(opts) {
     this.hideAll()
-    const bgmMeta = bgmTrackDef(opts.bgmState?.mode || 'auto')
+    const bgmMeta = bgmTrackDef(opts.bgmState?.mode || 'theme')
     const locked = opts.orbitLocked !== false
     const modeId = opts.modeMeta?.id || 'memory_sequence'
     const maxStage = MODE_MAX_STAGE[modeId] || 10
