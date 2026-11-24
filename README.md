@@ -1,9 +1,24 @@
-# 今晚，亮一盏灯 · Light A Window v4.0
+# 今晚，亮一盏灯 · Light A Window v5.1
 
 > 星露谷 3D 写意校园物语 · 四栋真实 Blender 建模宿舍楼 · 四季晴雨雾雪 · 五大并列小游戏。
 > 记忆顺序点灯、全景快照回忆、查寝夜猫子、GF(2) 熄灯解谜、以及经典三晚六结局连光物语。
 
-**架构契约**：`docs/v4_plan/`（v4.0 全套策划与渲染方案） & `docs/v3_plan/`
+**完整文档与赛用资料**：
+- 📖 **玩家完整说明书**：[docs/GAME_MANUAL.md](docs/GAME_MANUAL.md)（五大玩法规则、全部参数数值、结局攻略、段位表）
+- 🏆 **比赛项目说明书**：[docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md)（F1–F12 全功能设计白皮书、AI 管线与奖项举证）
+- 🧱 **架构策划档案**：`docs/v4_plan/` & `docs/v3_plan/`
+
+---
+
+## v5.1 & v5.0 做了什么（教学零残余 · 60+ FPS 优化 · 多维高难 · 直观段位）
+
+在 v4.0 多玩法与 Blender 校园基础上，v5.0–v5.1 全面完善了新手体验、渲染性能、关卡策略深度与竞技辨识度：
+
+- **三步互动微教程 & 零残余状态机**：新增确定性 `TutorialStateMachine`（单点微光 → 一笔拖连 3 窗 → 青色星桥），配备 SVG 轨迹与动态手势指示、12s 脉冲提示、第 2 步断划自动重武装防卡死，以及切换/跳过/退出的全链路 DOM 零残余清理；新增 3D 悬浮楼层标牌、智能胶囊标签（上限 4 枚）与点击任务发射 2 秒 3D 定位雷达圈。
+- **60+ FPS 无损渲染与视差画质飞跃**：新增 **Interior Mapping 3D 室内视差着色器**（`512×512` 8 房型图集 + 隐藏多余背板/剪影）、**InstancedMesh 墙面溢光贴花**、**Tilt-Shift 移轴微缩景深**与 4 层动态四季生态；引入静态阴影烘焙（`shadowMap.autoUpdate = false`）、半分辨率 Bloom、智能 DPR 封顶、暗窗精灵剔除与 9 采样合并 **Kuwahara + Sobel**（`uFastMode` 降至 5 采样 + 解析亚麻法线），本地/线上实测满画质 **`85–89.5 FPS`**。
+- **多维递进高难关卡**：依次/快照记忆扩至 **10 关**，包含 `740ms→210ms` / `2400ms→650ms` 时长压缩、第 4 关交错插播蓝紫干扰窗、第 6 关记忆留白黑屏停顿（`350ms→900ms`）与限时/容错收紧；查寝夜猫子升级为 60s **5 大急促波次**（第 4–5 波 35% 双窗并发 + 漏夜猫子断连）；熄灯棋盘扩至 **8 关限时** 并新增 Par 最优解 `+120` 加成。
+- **直观 7 级夜巡段位与闯关里程碑**：统一实现 [shared/ranks.js](shared/ranks.js) 的 `D`（见习点灯生）到 `SSS`（全校熄灯传说）段位评估与关卡里程碑文案（如「闯到 第 7/10 关」「守到 第 4/5 波」「解开 第 6/8 关」），打通 HUD 徽章、晋升提示、结算勋章卡及排行榜。
+- **心流 DDA 导演、突发危机与 6 秒回放**：新增 12 操作滑窗 EMA 心流调节器、`3` 种校园突发危机（螺蛳粉火锅/窜窗橘猫/蓝牙麦）、整层制霸黄金扫光演出与 12.5× 6 秒今夜回放剧场。
 
 ---
 
@@ -12,7 +27,7 @@
 在 v3.0 治愈系连光内核之上，v4.0 全面引入 Blender 3D 建筑群、星露谷像素-油画混成材质与多玩法闯关体系：
 
 - **4 栋真实 Blender GLB 宿舍楼 + 公共校园底盘**：员工宿舍桂花院（3×4=12窗）、高中晨光楼（3×6=18窗）、大学 17 号楼（4×6=24窗）、研究生研思楼（5×6=30窗）与 `campus_grounds.glb`，支持 3D 航拍切楼漫游与 4 档视角（`正面全景` / `星露谷45°` / `林荫仰望` / `天台巡礼`）+ 有界 `OrbitControls` 拖拽旋转。
-- **像素-油画混成 PBR 与真天气系统**：Procedural 128×128 像素法线砖瓦/屋瓦/石板路贴图、Kuwahara 半径微调（`0.95`）保留清晰细节；移除旧版用雪粒冒充雾天的逻辑，重做 **8 层 Perlin FBM 体积飘雾 + 路灯散射光晕**、细雨路面涟漪波纹与落雪屋檐窗台覆雪。
+- **像素-油画混成 PBR 与真天气系统**：Procedural 128×128 像素法线砖瓦/屋瓦/石板路贴图、Kuwahara 半径微调（`0.95`）保留清晰细节；移除旧版用雪粒冒充雾天的逻辑，重做 **4 层 Perlin FBM 体积飘雾 + 路灯散射光晕**、细雨路面涟漪波纹与落雪屋檐窗台覆雪。
 - **5 大并列宿舍玩法矩阵 + 8 项随机事件**：
   1. `memory_sequence`：窗户依次亮起并熄灭，考验顺序与准确率；
   2. `memory_snapshot`：多窗同时闪亮后全灭，考验瞬时空间记忆；
@@ -67,7 +82,7 @@ Node 22+ 必需（使用内置 `node:sqlite`）。
 |---|---|
 | 3D / 后期 | three.js r187（EffectComposer + 自定义 ShaderPass，无第三方后期库） |
 | 构建 | Vite 8 |
-| 测试 | Vitest 5（234 个用例，含五玩法引擎、GF(2) 求解器与 Fastify 全链路 API 集成测试） |
+| 测试 | Vitest 5 + Playwright 1.65（295 条单元/API 用例 + 217 条 4 层端到端 E2E = 512 条门禁） |
 | 类型 | TypeScript 7，`checkJs: true`，全部 `.js` 源码零错误 |
 | 后端 | Fastify 5 + Node 22 `node:sqlite`（WAL） |
 | 部署 | Nginx + systemd + rsync |
@@ -78,34 +93,43 @@ Node 22+ 必需（使用内置 `node:sqlite`）。
 
 ```text
 shared/
-  constants.js        24 扇窗 / 6 位住户 / 6 结局 / tempo 参数 / 委托类型
-  ai-schema.js        三智能体 payload 归一化与安全护栏（前后端同构）
-  ai-prompts.js       三个 System Prompt（服务端代理与浏览器直连共用同一份）
+  constants.js        4 栋宿舍 / 4 季 5 天气 / 6 结局 / tempo / 委托适配器
+  ranks.js            D..SSS 七级段位体系与各模式关数里程碑计算
+  ai-schema.js        六路由多智能体 payload 归一化与 12 词安全护栏
+  ai-prompts.js       多智能体 System Prompt（代理与直连共用）
 src/
   main.js             组装 Scene / Game / UI / Audio / RibbonTrail
-  game.js             主状态机：三晚循环、拖拽光链、委托、局中演进、结局路由
-  game-logic.js       纯函数：连击计分、委托判定、6 结局路由（可单测）
-  narrative-graph.js  6 位住户 × 3 晚剧本树 + 6 结局脚本 + 离线兜底生成器
-  scene.js            3D 微缩校园、3 层视差窗盒、5 态视觉、结局镜头演出
-  painterly.js        4-Sector Kuwahara + 彩色墨线 + Impasto + 雨滴折射
-  vfx-pool.js         1024 容量单 Points 环形粒子池（零 GC）
-  ribbon-trail.js     Catmull-Rom 一笔画流体尾翼
-  audio-engine.js     四层自适应 WebAudio 合成器
-  ai.js               双模 AI 调度（服务端代理 / 浏览器内存 Key 直连）
+  game.js             主状态机：五玩法引擎、三步微教程、危机/DDA/回放、结局路由
+  game-logic.js       纯函数：连击计分、整层制霸、委托判定、6 结局路由
+  tutorial.js         3 步互动微教程确定性状态机
+  difficulty.js       EMA 动态心流调节导演（DDA）
+  crisis.js           校园突发危机调度器（螺蛳粉/抓猫/拔麦）
+  replay.js           400 事件环形录屏器与 12.5x 6 秒回放播放器
+  narrative-graph.js  6 位住户 × 3 晚分支剧本 + 6 结局脚本 + 离线兜底
+  npc-portraits.js    8 位校园 NPC × 5 套天气动态换装 SVG 生成器
+  random-events.js    8 项校园随机事件引擎
+  minigames/          memory-patrol.js / dorm-reflex.js / lights-out.js (含 GF(2) 求解器)
+  scene.js            3D 校园与宿舍 GLB、Interior Mapping、溢光贴花、四季气象与 60fps 自适应
+  textures-procedural.js 128×128 高度场法线与像素-油画 PBR 材质合成
+  painterly.js        9 采样合并 Kuwahara+Sobel / 墨线 / 解析亚麻 / Tilt-Shift / 雨滴后期
+  vfx-pool.js         1024 容量单 Points 环形粒子池与星桥弧线（零 GC）
+  ribbon-trail.js     Catmull-Rom 磁吸流体尾翼
+  audio-engine.js     四层自适应 WebAudio 合成器 + 3 套 8 小节总谱 + 本地音频支持
+  ai.js               双模 AI 调度（服务端代理 / 浏览器内存 Key 直连 DeepSeek）
   records.js          本地档案 + 云端通行证双向同步
-  ui.js / icons.js    毛玻璃 UI + 内联 SVG 图标（无 emoji 豆腐块）
-  postcard.js         1080×1440 明信片合成（真实映射玩家点亮的窗）
+  ui.js / icons.js    毛玻璃 UI、DOM 池化标签、段位徽章与 SVG 图标
+  postcard.js         1080×1440 明信片合成（真实映射本局点亮窗格）
 server/
-  index.js            buildApp() 工厂 + 全部 API + 分级限流
-  db.js               SQLite WAL 六表 + 旧 scores 表迁移 + 种子数据
-  agents.js           四智能体编排 + 缓存 + 离线回退
+  index.js            buildApp() 工厂 + 全部 REST/AI API + 分级限流
+  db.js               SQLite WAL 六表 + v4/v5 幂等迁移 + 榜单排名差值计算
+  agents.js           7-Agent 编排 + SQLite 缓存 + 离线图谱回退
 tools/blender/
-  build_campus_v3.py  无头 Blender 生成 24 扇独立命名窗户的校园 GLB
+  build_campus_v4.py  无头 Blender 生成公共校园与 4 栋差异化宿舍 GLB
 deploy/
   deploy.sh           hynu.site 一键发布 / 备份 / 健康检查 / 回滚
   nginx-hynu.conf     TLS + gzip + /api 反代 + SPA 回退
   light-a-window.service
-tests/                204 个用例
+tests/                295 条 Vitest 单测与 API 集成 + 217 条 Playwright E2E
 ```
 
 ---
@@ -148,12 +172,15 @@ tests/                204 个用例
 
 ---
 
-## 四智能体 AI 管线
+## 七智能体 AI 管线
 
 ```text
 开局  POST /api/agent/plan      NightDirector + ResidentPersona → 三晚基线剧本（3.8s 竞速）
 45s   POST /api/agent/evolve    ResonanceWeaver → 按第 1 晚真实行为重写第 2、3 晚
 终局  POST /api/agent/epilogue  ChronicleCurator → 住户手写回信 + 留声寄语
+进校  POST /api/agent/dialogue  DialogueDirector → 天气/季节/宿舍专属值班室对话
+构图  POST /api/agent/puzzle    PuzzleArchitect → 记忆关卡对称/几何亮灯坐标阵
+结算  POST /api/agent/debrief   InspectorCommentator → 林阿姨与周副校长双视角夜巡评语
 ```
 
 关键工程点：
@@ -169,17 +196,14 @@ tests/                204 个用例
 
 ## 美术与渲染管线
 
-1. **4-Sector Kuwahara**（16 次采样）把数码渐变抹成厚涂色块，发光窗核心自动降低半径保住剪影。
-2. **双尺度手绘墨线**：UV 用双八度噪声抖动 1.6px，颜色在深群青与暖焦茶之间按局部色温混合，
-   亮侧叠暖金勾边，发光窗内部不上墨。
-3. **Impasto 画布**：程序化亚麻经纬高度场 → 有限差分微法线 → 与画室斜光点乘，
-   厚涂处出现掠射高光；暗部托底改成米黄画纸 + 羊皮暖灰蓝。
+1. **9 采样合并 Kuwahara + Sobel**（`uFastMode` 降载为 5 采样十字滤波）配合 **Tilt-Shift 移轴景深** 与发光窗芯收缩半径，兼具油画色块与建筑锐利度。
+2. **双尺度手绘墨线**：依据局部色温在深群青与暖焦茶间混色，轮廓峰值叠涂暖金勾边，单 `vnoise` 干画笔破墨。
+3. **解析法 Impasto 画布**：解析导数求亚麻经纬微法线 → 与画室斜光点乘出掠射高光，替代 3 次 `fbm2` 有限差分以稳定 60+ FPS。
 4. **屏幕空间雨滴**：双层 Voronoi，法线折射 + 水珠上缘暖窗倒影，`uRainAmount = 0` 时零成本。
-5. **3 层视差窗盒**：外层反光玻璃 / 中层室内剪影 / 底层暖色背板，镜头晃动时三层反向位移。
-6. **结局镜头**：天台拉升见银河、24 窗音律波浪、夜空渐变破晓、河灯升空。
+5. **Interior Mapping 室内视差 + 墙面溢光**：`512×512` 八房型程序化室内图集光线盒求交视差，`InstancedMesh` 批处理窗下砖墙溢光。
+6. **60 FPS 性能优化与结局镜头**：静态阴影烘焙（`shadowMap.autoUpdate = false`）、半分辨率 Bloom、暗窗精灵剔除；结局含天台拉升见银河、24 窗音律波浪、夜空渐变破晓、河灯升空。
 
-所有纹理都是 Canvas 2D 程序化生成，**不依赖任何外部图片**也能跑出完整效果。
-放图到 `public/textures/` 会被优先加载（清单见 03 号规格书第五节）。
+所有模型、纹理与音景均为项目原创代码与 Blender 脚本生成，**不依赖任何外部图片或音频**。
 
 ---
 
@@ -190,7 +214,7 @@ tests/                204 个用例
 - 匿名 `uid` + 6 位找回码，跨设备恢复结局树、住户羁绊、信物与称号。
 - **流光留声机**：把一句话封进某一扇窗，后来的人点亮时会在窗角看到它并点亮共鸣星。
 - **全服热力图**：标题页背景里最亮的窗，就是全服点亮最多的窗。
-- 旧版 `scores` 表在首次启动时自动无损迁入 `runs`。
+- 旧版 `scores` 表与 v3 对局字段在首次启动时自动无损迁入。
 
 ```bash
 ./deploy/deploy.sh --help
@@ -218,15 +242,19 @@ tests/                204 个用例
 
 - `npm run lint` —— ESLint 9，0 error 0 warning。
 - `npm run typecheck` —— `checkJs: true`，全部 `.js` 源码 0 错误。
-- `npm test` —— 204 个用例。
-- `npm run build` —— 生产包。
-- `npm run verify` —— 以上四步串联，CI 同款门禁。
+- `npm test` —— 12 个测试套件共 295 个单元与 API 集成用例。
+- `npm run test:e2e` —— 4 层 Playwright 端到端共 217 个实机用例。
+- `npm run build` —— Vite 生产分包构建（总包 ~5.63 MB）。
+- `npm run verify` —— 静态检查 + 类型 + 单测 + 构建全链路门禁。
 
 ## 文档索引
 
+- [docs/GAME_MANUAL.md](docs/GAME_MANUAL.md) **完整游戏手册与玩家讲解书**
+- [docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md) **心晴校园 AI 创意挑战赛 · 项目说明与全功能白皮书**
+- [docs/v4_plan/00_V4_VISION_AND_ARCHITECTURE.md](docs/v4_plan/00_V4_VISION_AND_ARCHITECTURE.md) v4.0 多玩法与校园 3D 架构书
 - [docs/v3_plan/00_MASTER_BLUEPRINT.md](docs/v3_plan/00_MASTER_BLUEPRINT.md) 总纲与主状态机
 - [docs/v3_plan/01_GAMEPLAY_AND_NARRATIVE_DESIGN.md](docs/v3_plan/01_GAMEPLAY_AND_NARRATIVE_DESIGN.md) 玩法与剧本
-- [docs/v3_plan/02_MULTI_AGENT_AI_ARCHITECTURE.md](docs/v3_plan/02_MULTI_AGENT_AI_ARCHITECTURE.md) 四智能体
+- [docs/v3_plan/02_MULTI_AGENT_AI_ARCHITECTURE.md](docs/v3_plan/02_MULTI_AGENT_AI_ARCHITECTURE.md) 多智能体架构
 - [docs/v3_plan/03_ART_BLENDER_AND_SHADER_PIPELINE.md](docs/v3_plan/03_ART_BLENDER_AND_SHADER_PIPELINE.md) 美术管线
 - [docs/v3_plan/04_INTERACTION_VFX_AND_120FPS_ENGINE.md](docs/v3_plan/04_INTERACTION_VFX_AND_120FPS_ENGINE.md) 交互与性能
 - [docs/v3_plan/05_BACKEND_PERSISTENCE_AND_DEPLOY.md](docs/v3_plan/05_BACKEND_PERSISTENCE_AND_DEPLOY.md) 持久化与部署
