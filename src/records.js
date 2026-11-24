@@ -293,7 +293,7 @@ export async function fetchLeaderboard({ scope = 'all', limit = 20, mode = '', d
 /**
  * Fetch leaderboard items along with the player's own rank summary (`myRank`).
  * @param {{ scope?: 'all'|'tonight', limit?: number, mode?: string, dormType?: string, uid?: string }} [opts]
- * @returns {Promise<{ items: any[], myRank: any, totalEntries: number, totalPlayers: number }>}
+ * @returns {Promise<{ items: any[], myRank: any, totalEntries: number, totalPlayers: number, offline: boolean }>}
  */
 export async function fetchLeaderboardWithRank({ scope = 'all', limit = 20, mode = '', dormType = '', uid = '' } = {}) {
   const q = new URLSearchParams({ scope, limit: String(limit) })
@@ -301,12 +301,13 @@ export async function fetchLeaderboardWithRank({ scope = 'all', limit = 20, mode
   if (dormType) q.set('dormType', dormType)
   if (uid) q.set('uid', uid)
   const data = await getJson('/api/leaderboard?' + q.toString())
-  if (!data || !data.ok) return { items: [], myRank: null, totalEntries: 0, totalPlayers: 0 }
+  if (!data || !data.ok) return { items: [], myRank: null, totalEntries: 0, totalPlayers: 0, offline: true }
   return {
     items: Array.isArray(data.items) ? data.items : [],
     myRank: data.myRank || null,
     totalEntries: Number(data.totalEntries) || 0,
-    totalPlayers: Number(data.totalPlayers) || 0
+    totalPlayers: Number(data.totalPlayers) || 0,
+    offline: false
   }
 }
 

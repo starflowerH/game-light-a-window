@@ -19,7 +19,7 @@ import {
   WEATHERS
 } from '../shared/constants.js'
 
-const VERSION = '4.0.0'
+const VERSION = '5.1.0'
 
 /**
  * Sliding-window limiter with a sweeper so the map cannot grow without bound.

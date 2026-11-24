@@ -4,8 +4,9 @@
 > 记忆顺序点灯、全景快照回忆、查寝夜猫子、GF(2) 熄灯解谜、以及经典三晚六结局连光物语。
 
 **完整文档与赛用资料**：
-- 📖 **玩家完整说明书**：[docs/GAME_MANUAL.md](docs/GAME_MANUAL.md)（五大玩法规则、全部参数数值、结局攻略、段位表）
-- 🏆 **比赛项目说明书**：[docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md)（F1–F12 全功能设计白皮书、AI 管线与奖项举证）
+- 📖 **玩家完整说明书**：[docs/GAME_MANUAL.md](docs/GAME_MANUAL.md) ｜ **排版讲解书（Word）**：[docs/submission/今晚亮一盏灯_v5.1_游戏手册与玩家讲解书.docx](docs/submission/今晚亮一盏灯_v5.1_游戏手册与玩家讲解书.docx)
+- 🏆 **比赛项目说明书**：[docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md) ｜ **全功能白皮书（Word）**：[docs/submission/今晚亮一盏灯_v5.1_比赛项目说明书与全功能设计白皮书.docx](docs/submission/今晚亮一盏灯_v5.1_比赛项目说明书与全功能设计白皮书.docx)
+- 🎬 **实机演示与视觉资产**：[主视觉海报](showcase/cover.png) · [五层架构图](showcase/architecture_diagram.png) · [实机演示视频 MP4](showcase/demo_gameplay.mp4) · [精华动图 GIF](showcase/demo_highlight.gif) · [10 张全场景实机截图](showcase/screenshots/)
 - 🧱 **架构策划档案**：`docs/v4_plan/` & `docs/v3_plan/`
 
 ---
@@ -82,7 +83,7 @@ Node 22+ 必需（使用内置 `node:sqlite`）。
 |---|---|
 | 3D / 后期 | three.js r187（EffectComposer + 自定义 ShaderPass，无第三方后期库） |
 | 构建 | Vite 8 |
-| 测试 | Vitest 5 + Playwright 1.65（295 条单元/API 用例 + 217 条 4 层端到端 E2E = 512 条门禁） |
+| 测试 | Vitest 5 + Playwright 1.65（296 条单元/API 用例 + 217 条 4 层端到端 E2E = 513 条门禁） |
 | 类型 | TypeScript 7，`checkJs: true`，全部 `.js` 源码零错误 |
 | 后端 | Fastify 5 + Node 22 `node:sqlite`（WAL） |
 | 部署 | Nginx + systemd + rsync |
@@ -242,15 +243,18 @@ tests/                295 条 Vitest 单测与 API 集成 + 217 条 Playwright E
 
 - `npm run lint` —— ESLint 9，0 error 0 warning。
 - `npm run typecheck` —— `checkJs: true`，全部 `.js` 源码 0 错误。
-- `npm test` —— 12 个测试套件共 295 个单元与 API 集成用例。
+- `npm test` —— 12 个测试套件共 296 个单元与 API 集成用例。
 - `npm run test:e2e` —— 4 层 Playwright 端到端共 217 个实机用例。
-- `npm run build` —— Vite 生产分包构建（总包 ~5.63 MB）。
+- `npm run build` —— Vite 生产分包构建（总包 ~4.46 MB）。
 - `npm run verify` —— 静态检查 + 类型 + 单测 + 构建全链路门禁。
 
-## 文档索引
+## 文档与赛用资产索引
 
-- [docs/GAME_MANUAL.md](docs/GAME_MANUAL.md) **完整游戏手册与玩家讲解书**
-- [docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md) **心晴校园 AI 创意挑战赛 · 项目说明与全功能白皮书**
+- [docs/GAME_MANUAL.md](docs/GAME_MANUAL.md) **完整游戏手册与玩家讲解书（Markdown）**
+- [docs/submission/今晚亮一盏灯_v5.1_游戏手册与玩家讲解书.docx](docs/submission/今晚亮一盏灯_v5.1_游戏手册与玩家讲解书.docx) **完整游戏手册与玩家讲解书（排版 Word 版，含实机截图）**
+- [docs/COMPETITION_PROJECT_SPEC.md](docs/COMPETITION_PROJECT_SPEC.md) **心晴校园 AI 创意挑战赛 · 项目说明与全功能白皮书（Markdown）**
+- [docs/submission/今晚亮一盏灯_v5.1_比赛项目说明书与全功能设计白皮书.docx](docs/submission/今晚亮一盏灯_v5.1_比赛项目说明书与全功能设计白皮书.docx) **比赛项目说明书与全功能设计白皮书（排版 Word 版，含架构图与实机截图）**
+- `showcase/` **比赛展示媒体库**：[cover.png](showcase/cover.png) · [architecture_diagram.png](showcase/architecture_diagram.png) · [demo_gameplay.mp4](showcase/demo_gameplay.mp4) · [demo_highlight.gif](showcase/demo_highlight.gif) · `screenshots/01~10.png`
 - [docs/v4_plan/00_V4_VISION_AND_ARCHITECTURE.md](docs/v4_plan/00_V4_VISION_AND_ARCHITECTURE.md) v4.0 多玩法与校园 3D 架构书
 - [docs/v3_plan/00_MASTER_BLUEPRINT.md](docs/v3_plan/00_MASTER_BLUEPRINT.md) 总纲与主状态机
 - [docs/v3_plan/01_GAMEPLAY_AND_NARRATIVE_DESIGN.md](docs/v3_plan/01_GAMEPLAY_AND_NARRATIVE_DESIGN.md) 玩法与剧本

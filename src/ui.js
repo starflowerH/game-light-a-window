@@ -70,6 +70,8 @@ export class UI {
   }
 
   _layer() {
+    this.hideCoach()
+    this.hideHintBubble()
     const d = document.createElement('div')
     d.className = 'screen'
     this.el.appendChild(d)
@@ -1618,6 +1620,15 @@ export class UI {
           '</div>' +
           '<div class="mrc-gap">' + gapHtml + '</div>' +
         '</div>'
+      } else if (data.offline) {
+        myRankEl.innerHTML = '<div class="my-rank-card">' +
+          '<div class="mrc-num">☁</div>' +
+          '<div class="mrc-meta">' +
+            '<b>📡 当前为离线 / 纯前端体验模式 · ' + esc(curNick) + '</b>' +
+            '<span>五大玩法、本地存档、手写全结局与自带 DeepSeek Key 直连 AI 均可完整使用；全服排行与流光留声机需访问在线云端版</span>' +
+          '</div>' +
+          '<div class="mrc-gap"><a href="https://game.xiaoxin.email/" target="_blank" rel="noopener noreferrer" style="color:#ffd88a;text-decoration:underline;">前往在线云端版 ↗</a></div>' +
+        '</div>'
       } else {
         myRankEl.innerHTML = '<div class="my-rank-card">' +
           '<div class="mrc-num">—</div>' +
@@ -1629,6 +1640,10 @@ export class UI {
         '</div>'
       }
 
+      if (data.offline) {
+        body.innerHTML = '<div class="empty">离线静态包不包含全服排行榜服务；如需查看实时排行与全校留声墙，请访问 <a href="https://game.xiaoxin.email/" target="_blank" rel="noopener noreferrer" style="color:#ffd88a;text-decoration:underline;">https://game.xiaoxin.email/</a></div>'
+        return
+      }
       if (!data.items.length) {
         body.innerHTML = '<div class="empty">这个分榜还没有人挑战过，快去拿下第一名吧！</div>'
         return

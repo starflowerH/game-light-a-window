@@ -36,7 +36,7 @@ describe('health', () => {
     const body = res.json()
     expect(body.ok).toBe(true)
     expect(body.service).toBe('light-a-window')
-    expect(body.version).toBe('4.0.0')
+    expect(body.version).toBe('5.1.0')
     expect(body.dbOk).toBe(true)
     expect(body.aiConfigured).toBe(false)
     expect(typeof body.globalLitWindows).toBe('number')

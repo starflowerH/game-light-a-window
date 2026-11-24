@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadRecords, mergeRun } from '../src/records.js'
+import { fetchLeaderboardWithRank, loadRecords, mergeRun } from '../src/records.js'
 
 const empty = () => ({ bestWarmth: 0, bestCombo: 0, plays: 0, totalWindows: 0, bestNight: 0, items: [], history: [] })
 
@@ -203,6 +203,21 @@ describe('nickname storage', () => {
 describe('saveRecords', () => {
   it('accepts a record set without throwing in a headless environment', () => {
     expect(() => saveRecords(empty())).not.toThrow()
+  })
+})
+
+describe('fetchLeaderboardWithRank', () => {
+  it('returns offline: true safely when backend endpoint is unavailable', async () => {
+    const prevFetch = globalThis.fetch
+    globalThis.fetch = () => Promise.reject(new Error('network unavailable'))
+    try {
+      const res = await fetchLeaderboardWithRank({ mode: 'memory_sequence' })
+      expect(res.offline).toBe(true)
+      expect(res.items).toEqual([])
+      expect(res.myRank).toBeNull()
+    } finally {
+      globalThis.fetch = prevFetch
+    }
   })
 })
 
