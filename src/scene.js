@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { createPainterlyPass } from './painterly.js'
 import { createStardewTextureKit } from './textures-procedural.js'
@@ -569,6 +569,7 @@ export class Scene {
     this._leafMaterials = []
     this._snowNodes = []
     this._loader = new GLTFLoader()
+    this._loader.setMeshoptDecoder(MeshoptDecoder)
     this._texKit = createStardewTextureKit()
 
     this._pointer = { x: 0, y: 0, dragging: false }
@@ -584,6 +585,10 @@ export class Scene {
     this._windTarget = 0
     this._windTimeUniform = { value: 0 }
     this._windStrengthUniform = { value: 0 }
+    this._leafRimColorUniform = { value: new THREE.Color(0xffb347) }
+    this._waterSkyUniform = { value: new THREE.Color(0x6a86c4) }
+    this._waterWarmUniform = { value: new THREE.Color(0xffc06a) }
+    this._roofCatTail = null
     this._cutscene = null
     this._resonance = null
     this._harmonyUntil = 0
@@ -754,6 +759,10 @@ export class Scene {
     root.position.set(0, BASE_Y, 0)
     root.updateMatrixWorld(true)
 
+    /** @type {Map<string, any>} */
+    const styledMats = new Map()
+    const existingLeafMats = new Set(this._leafMaterials)
+
     root.traverse(obj => {
       const mesh = /** @type {THREE.Mesh} */ (obj)
       if (!mesh.isMesh) return
@@ -769,71 +778,139 @@ export class Scene {
       const rawMat = /** @type {any} */ (mesh.material)
       if (!rawMat) return
       const matName = rawMat.name || ''
+      const isSnow = name.startsWith('Season_Snow_')
+      const matKey = matName + (isSnow ? '|snow' : '')
 
-      // Clone once per mesh material so leaf/texture mutations stay clean
-      const mat = rawMat.clone()
-      if (name.startsWith('Season_Snow_') && mat.isMeshStandardMaterial) {
-        // Keep snow softly matte so UnrealBloom never washes rooftops into white glare
-        if (mat.color) mat.color.setHex(0xcbd8ec)
-        mat.roughness = 0.94
-        mat.metalness = 0.0
-      }
-      if (mesh.geometry && mesh.geometry.attributes.color) {
-        mat.vertexColors = true
-      }
-
-      const texSet = this._texKit[matName]
-      if (texSet && mat.isMeshStandardMaterial) {
-        if (texSet.map.anisotropy !== this._maxAniso) texSet.map.anisotropy = this._maxAniso
-        if (texSet.normalMap.anisotropy !== this._maxAniso) texSet.normalMap.anisotropy = this._maxAniso
-        mat.map = texSet.map
-        mat.normalMap = texSet.normalMap
-        const nStr = (matName === 'Mat_Trim_Cream' || matName === 'Mat_Stone_Trim') ? 0.24 : 0.42
-        mat.normalScale = new THREE.Vector2(nStr, nStr)
-        // Brighten albedo multiplier when vertex colors & diffuse texture combine
-        if (mat.color) mat.color.lerp(new THREE.Color(0xffffff), 0.78)
-        mat.roughness = matName === 'Mat_Pond_Water' ? 0.16 : Math.max(0.54, mat.roughness || 0.82)
-        if (matName === 'Mat_Pond_Water') {
-          mat.metalness = 0.28
-          this._pondWaterMat = mat
+      let mat = styledMats.get(matKey)
+      if (!mat) {
+        mat = rawMat.clone()
+        if (isSnow && mat.isMeshStandardMaterial) {
+          // Keep snow softly matte so UnrealBloom never washes rooftops into white glare
+          if (mat.color) mat.color.setHex(0xcbd8ec)
+          mat.roughness = 0.94
+          mat.metalness = 0.0
         }
-        mat.needsUpdate = true
-      }
+        if (mesh.geometry && mesh.geometry.attributes.color) {
+          mat.vertexColors = true
+        }
 
-      if (matName === 'Mat_Leaf_Main' || matName === 'Mat_Leaf_Accent') {
-        mat.userData.leafRole = matName === 'Mat_Leaf_Main' ? 'main' : 'accent'
-        this._injectWindShader(mat, 0.65)
-        this._leafMaterials.push(mat)
-      } else if (matName.startsWith('Mat_Laundry_') || name.startsWith('Laundry_') || name.startsWith('Season_Vines_')) {
-        this._injectWindShader(mat, 1.0)
-      }
+        const texSet = this._texKit[matName]
+        if (texSet && mat.isMeshStandardMaterial) {
+          if (texSet.map.anisotropy !== this._maxAniso) texSet.map.anisotropy = this._maxAniso
+          if (texSet.normalMap.anisotropy !== this._maxAniso) texSet.normalMap.anisotropy = this._maxAniso
+          mat.map = texSet.map
+          mat.normalMap = texSet.normalMap
+          const nStr = (matName === 'Mat_Trim_Cream' || matName === 'Mat_Stone_Trim') ? 0.24 : 0.42
+          mat.normalScale = new THREE.Vector2(nStr, nStr)
+          // Brighten albedo multiplier when vertex colors & diffuse texture combine
+          if (mat.color) mat.color.lerp(new THREE.Color(0xffffff), 0.78)
+          mat.roughness = matName === 'Mat_Pond_Water' ? 0.16 : Math.max(0.54, mat.roughness || 0.82)
+          if (matName === 'Mat_Pond_Water') {
+            mat.metalness = 0.28
+            this._pondWaterMat = mat
+            this._injectPondWaterShader(mat)
+          }
+          mat.needsUpdate = true
+        }
 
-      if (matName === 'Mat_Lamp_Glow' || matName === 'Mat_Door_Glow') {
-        mat.emissiveIntensity = isGrounds ? 1.5 : 1.15
-      }
-      if (matName === 'Mat_Door_Glow') {
-        mat.polygonOffset = true
-        mat.polygonOffsetFactor = -1
-        mat.polygonOffsetUnits = -2
+        if (matName === 'Mat_Leaf_Main' || matName === 'Mat_Leaf_Accent') {
+          mat.userData.leafRole = matName === 'Mat_Leaf_Main' ? 'main' : 'accent'
+          this._injectWindShader(mat, 0.65, true)
+          if (!existingLeafMats.has(mat)) {
+            this._leafMaterials.push(mat)
+            existingLeafMats.add(mat)
+          }
+        } else if (matName === 'Mat_Hedge_Leaf' || matName === 'Mat_Pine_Leaf') {
+          this._injectWindShader(mat, 0.35, true)
+        } else if (matName.startsWith('Mat_Laundry_') || name.startsWith('Laundry_') || name.startsWith('Season_Vines_')) {
+          this._injectWindShader(mat, 1.0, false)
+        }
+
+        if (matName === 'Mat_Lamp_Glow' || matName === 'Mat_Door_Glow') {
+          mat.emissiveIntensity = isGrounds ? 1.5 : 1.15
+        }
+        if (matName === 'Mat_Door_Glow') {
+          mat.polygonOffset = true
+          mat.polygonOffsetFactor = -1
+          mat.polygonOffsetUnits = -2
+        }
+
+        styledMats.set(matKey, mat)
       }
 
       mesh.material = mat
     })
   }
 
-  /** @param {THREE.Material} mat @param {number} amp */
-  _injectWindShader(mat, amp = 1.0) {
+  /** @param {THREE.Material} mat @param {number} amp @param {boolean} [isFoliage] */
+  _injectWindShader(mat, amp = 1.0, isFoliage = false) {
+    mat.customProgramCacheKey = () => (isFoliage ? 'stardew_foliage_v1_' : 'stardew_wind_v1_') + amp.toFixed(2)
     mat.onBeforeCompile = shader => {
       shader.uniforms.uWindTime = this._windTimeUniform
       shader.uniforms.uWindStrength = this._windStrengthUniform
-      shader.vertexShader = 'uniform float uWindTime;\nuniform float uWindStrength;\n' + shader.vertexShader
+      shader.vertexShader = 'uniform float uWindTime;\nuniform float uWindStrength;\n' +
+        (isFoliage ? 'varying vec3 vFoliageWorldPos;\n' : '') +
+        shader.vertexShader
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         '#include <begin_vertex>\n' +
         'vec3 wPos = (modelMatrix * vec4(position, 1.0)).xyz;\n' +
+        (isFoliage ? 'vFoliageWorldPos = wPos;\n' : '') +
         `float wFactor = clamp((wPos.y + 190.0) / 140.0, 0.0, 1.4) * ${amp.toFixed(2)};\n` +
         'transformed.x += sin(uWindTime * 1.8 + wPos.x * 0.08 + wPos.y * 0.12) * uWindStrength * 0.018 * wFactor;\n' +
         'transformed.z += cos(uWindTime * 1.4 + wPos.z * 0.08) * uWindStrength * 0.010 * wFactor;\n'
+      )
+      if (isFoliage) {
+        shader.uniforms.uLeafRimColor = this._leafRimColorUniform
+        shader.fragmentShader = 'uniform vec3 uLeafRimColor;\nvarying vec3 vFoliageWorldPos;\n' + shader.fragmentShader
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          '#include <opaque_fragment>\n' +
+          'float foliageViewDot = dot(normalize(vNormal), normalize(vViewPosition));\n' +
+          'float foliageRim = pow(1.0 - clamp(abs(foliageViewDot), 0.0, 1.0), 2.2);\n' +
+          'float canopyLift = smoothstep(-200.0, 20.0, vFoliageWorldPos.y);\n' +
+          'gl_FragColor.rgb += uLeafRimColor * foliageRim * (0.14 + 0.16 * canopyLift);\n'
+        )
+      }
+    }
+  }
+
+  /** @param {THREE.Material} mat */
+  _injectPondWaterShader(mat) {
+    mat.customProgramCacheKey = () => 'stardew_pond_water_v1'
+    mat.onBeforeCompile = shader => {
+      shader.uniforms.uPondTime = this._windTimeUniform
+      shader.uniforms.uSkyHorizon = this._waterSkyUniform
+      shader.uniforms.uWarmGlowColor = this._waterWarmUniform
+      shader.vertexShader = 'varying vec3 vPondWorldPos;\n' + shader.vertexShader
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvPondWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n'
+      )
+      shader.fragmentShader =
+        'uniform float uPondTime;\nuniform vec3 uSkyHorizon;\nuniform vec3 uWarmGlowColor;\nvarying vec3 vPondWorldPos;\n' +
+        shader.fragmentShader
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        '#include <opaque_fragment>\n' +
+        'vec2 pondNorm = (vPondWorldPos.xz - vec2(468.0, 19.2)) / vec2(99.6, 78.2);\n' +
+        'float pondR = length(pondNorm);\n' +
+        'float caust1 = sin(vPondWorldPos.x * 0.16 + uPondTime * 1.45) * cos(vPondWorldPos.z * 0.19 - uPondTime * 1.15);\n' +
+        'float caust2 = sin((vPondWorldPos.x + vPondWorldPos.z) * 0.13 - uPondTime * 0.95);\n' +
+        'float caustic = pow(clamp(0.5 + 0.5 * (caust1 * 0.6 + caust2 * 0.4), 0.0, 1.0), 3.0);\n' +
+        'float depthBlend = smoothstep(0.15, 0.95, pondR);\n' +
+        'vec3 shallowTint = vec3(0.08, 0.24, 0.30);\n' +
+        'vec3 deepTint = vec3(0.02, 0.07, 0.14);\n' +
+        'float wFres = pow(1.0 - clamp(abs(dot(normalize(vNormal), normalize(vViewPosition))), 0.0, 1.0), 3.0);\n' +
+        'float lan1 = exp(-dot(vPondWorldPos.xz - vec2(403.2, 38.4), vPondWorldPos.xz - vec2(403.2, 38.4)) * 0.00055);\n' +
+        'float lan2 = exp(-dot(vPondWorldPos.xz - vec2(532.8, 38.4), vPondWorldPos.xz - vec2(532.8, 38.4)) * 0.00055);\n' +
+        'float shoreWave = sin(pondR * 28.0 - uPondTime * 2.2 + caust1 * 1.4) * 0.5 + 0.5;\n' +
+        'float shoreFoam = smoothstep(0.80, 0.97, pondR) * smoothstep(0.45, 0.90, shoreWave);\n' +
+        'vec3 pondCol = mix(gl_FragColor.rgb * 0.85 + mix(deepTint, shallowTint, depthBlend), uSkyHorizon * 0.55, clamp(wFres * 0.72, 0.0, 0.65));\n' +
+        'pondCol += vec3(0.24, 0.52, 0.60) * caustic * 0.22 * (1.0 - depthBlend * 0.4);\n' +
+        'pondCol += uWarmGlowColor * (lan1 + lan2) * (0.28 + 0.14 * caustic);\n' +
+        'pondCol = mix(pondCol, vec3(0.84, 0.91, 0.98), shoreFoam * 0.45);\n' +
+        'gl_FragColor.rgb = pondCol;\n'
       )
     }
   }
@@ -970,6 +1047,7 @@ export class Scene {
           winH = Math.max(28, size.y * 0.96)
         }
         node.visible = false
+        if (node.parent) node.parent.remove(node)
       }
 
       const rec = this._createInteractiveWindow(meta.idx, meta.roomId, meta.row, meta.col, cx, cy, cz, winW, winH)
@@ -1417,12 +1495,29 @@ export class Scene {
     this.moths.position.set(-292, BASE_Y + 95, 190)
     this.dorm.add(this.moths)
 
-    // Rooftop cat: default visible so it's always part of campus ecology
+    // Sculpted animated rooftop cat silhouette (tail slowly sways in breeze)
     const cat = new THREE.Group()
-    const cMat = new THREE.MeshStandardMaterial({ color: 0xd98038, roughness: 0.85 })
-    const b = new THREE.Mesh(new THREE.SphereGeometry(5.5, 10, 8), cMat)
-    b.scale.set(1.25, 0.9, 1)
-    cat.add(b)
+    const cMat = new THREE.MeshStandardMaterial({ color: 0xd98038, roughness: 0.82 })
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(5.0, 10, 8), cMat)
+    torso.scale.set(1.3, 0.86, 0.92)
+    cat.add(torso)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(3.3, 10, 8), cMat)
+    head.position.set(5.2, 3.6, 0)
+    cat.add(head)
+    for (const ez of [-1.7, 1.7]) {
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.8, 4), cMat)
+      ear.position.set(5.2, 6.9, ez)
+      ear.rotation.y = Math.PI * 0.25
+      cat.add(ear)
+    }
+    const tailPivot = new THREE.Group()
+    tailPivot.position.set(-5.6, 1.2, 0)
+    const tailMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 1.15, 7.6, 6), cMat)
+    tailMesh.position.set(-1.6, 3.2, 0)
+    tailMesh.rotation.z = 0.42
+    tailPivot.add(tailMesh)
+    cat.add(tailPivot)
+    this._roofCatTail = tailPivot
     cat.position.set(0, BASE_Y + 370, -10)
     cat.visible = true
     this.dorm.add(cat)
@@ -2127,7 +2222,6 @@ export class Scene {
     this.composer.addPass(this.bloom)
     this.painterly = createPainterlyPass()
     this.composer.addPass(this.painterly)
-    this.composer.addPass(new OutputPass())
   }
 
   // ---------------------------------------------------------------- public v4 APIs
@@ -2149,6 +2243,11 @@ export class Scene {
       if (mat.userData.leafRole === 'accent') mat.color.copy(accCol)
       else mat.color.copy(mainCol)
     }
+    const rimHex = def.id === 'spring' ? 0xffb8d2
+      : def.id === 'summer' ? 0xb8f29c
+      : def.id === 'winter' ? 0xd8ecff
+      : 0xffb347
+    this._leafRimColorUniform.value.setHex(rimHex)
     this._syncSnowVisibility()
     if (this.fireflyMat) {
       const pCol = def.id === 'spring' ? 0xffc6de
@@ -2506,6 +2605,7 @@ export class Scene {
     if (this.doorLight) this.doorLight.intensity = 45 + p * 120
     this.bloom.strength = 0.45 + p * 0.17
     this.renderer.toneMappingExposure = 1.18 + p * 0.10
+    if (this.painterly) this.painterly.material.uniforms.uExposure.value = this.renderer.toneMappingExposure
     this._syncSpillDecals()
   }
 
@@ -2705,6 +2805,8 @@ export class Scene {
     }
     if (this.doorGlow) this.doorGlow.material.color.set(p.warm)
     this.warmLight.color.set(p.warm)
+    this._waterSkyUniform.value.setHex(p.sky[2])
+    this._waterWarmUniform.value.setHex(p.warm)
     if (this.lampConeMat) this.lampConeMat.uniforms.uColor.value.set(p.warm)
     if (this.mistUniforms) {
       this.mistUniforms.uColorA.value.set(p.fog).lerp(new THREE.Color(0xcfd9f6), 0.55)
@@ -2951,10 +3053,10 @@ export class Scene {
       for (let i = 0; i < 60; i++) sum += this._frameTimes[i]
       const avgMs = sum / 60
 
-      if (avgMs > 19.8) {
+      if (avgMs > 25.5) {
         this._degradeTimer += dt
         this._upgradeTimer = 0
-        if (this._degradeTimer >= 1.5 && this._quality > 0) {
+        if (this._degradeTimer >= 1.5 && this._quality > 1) {
           this.setQuality(this._quality - 1)
           this._degradeTimer = 0
         }
@@ -2989,6 +3091,9 @@ export class Scene {
     }
     if (this.renderer) {
       this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1, dt * 2.5)
+      if (this.painterly) {
+        this.painterly.material.uniforms.uExposure.value = this.renderer.toneMappingExposure
+      }
     }
     if (this.puddleUniforms) {
       this.puddleUniforms.uWarmGlow.value += (pLit - this.puddleUniforms.uWarmGlow.value) * Math.min(1, dt * 2.5)
@@ -3012,8 +3117,11 @@ export class Scene {
 
     if (this.roofCat) {
       const breathe = 1.0 + 0.04 * Math.sin(t * 2.2)
-      this.roofCat.scale.set(1.25, 0.9 * breathe, 1.0)
-      this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 1.1) * 1.5
+      this.roofCat.scale.set(1.0 + 0.02 * breathe, 0.96 * breathe, 1.0)
+      this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 1.1) * 1.2
+      if (this._roofCatTail) {
+        this._roofCatTail.rotation.z = Math.sin(t * 2.6) * 0.28
+      }
     }
 
     // Update Interior Mapping uniforms only when camera moved or window is lit
@@ -3251,6 +3359,18 @@ export class Scene {
       this.renderer.setRenderTarget(null)
       this.renderer.render(this.scene, this.camera)
     }
+  }
+
+  /** Synchronously render one clean frame and capture it as a PNG data URL for postcard export. */
+  captureSnapshotDataUrl() {
+    if (!this.renderer || !this.scene || !this.camera) return ''
+    if (this._useComposer && this.composer) {
+      this.composer.render()
+    } else {
+      this.renderer.setRenderTarget(null)
+      this.renderer.render(this.scene, this.camera)
+    }
+    return this.renderer.domElement.toDataURL('image/png')
   }
 
   dispose() {

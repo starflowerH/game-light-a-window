@@ -299,12 +299,12 @@ def add_corner_quoins(body_w, body_d, body_h, plinth_h, mat_quoin, mat_band=None
         if plinth_h < 2.2:
             seg_w = hw - 2.0
             cx = 2.0 + seg_w / 2.0
-            box('WaterTable_FL', (-cx, -hd - 0.06, plinth_h + 0.06), (seg_w + 0.45, 0.24, 0.16), mat_band or mat_quoin, bevel=0.02)
-            box('WaterTable_FR', (cx, -hd - 0.06, plinth_h + 0.06), (seg_w + 0.45, 0.24, 0.16), mat_band or mat_quoin, bevel=0.02)
+            box('WaterTable_FL', (-cx, -hd - 0.06, plinth_h + 0.06), (seg_w + 0.45, 0.24, 0.16), mat_band or mat_quoin, bevel=0.0)
+            box('WaterTable_FR', (cx, -hd - 0.06, plinth_h + 0.06), (seg_w + 0.45, 0.24, 0.16), mat_band or mat_quoin, bevel=0.0)
         else:
-            box('WaterTable_Front', (0, -hd - 0.05, plinth_h + 0.06), (body_w + 0.42, 0.22, 0.16), mat_band or mat_quoin, bevel=0.02)
-        box('WaterTable_L', (-hw - 0.05, 0, plinth_h + 0.06), (0.22, body_d + 0.42, 0.16), mat_band or mat_quoin, bevel=0.02)
-        box('WaterTable_R', (hw + 0.05, 0, plinth_h + 0.06), (0.22, body_d + 0.42, 0.16), mat_band or mat_quoin, bevel=0.02)
+            box('WaterTable_Front', (0, -hd - 0.05, plinth_h + 0.06), (body_w + 0.42, 0.22, 0.16), mat_band or mat_quoin, bevel=0.0)
+        box('WaterTable_L', (-hw - 0.05, 0, plinth_h + 0.06), (0.22, body_d + 0.42, 0.16), mat_band or mat_quoin, bevel=0.0)
+        box('WaterTable_R', (hw + 0.05, 0, plinth_h + 0.06), (0.22, body_d + 0.42, 0.16), mat_band or mat_quoin, bevel=0.0)
 
     z = plinth_h + 0.42
     idx = 0
@@ -317,7 +317,7 @@ def add_corner_quoins(body_w, body_d, body_h, plinth_h, mat_quoin, mat_band=None
             for sy in (-1.0, 1.0):
                 cx = sx * (hw - qw * 0.32)
                 cy = sy * (hd - qd * 0.32)
-                box(f'Quoin_{idx}_{int(sx)}_{int(sy)}', (cx, cy, z), (qw, qd, qh), mat_quoin, bevel=0.02)
+                box(f'Quoin_{idx}_{int(sx)}_{int(sy)}', (cx, cy, z), (qw, qd, qh), mat_quoin, bevel=0.0)
         z += step_h
         idx += 1
 
@@ -613,11 +613,31 @@ def add_tree(prefix, x, y, z, height, canopy_r, mats, rng, is_ginkgo=False, with
             rad = canopy_r * 0.22 if i < 3 else 0.0
             specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.82, height * 0.92 + canopy_r * (0.48 if i < 3 else 0.68), canopy_r * (0.38 if i < 3 else 0.46), 1))
 
+    crown_center = Vector((x, y, z + height * 0.78))
+    if not low_detail:
+        # Outer lacy silhouette sprig puffs breaking up the core dome
+        for k in range(5):
+            ang = (k / 5.0) * math.pi * 2.0 + 0.32
+            rad = canopy_r * rng.uniform(0.62, 0.78)
+            specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.85, height * (0.76 + (k % 2) * 0.14), canopy_r * rng.uniform(0.30, 0.38), k % 2))
+
     for i, (dx, dy, dz, r, role) in enumerate(specs):
         lobe_sub = 1 if (low_detail or i < len(specs) - 4) else 2
-        ico(f'Tree_Canopy_{prefix}_{i}', (x + dx, y + dy, z + dz), r, mat_b if role else mat_a,
-            sub=lobe_sub, scale=(1.14, 1.04, 0.80), smooth=True, organic=0.18, seed=i * 2.1 + x + y)
-        if not low_detail and i >= len(specs) - 5:
+        ob_canopy = ico(f'Tree_Canopy_{prefix}_{i}', (x + dx, y + dy, z + dz), r, mat_b if role else mat_a,
+                        sub=lobe_sub, scale=(1.14, 1.04, 0.80), smooth=True, organic=0.22, seed=i * 2.1 + x + y)
+        # Ghibli Normal Transfer: blend radial outward crown normal (75%) + local normal (25%)
+        me_c = ob_canopy.data
+        custom_normals = []
+        loc_c = Vector(ob_canopy.location)
+        for v in me_c.vertices:
+            radial = (loc_c + v.co) - crown_center
+            r_dir = radial.normalized() if radial.length > 1e-5 else Vector((0.0, 0.0, 1.0))
+            v_norm = v.normal.normalized() if v.normal.length > 1e-5 else r_dir
+            blended = (r_dir * 0.75 + v_norm * 0.25)
+            custom_normals.append(blended.normalized() if blended.length > 1e-5 else r_dir)
+        if custom_normals and hasattr(me_c, 'normals_split_custom_set_from_vertices'):
+            me_c.normals_split_custom_set_from_vertices(custom_normals)
+        if not low_detail and i >= len(specs) - 9 and i < len(specs) - 5:
             ico(f'Season_Snow_Tree_{prefix}_{i}', (x + dx, y + dy, z + dz + r * 0.52), r * 0.72,
                 mats['snow_cap'], sub=1, scale=(1.08, 1.0, 0.34), tint=False, smooth=True)
         elif not low_detail and is_ginkgo and i % 4 == 1:
@@ -1260,7 +1280,7 @@ def build_campus_grounds(mats, rng):
     # Expanded soft ground apron (Campus_Grass_* and Campus_Road* preserve shadow exclusion)
     box('Campus_Grass_Base', (0, 6.0, -0.4), (104.0, 68.0, 0.8), mats['lawn_grass'], bevel=0.05, top_z=4.0, half_w=52.0)
     box('Campus_Stone_Plaza', (0, -3.5, 0.02), (25.6, 12.4, 0.12), mats['stone_ground'], bevel=0.03)
-    box('Campus_PlazaBorder', (0, -6.95, 0.09), (25.8, 0.34, 0.16), mats['stone_trim'], bevel=0.015)
+    box('Campus_PlazaBorder', (0, -6.95, 0.09), (25.8, 0.34, 0.16), mats['stone_trim'], bevel=0.0)
     box('Campus_Road', (0, -9.2, 0.04), (104.0, 4.4, 0.12), mats['cobble'], bevel=0.02)
     box('Campus_Curb_N', (0, -7.0, 0.08), (104.0, 0.30, 0.18), mats['trim_cream'], bevel=0.015)
     box('Campus_Curb_S', (0, -11.4, 0.08), (104.0, 0.30, 0.18), mats['trim_cream'], bevel=0.015)
@@ -1359,9 +1379,9 @@ def build_campus_grounds(mats, rng):
             sx = px_c + rx_c + (stalk - 1) * 0.16
             sy = py_c + ry_c + rng.uniform(-0.14, 0.14)
             cylinder(f'Pond_Reed_{cr_i}_{stalk}', (sx, sy, 0.45), 0.032, 0.85 + stalk * 0.12,
-                     mats['pine_leaf'], verts=6, rot=(rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12), 0), smooth=True)
+                     mats['pine_leaf'], verts=5, rot=(rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12), 0), smooth=True)
             if stalk == 1:
-                cylinder(f'Pond_Cattail_{cr_i}', (sx, sy, 0.82), 0.055, 0.22, mats['trunk'], verts=7, smooth=True)
+                cylinder(f'Pond_Cattail_{cr_i}', (sx, sy, 0.82), 0.055, 0.22, mats['trunk'], verts=5, smooth=True)
     # 7 floating lily pads & 4 multi-petal lotus blossoms
     for li, (lx_o, ly_o, has_fl) in enumerate([
         (-2.2, 1.2, True), (-1.4, 1.8, False), (1.8, 1.5, True), (2.4, 0.4, False),
@@ -1375,6 +1395,20 @@ def build_campus_grounds(mats, rng):
                     (px_c + lx_o + math.cos(p_ang) * 0.11, py_c + ly_o + math.sin(p_ang) * 0.11, 0.17),
                     0.09, mats['flower_coral'], sub=1, scale=(1.2, 0.8, 0.9), smooth=True)
             ico(f'Pond_LotusCore_{li}', (px_c + lx_o, py_c + ly_o, 0.20), 0.065, mats['flower_gold'], sub=1, smooth=True)
+
+    # 3 streamlined 3D koi carp swimming among the lily pads
+    for ki, (kx_o, ky_o, k_rot, k_mat) in enumerate([
+        (-0.45, 0.65, 0.42, mats['flower_coral']),
+        (0.58, 1.05, -0.68, mats['flower_gold']),
+        (-1.25, 0.18, 1.15, mats['flower_coral']),
+    ]):
+        kx, ky = px_c + kx_o, py_c + ky_o
+        ico(f'Pond_Koi_{ki}', (kx, ky, 0.095), 0.11, k_mat, sub=1, scale=(2.1, 0.72, 0.52), smooth=True)
+        bpy.data.objects[f'Pond_Koi_{ki}'].rotation_euler = (0.0, 0.0, k_rot)
+        tx = kx - math.cos(k_rot) * 0.25
+        ty = ky - math.sin(k_rot) * 0.25
+        cone(f'Pond_Koi_Tail_{ki}', (tx, ty, 0.095), 0.09, 0.01, 0.16, k_mat,
+             verts=4, rot=(0.0, math.pi / 2.0, k_rot + math.pi), smooth=False)
 
     # Arched wooden footbridge spanning pond at y = -1.6 with baluster rails & arch stringers
     by_br = -1.6
@@ -1545,6 +1579,7 @@ def merge_static_meshes():
         bpy.context.view_layer.objects.active = objs[0]
         objs[0].name = f'{prefix}_{mat_name}'
         bpy.ops.object.join()
+        objs[0].data.name = f'{prefix}_{mat_name}'
 
 
 BUILDERS = {
@@ -1572,6 +1607,7 @@ def export_glb(path):
         'export_animations': False,
         'export_cameras': False,
         'export_lights': False,
+        'export_meshopt_compression_enable': True,
     }
     known = bpy.ops.export_scene.gltf.get_rna_type().properties.keys()
     kwargs = {k: v for k, v in wanted.items() if k == 'filepath' or k in known}

@@ -166,7 +166,7 @@ export class UI {
           '<button class="btn ghost" data-act="board">全校排行榜</button>' +
           '<button class="btn ghost" data-act="npcs">NPC 换装图鉴</button>' +
           '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
-          '<button class="btn ghost docs-btn" data-act="docs"><span data-icon="ledger"></span>作品说明 · 手册</button>' +
+          '<button class="btn ghost docs-btn" data-act="docs"><span data-icon="ledger"></span>作品说明 · 评审手册</button>' +
           '<button class="btn ghost icon" data-act="key" data-icon="key" title="DeepSeek AI 直连 Key"></button>' +
         '</div>' +
         '<div class="title-foot">' +
@@ -368,6 +368,9 @@ export class UI {
    *   onLeaderboard: Function,
    *   onCollection: Function,
    *   onKeyConfig: Function,
+   *   tourActive?: boolean,
+   *   onToggleTour?: Function,
+   *   onPostcard?: Function,
    *   onDocs?: Function,
    *   onTitle: Function
    * }} opts
@@ -399,6 +402,8 @@ export class UI {
             '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
           '</div>' +
           '<button class="chip-btn" data-act="panel-toggle">🎛 控制台</button>' +
+          '<button class="chip-btn ' + (opts.tourActive ? 'on' : '') + '" data-act="scenic-tour">' + (opts.tourActive ? '⏸ 停止巡礼' : '✨ 四季巡礼') + '</button>' +
+          '<button class="chip-btn" data-act="postcard">📸 明信片</button>' +
           '<button class="chip-btn" data-act="bgm-cycle" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' +
           '<button class="chip-btn" data-act="mute">' + (opts.bgmState && opts.bgmState.muted ? '🔇' : '🔊') + '</button>' +
           '<button class="chip-btn" data-act="board">🏆 排行榜</button>' +
@@ -562,6 +567,8 @@ export class UI {
     qs(hub, '[data-act="dialogue"]').onclick = () => opts.onReplayDialogue()
     qs(hub, '[data-act="collection"]').onclick = () => opts.onCollection()
     qs(hub, '[data-act="key"]').onclick = () => opts.onKeyConfig()
+    if (opts.onToggleTour) qs(hub, '[data-act="scenic-tour"]').onclick = () => opts.onToggleTour()
+    if (opts.onPostcard) qs(hub, '[data-act="postcard"]').onclick = () => opts.onPostcard()
     if (opts.onDocs) qs(hub, '[data-act="docs"]').onclick = () => opts.onDocs('overview')
     qs(hub, '[data-act="title"]').onclick = () => opts.onTitle()
 
@@ -1777,6 +1784,105 @@ export class UI {
       if (!s.isConnected) return
       s.innerHTML = '<div class="panel glass small"><h2 class="h2">文档模块载入失败</h2><p class="lede small">请刷新页面后重试。</p><button class="btn ghost" data-act="back">返回</button></div>'
       qs(s, '[data-act="back"]').onclick = () => { if (onClose) onClose() }
+    }
+  }
+
+  /**
+   * Present a keepsake evening campus postcard rendered from the live 3D diorama snapshot.
+   * @param {{
+   *   imageDataUrl: string, dormName: string, seasonName: string, weatherName: string,
+   *   nickname: string, litCount: number, totalWindows: number, onClose?: () => void
+   * }} opts
+   */
+  showPostcardModal({ imageDataUrl, dormName, seasonName, weatherName, nickname, litCount, totalWindows, onClose }) {
+    const s = this._layer()
+    const stampDate = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    s.innerHTML =
+      '<div class="panel glass wide">' +
+        '<div class="kicker">EVENING KEEPSAKE POSTCARD</div>' +
+        '<h2 class="h2">📸 晚安校园明信片</h2>' +
+        '<p class="lede small">' + esc(dormName) + ' · ' + esc(seasonName) + ' · ' + esc(weatherName) + ' · 已点亮 ' + esc(litCount) + '/' + esc(totalWindows) + ' 扇窗</p>' +
+        '<div class="postcard-stage">' +
+          '<canvas class="postcard-canvas" width="1040" height="700"></canvas>' +
+        '</div>' +
+        '<div class="dialog-actions" style="justify-content:center;">' +
+          '<button class="btn primary" data-act="save-postcard">💾 保存纪念明信片 PNG</button>' +
+          '<button class="btn ghost" data-act="close-postcard">返回校园</button>' +
+        '</div>' +
+      '</div>'
+    paintIcons(s)
+
+    const canvas = /** @type {HTMLCanvasElement} */ (qs(s, '.postcard-canvas'))
+    const ctx = canvas.getContext('2d')
+    const renderCard = photo => {
+      if (!ctx) return
+      ctx.fillStyle = '#f6ebd2'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.strokeStyle = '#b9894d'
+      ctx.lineWidth = 4
+      ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36)
+
+      ctx.fillStyle = '#151c36'
+      ctx.fillRect(42, 42, 956, 486)
+      if (photo && photo.width > 0 && photo.height > 0) {
+        const scale = Math.max(956 / photo.width, 486 / photo.height)
+        const dw = photo.width * scale
+        const dh = photo.height * scale
+        const dx = 42 + (956 - dw) * 0.5
+        const dy = 42 + (486 - dh) * 0.5
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(42, 42, 956, 486)
+        ctx.clip()
+        ctx.drawImage(photo, dx, dy, dw, dh)
+        ctx.restore()
+      }
+
+      ctx.fillStyle = '#472a15'
+      ctx.font = 'bold 28px "Songti SC", "Noto Serif SC", serif'
+      ctx.fillText('今晚，亮一盏灯 · ' + dormName, 48, 578)
+      ctx.fillStyle = '#6c4829'
+      ctx.font = '18px "PingFang SC", "Microsoft YaHei", sans-serif'
+      ctx.fillText(`${seasonName} · ${weatherName} · 守夜人「${nickname}」 · 共亮 ${litCount}/${totalWindows} 扇暖窗`, 48, 616)
+      ctx.fillStyle = '#8b6138'
+      ctx.font = 'italic 16px "Songti SC", "Noto Serif SC", serif'
+      ctx.fillText('“总有一扇为你留着的微光，陪你走过今晚的校园星夜。” — ' + stampDate, 48, 654)
+
+      ctx.save()
+      ctx.translate(930, 608)
+      ctx.rotate(-0.14)
+      ctx.strokeStyle = 'rgba(176, 66, 48, 0.86)'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(0, 0, 44, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = 'rgba(176, 66, 48, 0.88)'
+      ctx.font = 'bold 14px "Songti SC", serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('夜巡纪念', 0, -4)
+      ctx.font = '12px sans-serif'
+      ctx.fillText('LIGHT A WINDOW', 0, 16)
+      ctx.restore()
+    }
+
+    if (imageDataUrl) {
+      const img = new Image()
+      img.onload = () => renderCard(img)
+      img.onerror = () => renderCard(null)
+      img.src = imageDataUrl
+    } else {
+      renderCard(null)
+    }
+
+    qs(s, '[data-act="save-postcard"]').onclick = () => {
+      const link = document.createElement('a')
+      link.download = `light-a-window-${Date.now()}.png`
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    }
+    qs(s, '[data-act="close-postcard"]').onclick = () => {
+      this.hideAll()
+      if (onClose) onClose()
     }
   }
 

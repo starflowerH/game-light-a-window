@@ -26,7 +26,9 @@ export const PainterlyShader = {
     uTiltShiftAmount: { value: 0.55 },
     uTiltShiftCenter: { value: 0.46 },
     uTiltShiftRange: { value: 0.24 },
-    uFastMode: { value: 0.0 }
+    uFastMode: { value: 0.0 },
+    uExposure: { value: 1.18 },
+    uOutputToScreen: { value: 1.0 }
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -54,6 +56,40 @@ export const PainterlyShader = {
     uniform float uTiltShiftCenter;
     uniform float uTiltShiftRange;
     uniform float uFastMode;
+    uniform float uExposure;
+    uniform float uOutputToScreen;
+
+    vec3 rrtAndOdtFit(vec3 v) {
+      vec3 a = v * (v + 0.0245786) - 0.000090537;
+      vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+      return a / b;
+    }
+
+    vec3 acesFilmicToneMap(vec3 color, float exposure) {
+      const mat3 ACESInputMat = mat3(
+        vec3(0.59719, 0.07600, 0.02840),
+        vec3(0.35458, 0.90834, 0.13383),
+        vec3(0.04823, 0.01566, 0.83777)
+      );
+      const mat3 ACESOutputMat = mat3(
+        vec3( 1.60475, -0.10208, -0.00327),
+        vec3(-0.53108,  1.10813, -0.07276),
+        vec3(-0.07367, -0.00605,  1.07602)
+      );
+      color *= exposure / 0.6;
+      color = ACESInputMat * color;
+      color = rrtAndOdtFit(color);
+      color = ACESOutputMat * color;
+      return clamp(color, 0.0, 1.0);
+    }
+
+    vec3 linearToSRGBExact(vec3 rgb) {
+      return mix(
+        pow(max(rgb, vec3(0.0)), vec3(0.41666)) * 1.055 - vec3(0.055),
+        rgb * 12.92,
+        vec3(lessThanEqual(rgb, vec3(0.0031308)))
+      );
+    }
 
     const vec3 INK_COLD = vec3(0.0784, 0.0941, 0.1804); // #14182e deep ultramarine
     const vec3 INK_WARM = vec3(0.2196, 0.1333, 0.0784); // #382214 warm burnt tea
@@ -138,32 +174,55 @@ export const PainterlyShader = {
       float gFine;
       float gBroad;
       float nPeak;
+      float mAvgLum;
 
       if (uFastMode > 0.5) {
-        // Directional oil-brush gouache filter (5 texel reads, 0 extra bandwidth)
+        // Directional structure-aware oil-brush filter (7 taps)
         vec3 c01 = texture2D(tDiffuse, uv - vec2(stepK.x, 0.0)).rgb;
         vec3 c21 = texture2D(tDiffuse, uv + vec2(stepK.x, 0.0)).rgb;
         vec3 c10 = texture2D(tDiffuse, uv - vec2(0.0, stepK.y)).rgb;
         vec3 c12 = texture2D(tDiffuse, uv + vec2(0.0, stepK.y)).rgb;
 
         float l01 = lum(c01), l21 = lum(c21), l10 = lum(c10), l12 = lum(c12);
-        gFine = length(vec2(l21 - l01, l12 - l10));
+        float gx = l21 - l01;
+        float gy = l12 - l10;
+        gFine = length(vec2(gx, gy));
         gBroad = gFine * 0.85;
         nPeak = max(max(l01, l21), max(l10, l12));
+        mAvgLum = (l01 + l21 + l10 + l12) * 0.25;
+
+        vec2 tangent = gFine > 0.015 ? normalize(vec2(-gy, gx) + vec2(1e-5, 0.0)) : vec2(1.0, 0.0);
+        vec3 cTanA = texture2D(tDiffuse, uv - tangent * stepK * 1.35).rgb;
+        vec3 cTanB = texture2D(tDiffuse, uv + tangent * stepK * 1.35).rgb;
+        vec3 strokeDir = (cTanA + c11 + cTanB) / 3.0;
         float varH = dot(abs(c21 - c01), vec3(1.0));
         float varV = dot(abs(c12 - c10), vec3(1.0));
-        vec3 strokePair = varH < varV ? (c01 + c11 + c21) / 3.0 : (c10 + c11 + c12) / 3.0;
-        paint = mix(c11, strokePair, 0.78 * (1.0 - smoothstep(0.20, 0.58, gFine)));
+        vec3 strokeAxis = varH < varV ? (c01 + c11 + c21) / 3.0 : (c10 + c11 + c12) / 3.0;
+        vec3 bestStroke = mix(strokeAxis, strokeDir, smoothstep(0.02, 0.16, gFine));
+        paint = mix(c11, bestStroke, 0.80 * (1.0 - smoothstep(0.22, 0.60, gFine)));
       } else {
-        // Exact 4-sector 2x2 Kuwahara & Sobel fused into 9 shared taps (8 reads + center)
-        vec3 c00 = texture2D(tDiffuse, uv + vec2(-stepK.x, -stepK.y)).rgb;
-        vec3 c10 = texture2D(tDiffuse, uv + vec2(0.0,      -stepK.y)).rgb;
-        vec3 c20 = texture2D(tDiffuse, uv + vec2( stepK.x, -stepK.y)).rgb;
-        vec3 c01 = texture2D(tDiffuse, uv + vec2(-stepK.x,  0.0)).rgb;
-        vec3 c21 = texture2D(tDiffuse, uv + vec2( stepK.x,  0.0)).rgb;
-        vec3 c02 = texture2D(tDiffuse, uv + vec2(-stepK.x,  stepK.y)).rgb;
-        vec3 c12 = texture2D(tDiffuse, uv + vec2(0.0,       stepK.y)).rgb;
-        vec3 c22 = texture2D(tDiffuse, uv + vec2( stepK.x,  stepK.y)).rgb;
+        // Structure-tensor oriented Anisotropic 2x2 Kuwahara & Sobel
+        float lL = lum(texture2D(tDiffuse, uv - vec2(stepK.x * 0.78, 0.0)).rgb);
+        float lR = lum(texture2D(tDiffuse, uv + vec2(stepK.x * 0.78, 0.0)).rgb);
+        float lD = lum(texture2D(tDiffuse, uv - vec2(0.0, stepK.y * 0.78)).rgb);
+        float lU = lum(texture2D(tDiffuse, uv + vec2(0.0, stepK.y * 0.78)).rgb);
+        float gx0 = lR - lL;
+        float gy0 = lU - lD;
+        float gBase = length(vec2(gx0, gy0));
+        vec2 rawTan = gBase > 0.01 ? normalize(vec2(-gy0, gx0) + vec2(1e-5, 0.0)) : vec2(1.0, 0.0);
+        vec2 tangent = normalize(mix(vec2(1.0, 0.0), rawTan, smoothstep(0.015, 0.09, gBase)));
+        vec2 normal = vec2(-tangent.y, tangent.x);
+
+        #define KUW_UV(ox, oy) (uv + (tangent * ((ox) * 1.35) + normal * ((oy) * 0.80)) * stepK)
+        vec3 c00 = texture2D(tDiffuse, KUW_UV(-1.0, -1.0)).rgb;
+        vec3 c10 = texture2D(tDiffuse, KUW_UV( 0.0, -1.0)).rgb;
+        vec3 c20 = texture2D(tDiffuse, KUW_UV( 1.0, -1.0)).rgb;
+        vec3 c01 = texture2D(tDiffuse, KUW_UV(-1.0,  0.0)).rgb;
+        vec3 c21 = texture2D(tDiffuse, KUW_UV( 1.0,  0.0)).rgb;
+        vec3 c02 = texture2D(tDiffuse, KUW_UV(-1.0,  1.0)).rgb;
+        vec3 c12 = texture2D(tDiffuse, KUW_UV( 0.0,  1.0)).rgb;
+        vec3 c22 = texture2D(tDiffuse, KUW_UV( 1.0,  1.0)).rgb;
+        #undef KUW_UV
 
         vec3 m0 = (c00 + c10 + c01 + c11) * 0.25;
         vec3 m1 = (c10 + c20 + c11 + c21) * 0.25;
@@ -185,6 +244,8 @@ export const PainterlyShader = {
         if (v1 < minVar) { minVar = v1; paint = m1; }
         if (v2 < minVar) { minVar = v2; paint = m2; }
         if (v3 < minVar) { paint = m3; }
+
+        mAvgLum = lum((m0 + m1 + m2 + m3) * 0.25);
 
         float l00 = lum(c00), l20 = lum(c20), l02 = lum(c02), l22 = lum(c22);
         float l01 = lum(c01), l21 = lum(c21), l10 = lum(c10), l12 = lum(c12);
@@ -245,6 +306,10 @@ export const PainterlyShader = {
       paint *= 1.0 - pool * 0.11;
 
       vec3 col = mix(baseCol, paint, clamp(strength, 0.0, 1.0));
+
+      // ---- screen-space contact micro-AO for grounded eaves & plinths ----
+      float valley = clamp((mAvgLum - baseLum) * 2.4, 0.0, 1.0) * (1.0 - smoothstep(0.50, 0.88, baseLum));
+      col *= 1.0 - valley * 0.22;
 
       // ---- healing split-toning: soft indigo shadows & golden highlights ----
       float splitL = lum(col);
@@ -309,7 +374,11 @@ export const PainterlyShader = {
         col = mix(col, wet, clamp(dropMask, 0.0, 1.0) * clamp(uRainAmount, 0.0, 1.0) * 0.85);
       }
 
-      gl_FragColor = vec4(max(col, vec3(0.0)), 1.0);
+      col = max(col, vec3(0.0));
+      if (uOutputToScreen > 0.5) {
+        col = linearToSRGBExact(acesFilmicToneMap(col, uExposure));
+      }
+      gl_FragColor = vec4(col, 1.0);
     }
   `
 }
@@ -320,6 +389,8 @@ export function createPainterlyPass() {
   pass.material.uniforms.uRainAmount.value = 0
   pass.material.uniforms.uDawn.value = 0
   pass.material.uniforms.uComboVignette.value = 0
+  pass.material.uniforms.uExposure.value = 1.18
+  pass.material.uniforms.uOutputToScreen.value = 1.0
   return pass
 }
 

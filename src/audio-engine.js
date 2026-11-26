@@ -485,7 +485,14 @@ export class AudioEngine {
     else if (id === 406) this._chimes(t)
     else if (id === 102) this._clink(t)
     else if (id === 203) this._scratch(t)
-    else this._marimba(SCALE[2] * 2, t, 0.06, 0)
+    else {
+      const safeId = Number.isFinite(id) ? id : 103
+      const row = Math.max(0, Math.floor(safeId / 100))
+      const col = Math.max(0, ((safeId % 100) || 3) - 1)
+      const pan = Math.max(-0.65, Math.min(0.65, (col - 2.5) * 0.24))
+      const note = SCALE[(row + col) % SCALE.length] * 2
+      this._marimba(note, t, 0.065, pan)
+    }
   }
 
   resonance() {

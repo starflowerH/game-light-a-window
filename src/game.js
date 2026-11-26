@@ -34,8 +34,8 @@ import {
   LIT_RETAP_GAIN, DARK_TAP_GAIN, DARK_TAP_WAKE_CHANCE,
   STORY_BEACON_SCHEDULE, RESONANCE_SCHEDULE,
   EVOLVE_AT_S, CORE_RESIDENT_ROOMS, CAMERA_VIEW_IDS,
-  BGM_TRACKS, adaptCommissionsForDorm, adaptResonancePairForDorm,
-  dormDef, gameModeDef, endingMeta
+  BGM_TRACKS, WEATHER_CATALOG, adaptCommissionsForDorm, adaptResonancePairForDorm,
+  dormDef, gameModeDef, endingMeta, seasonDef
 } from '../shared/constants.js'
 import { evaluateRunTier } from '../shared/ranks.js'
 import { RESIDENT_BY_ROOM, chapterMeta } from './narrative-graph.js'
@@ -100,6 +100,9 @@ export class Game {
     this._raf = 0
     this._coachRaf = 0
     this._pausedAt = 0
+    /** @type {any} */
+    this._tourTimer = null
+    this._tourIndex = 0
     this.orbitLocked = false
     this._choiceOpen = false
     this._choicePausedAt = 0
@@ -235,7 +238,7 @@ export class Game {
     this.ui.showLoading('正在载入 3D 校园星夜与宿舍楼群')
     await Promise.race([
       this.scene.ready,
-      new Promise(r => setTimeout(r, 2200))
+      new Promise(r => setTimeout(r, 650))
     ])
     if (this.scene.setQualityMode) this.scene.setQualityMode(this.qualityMode)
     this.scene.setSeason(this.season)
@@ -244,7 +247,7 @@ export class Game {
 
     const cloud = await Promise.race([
       bootstrapProfile({ uid: this.records.uid, passCode: this.records.passCode }),
-      new Promise(r => setTimeout(() => r(null), 1600))
+      new Promise(r => setTimeout(() => r(null), 900))
     ])
     if (cloud) {
       this.records = mergeRunAdopted(this.records, cloud.player)
@@ -309,6 +312,7 @@ export class Game {
   }
 
   showTitle() {
+    this.stopScenicTour()
     this._clearMinigame()
     this.state = 'title'
     if (this.audio) this.audio.setSceneContext('title')
@@ -432,13 +436,86 @@ export class Game {
       onNpcGallery: () => this.openNpcGallery(() => this.showHub()),
       onLeaderboard: () => this.openLeaderboard(() => this.showHub()),
       onCollection: () => this.ui.showCollection({ records: this.records, onClose: () => this.showHub() }),
-      onKeyConfig: () => this.ui.showKeyDialog({
-        status: getUserApiKeyStatus(),
-        onVerify: (key, base) => this.verifyKey(key, base),
-        onClose: () => this.showHub()
-      }),
+      onKeyConfig: () => {
+        this.stopScenicTour()
+        this.ui.showKeyDialog({
+          status: getUserApiKeyStatus(),
+          onVerify: (key, base) => this.verifyKey(key, base),
+          onClose: () => this.showHub()
+        })
+      },
+      tourActive: Boolean(this._tourTimer),
+      onToggleTour: () => this.toggleScenicTour(),
+      onPostcard: () => this.openPostcard(),
       onDocs: tab => this.openDocs(tab, () => this.showHub()),
       onTitle: () => this.showTitle()
+    })
+  }
+
+  stopScenicTour() {
+    if (this._tourTimer) {
+      clearInterval(this._tourTimer)
+      this._tourTimer = null
+    }
+  }
+
+  _applyScenicTourStep(stepIndex) {
+    const TOUR_STEPS = [
+      { season: 'spring', weather: 'light_rain', view: 'stardew', title: '春樱微雨 · 宿舍暖灯轻落雨丝', desc: 'Cherry Rain · 油画雨滴折射窗光' },
+      { season: 'summer', weather: 'clear', view: 'street', title: '夏夜流萤 · 莲池月色与街头锦鲤', desc: 'Firefly Pond · 焦散波纹与夜风芦苇' },
+      { season: 'autumn', weather: 'wind', view: 'stardew', title: '秋暮银杏 · 晚风拂过红砖飞檐', desc: 'Golden Autumn · 吉卜力逆光叶冠' },
+      { season: 'winter', weather: 'snow', view: 'rooftop', title: '冬雪暖檐 · 橘猫守望满楼灯火', desc: 'Snowy Rooftop · 暮雪屋脊与暖炉光晕' }
+    ]
+    const step = TOUR_STEPS[stepIndex % TOUR_STEPS.length]
+    this.season = step.season
+    this.weather = step.weather
+    this.viewId = step.view
+    this.scene.setSeason(step.season)
+    this.scene.setWeatherFx(step.weather)
+    this.scene.setCameraView(step.view, false)
+    if (this.audio) this.audio.setWeather(step.weather)
+    this.ui.toast(step.title, step.desc)
+    if (this.state === 'hub') this.showHub()
+  }
+
+  toggleScenicTour() {
+    if (this.audio) this.audio.unlock()
+    if (this._tourTimer) {
+      this.stopScenicTour()
+      this.ui.toast('✨ 已结束四季巡礼', '可继续自由拖拽赏景或选择模式开始巡查')
+      if (this.state === 'hub') this.showHub()
+      return
+    }
+    this._tourIndex = 0
+    this._tourTimer = setInterval(() => {
+      if (this.state !== 'hub') {
+        this.stopScenicTour()
+        return
+      }
+      this._tourIndex = (this._tourIndex + 1) % 4
+      this._applyScenicTourStep(this._tourIndex)
+    }, 3200)
+    this._applyScenicTourStep(0)
+  }
+
+  openPostcard() {
+    if (this.audio) this.audio.unlock()
+    this.stopScenicTour()
+    const snapshot = typeof this.scene.captureSnapshotDataUrl === 'function'
+      ? this.scene.captureSnapshotDataUrl()
+      : ''
+    const dorm = dormDef(this.dormId)
+    const season = seasonDef(this.season)
+    const weatherMeta = WEATHER_CATALOG.find(w => w.id === this.weather) || WEATHER_CATALOG[0]
+    this.ui.showPostcardModal({
+      imageDataUrl: snapshot,
+      dormName: dorm.name,
+      seasonName: season.name,
+      weatherName: weatherMeta.name,
+      nickname: this.nickname,
+      litCount: this.scene.lit || 0,
+      totalWindows: dorm.windowCount || 24,
+      onClose: () => { if (this.state === 'hub') this.showHub() }
     })
   }
 
@@ -449,6 +526,7 @@ export class Game {
    */
   openDocs(initialTab = 'overview', onReturn = () => this.showTitle()) {
     if (this.audio) this.audio.unlock()
+    this.stopScenicTour()
     this.ui.showDocsModal({
       initialTab,
       onClose: onReturn,
@@ -530,6 +608,7 @@ export class Game {
 
   launchGame(modeId) {
     if (this.audio) this.audio.unlock()
+    this.stopScenicTour()
     this.gameMode = modeId || this.gameMode
     this.records.preferredMode = this.gameMode
     saveRecords(this.records)
@@ -1281,6 +1360,7 @@ export class Game {
 
   async start() {
     if (this.audio) this.audio.unlock()
+    this.stopScenicTour()
     this._clearMinigame()
     this.state = 'prologue'
     this.scene.setFlyover(false)
