@@ -140,7 +140,7 @@ export const PainterlyShader = {
       float nPeak;
 
       if (uFastMode > 0.5) {
-        // High-60fps 5-tap cross (4 reads + center = 5 total texel reads)
+        // Directional oil-brush gouache filter (5 texel reads, 0 extra bandwidth)
         vec3 c01 = texture2D(tDiffuse, uv - vec2(stepK.x, 0.0)).rgb;
         vec3 c21 = texture2D(tDiffuse, uv + vec2(stepK.x, 0.0)).rgb;
         vec3 c10 = texture2D(tDiffuse, uv - vec2(0.0, stepK.y)).rgb;
@@ -150,8 +150,10 @@ export const PainterlyShader = {
         gFine = length(vec2(l21 - l01, l12 - l10));
         gBroad = gFine * 0.85;
         nPeak = max(max(l01, l21), max(l10, l12));
-        vec3 crossAvg = (c11 + c01 + c21 + c10 + c12) * 0.2;
-        paint = mix(c11, crossAvg, 0.65 * (1.0 - smoothstep(0.18, 0.55, gFine)));
+        float varH = dot(abs(c21 - c01), vec3(1.0));
+        float varV = dot(abs(c12 - c10), vec3(1.0));
+        vec3 strokePair = varH < varV ? (c01 + c11 + c21) / 3.0 : (c10 + c11 + c12) / 3.0;
+        paint = mix(c11, strokePair, 0.78 * (1.0 - smoothstep(0.20, 0.58, gFine)));
       } else {
         // Exact 4-sector 2x2 Kuwahara & Sobel fused into 9 shared taps (8 reads + center)
         vec3 c00 = texture2D(tDiffuse, uv + vec2(-stepK.x, -stepK.y)).rgb;
@@ -191,20 +193,20 @@ export const PainterlyShader = {
         nPeak = max(max(l01, l21), max(l10, l12));
       }
 
-      // ---- 2. hand-wobbled ink & gold rim ------------------------------
-      float edgeFine = smoothstep(0.16, 0.45, gFine);
-      float edgeBroad = smoothstep(0.16, 0.45, gBroad);
+      // ---- 2. gentle warm sepia-pencil contour & sunlit gold rim ---------
+      float edgeFine = smoothstep(0.20, 0.50, gFine);
+      float edgeBroad = smoothstep(0.20, 0.50, gBroad);
 
       // dry-brush break-up: single vnoise pass saves ~70% ALU noise cost
       float inkNoise = vnoise(uv * 26.0);
-      float inkAmt = clamp(max(edgeFine * 0.86, edgeBroad * 0.68) * (0.58 + 0.8 * inkNoise), 0.0, 1.0);
-      inkAmt *= 1.0 - smoothstep(0.72, 0.95, baseLum);
+      float inkAmt = clamp(max(edgeFine * 0.72, edgeBroad * 0.58) * (0.55 + 0.75 * inkNoise), 0.0, 1.0);
+      inkAmt *= 1.0 - smoothstep(0.68, 0.94, baseLum);
 
-      float warmth = clamp((baseCol.r - baseCol.b) * 2.6 + 0.42, 0.0, 1.0);
-      vec3 inkCol = mix(INK_COLD, INK_WARM, warmth);
+      float warmth = clamp((baseCol.r - baseCol.b) * 2.6 + 0.48, 0.0, 1.0);
+      vec3 inkCol = mix(INK_COLD * 1.15, INK_WARM * 1.25, warmth);
       float rimBand = smoothstep(0.46, 0.80, nPeak) * (1.0 - smoothstep(0.90, 1.0, nPeak));
-      inkCol = mix(inkCol, INK_GOLD, rimBand * (0.22 + 0.40 * edgeFine));
-      paint = mix(paint, inkCol, inkAmt * 0.85);
+      inkCol = mix(inkCol, INK_GOLD, rimBand * (0.28 + 0.44 * edgeFine));
+      paint = mix(paint, inkCol, inkAmt * 0.68);
 
       // ---- 3. analytic impasto relief on the linen canvas --------------
       float fibre = vnoise(uv * (160.0 * paperScale));
@@ -222,33 +224,34 @@ export const PainterlyShader = {
       vec3 Lg = normalize(STUDIO_LIGHT);
       float ndl = dot(N, Lg);
       float tooth = 1.0 - 0.55 * smoothstep(0.55, 0.95, lum(paint));
-      paint *= 1.0 + (ndl - 0.5025) * 0.20 * tooth;
+      paint *= 1.0 + (ndl - 0.5025) * 0.24 * tooth;
 
       vec3 Hv = normalize(Lg + vec3(0.0, 0.0, 1.0));
       float ridge = 0.25 + 0.75 * smoothstep(0.05, 0.95, h0);
       float spec = max(pow(max(dot(N, Hv), 0.0), 40.0) - 0.006, 0.0) * ridge;
-      paint += vec3(1.0, 0.93, 0.80) * spec * (0.05 + 0.26 * smoothstep(0.15, 0.85, lum(paint)));
+      paint += vec3(1.0, 0.93, 0.80) * spec * (0.06 + 0.28 * smoothstep(0.15, 0.85, lum(paint)));
 
-      // warm gouache paper undertone
+      // warm gouache paper undertone & candlelight honey wash
       float paperTone = fbmPaper(uv * (3.2 * paperScale) + vec2(time * 0.006, 0.0));
-      vec3 creamPaper = vec3(0.93, 0.86, 0.71);
-      vec3 parchment = vec3(0.40, 0.41, 0.49);
-      vec3 under = mix(parchment, creamPaper, 0.35 + 0.5 * paperTone) * 0.55 + tint * 0.45;
-      float shade = 1.0 - smoothstep(0.02, 0.42, lum(paint));
-      paint += under * 0.085 * shade;
+      vec3 creamPaper = vec3(0.96, 0.89, 0.74);
+      vec3 parchment = vec3(0.45, 0.43, 0.52);
+      vec3 under = mix(parchment, creamPaper, 0.42 + 0.50 * paperTone) * 0.58 + tint * 0.42;
+      float shade = 1.0 - smoothstep(0.02, 0.48, lum(paint));
+      paint += under * 0.115 * shade;
+      paint += vec3(0.14, 0.08, 0.02) * smoothstep(0.45, 0.95, warmth) * 0.22;
 
       // watercolour pooling
       float pool = smoothstep(0.05, 0.20, max(gFine, gBroad)) * (1.0 - inkAmt);
-      paint *= 1.0 - pool * 0.13;
+      paint *= 1.0 - pool * 0.11;
 
       vec3 col = mix(baseCol, paint, clamp(strength, 0.0, 1.0));
 
-      // ---- cinematic split-toning: ultramarine shadows & warm highlights ----
+      // ---- healing split-toning: soft indigo shadows & golden highlights ----
       float splitL = lum(col);
-      vec3 shadowTint = mix(vec3(0.08, 0.10, 0.22), vec3(0.14, 0.18, 0.28), uDawn);
-      vec3 highlightTint = mix(vec3(1.0, 0.88, 0.70), vec3(1.05, 0.92, 0.82), uDawn);
-      vec3 graded = mix(col * shadowTint * 2.2, col * highlightTint, smoothstep(0.18, 0.75, splitL));
-      col = mix(col, graded, 0.28);
+      vec3 shadowTint = mix(vec3(0.11, 0.12, 0.24), vec3(0.16, 0.19, 0.29), uDawn);
+      vec3 highlightTint = mix(vec3(1.02, 0.91, 0.73), vec3(1.06, 0.93, 0.82), uDawn);
+      vec3 graded = mix(col * shadowTint * 2.1, col * highlightTint, smoothstep(0.16, 0.76, splitL));
+      col = mix(col, graded, 0.30);
 
       // ---- combo-driven vignette contraction ----------------------------
       if (uComboVignette > 0.001) {
@@ -329,11 +332,11 @@ export function setPainterlyStyle(pass, mode = 'stardew') {
   if (!pass?.material?.uniforms) return
   const u = pass.material.uniforms
   if (mode === 'oil') {
-    u.strength.value = 0.55
+    u.strength.value = 0.62
     u.uKuwaharaRadius.value = 2.4
   } else {
-    u.strength.value = 0.40
-    u.uKuwaharaRadius.value = 0.95
+    u.strength.value = 0.50
+    u.uKuwaharaRadius.value = 1.32
   }
 }
 

@@ -244,37 +244,69 @@ function windowTexture(S, state, warmHex, silhouette, variant) {
 }
 
 function rooftopSvg() {
-  const W = 2048, H = 300
+  const W = 4096, H = 360
   const c = document.createElement('canvas'); c.width = W; c.height = H
   const g = c.getContext('2d')
   g.clearRect(0, 0, W, H)
-  let x = 0
-  while (x < W) {
-    const w = 90 + Math.random() * 190
-    const h = 70 + Math.random() * 140
-    const base = H - 30
-    g.fillStyle = 'rgba(11,17,38,0.9)'
+
+  // Soft distant hillside tree line silhouette behind town gables
+  g.fillStyle = 'rgba(18, 28, 44, 0.85)'
+  g.beginPath()
+  g.moveTo(0, H)
+  for (let px = 0; px <= W; px += 32) {
+    const hillY = H - 96 - Math.sin(px * 0.0045) * 32 - Math.cos(px * 0.011) * 18 - (px % 96 === 0 ? 18 : 6)
+    g.lineTo(px, hillY)
+  }
+  g.lineTo(W, H)
+  g.closePath()
+  g.fill()
+
+  let x = 24
+  let idx = 0
+  while (x < W - 40) {
+    const isTower = idx % 9 === 4
+    const w = isTower ? 76 + Math.random() * 28 : 96 + Math.random() * 145
+    const h = isTower ? 185 + Math.random() * 45 : 74 + Math.random() * 108
+    const base = H - 24
+    g.fillStyle = isTower ? 'rgba(20, 26, 48, 0.96)' : (idx % 2 === 0 ? 'rgba(16, 22, 42, 0.94)' : 'rgba(22, 26, 46, 0.92)')
     g.fillRect(x, base - h, w, h)
-    const kind = Math.random()
+    // Pitched roof / spire / dormer silhouettes
     g.beginPath()
-    if (kind < 0.4) { g.moveTo(x - 5, base - h); g.lineTo(x + w * 0.5, base - h - 26 - Math.random() * 18); g.lineTo(x + w + 5, base - h) }
-    else if (kind < 0.7) g.rect(x - 5, base - h - 14, w + 10, 14)
-    else g.rect(x + w * 0.2, base - h - 20, w * 0.6, 20)
+    if (isTower) {
+      g.moveTo(x - 6, base - h)
+      g.lineTo(x + w * 0.5, base - h - 68)
+      g.lineTo(x + w + 6, base - h)
+    } else if (idx % 3 === 0) {
+      g.moveTo(x - 6, base - h)
+      g.lineTo(x + w * 0.5, base - h - 28 - Math.random() * 16)
+      g.lineTo(x + w + 6, base - h)
+    } else {
+      g.rect(x - 4, base - h - 12, w + 8, 12)
+      g.rect(x + w * 0.16, base - h - 24, 14, 18)
+    }
     g.fill()
-    for (let ry = 0; ry < h - 20; ry += 16) {
-      for (let rx = 8; rx < w - 8; rx += 14) {
-        if (Math.random() > 0.62) {
-          g.fillStyle = 'rgba(255,205,130,' + (0.25 + Math.random() * 0.4) + ')'
-          g.fillRect(x + rx, base - h + 10 + ry, 5, 7)
+    // Clockface or warm amber house windows
+    if (isTower) {
+      g.fillStyle = 'rgba(255, 222, 152, 0.85)'
+      g.beginPath()
+      g.arc(x + w * 0.5, base - h + 26, 13, 0, Math.PI * 2)
+      g.fill()
+    }
+    for (let ry = 18; ry < h - 22; ry += 18) {
+      for (let rx = 12; rx < w - 12; rx += 16) {
+        if (Math.random() > 0.58) {
+          g.fillStyle = 'rgba(255, 206, 126, ' + (0.34 + Math.random() * 0.45) + ')'
+          g.fillRect(x + rx, base - h + ry, 6, 9)
         }
       }
     }
-    x += w + 18 + Math.random() * 44
+    x += w + 12 + Math.random() * 34
+    idx += 1
   }
-  const gg = g.createLinearGradient(0, H - 70, 0, H)
-  gg.addColorStop(0, 'rgba(11,17,38,0)')
-  gg.addColorStop(1, 'rgba(11,17,38,0.95)')
-  g.fillStyle = gg; g.fillRect(0, H - 70, W, 70)
+  const gg = g.createLinearGradient(0, H - 85, 0, H)
+  gg.addColorStop(0, 'rgba(14, 22, 34, 0)')
+  gg.addColorStop(1, 'rgba(14, 22, 34, 0.96)')
+  g.fillStyle = gg; g.fillRect(0, H - 85, W, 85)
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = THREE.SRGBColorSpace
   return t
@@ -570,7 +602,7 @@ export class Scene {
 
     this.scene = new THREE.Scene()
     this.scene.fog = new THREE.FogExp2(0x1b2b4d, 0.00017)
-    this.camera = new THREE.PerspectiveCamera(41, 1, 5.0, 4200)
+    this.camera = new THREE.PerspectiveCamera(41, 1, 5.0, 7600)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
@@ -637,6 +669,7 @@ export class Scene {
     this._buildSky()
     this._buildStars()
     this._buildMoon()
+    this._buildClouds()
     this._buildMountains()
     this._buildGround()
     this._buildVolumetricFog()
@@ -745,10 +778,10 @@ export class Scene {
       if (texSet && mat.isMeshStandardMaterial) {
         mat.map = texSet.map
         mat.normalMap = texSet.normalMap
-        mat.normalScale = new THREE.Vector2(0.75, 0.75)
+        mat.normalScale = new THREE.Vector2(0.36, 0.36)
         // Brighten albedo multiplier when vertex colors & diffuse texture combine
         if (mat.color) mat.color.lerp(new THREE.Color(0xffffff), 0.78)
-        mat.roughness = Math.max(0.55, mat.roughness || 0.8)
+        mat.roughness = Math.max(0.58, mat.roughness || 0.82)
         mat.needsUpdate = true
       }
 
@@ -796,7 +829,7 @@ export class Scene {
     this.groundsRoot = sceneClone.clone(true)
     this._styleGlbHierarchy(this.groundsRoot, true)
     this.groundsGroup.add(this.groundsRoot)
-    // Add crisp additive glow halos over the 4 foreground boulevard lamps
+    // Add crisp additive glow halos over the 4 foreground boulevard lamps + garden pavilion & bridge lanterns
     this.aveLampHalos = []
     for (const lx of [-12.2, 12.2, -26.0, 26.0]) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -805,10 +838,29 @@ export class Scene {
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        opacity: 0.42
+        opacity: 0.44
       }))
       sp.position.set(lx * DORM_SCALE, BASE_Y + 4.86 * DORM_SCALE, 7.92 * DORM_SCALE)
-      sp.scale.setScalar(74)
+      sp.scale.setScalar(76)
+      this.groundsGroup.add(sp)
+      this.aveLampHalos.push(sp)
+    }
+    for (const [gx, gy, gz, sc] of [
+      [-19.5, 3.25, -0.5, 68],
+      [16.8, 1.55, 1.6, 52],
+      [22.2, 1.55, 1.6, 52],
+      [-19.5, 14.2, -17.5, 64]
+    ]) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: softDot('rgba(255,210,128,1)', 128),
+        color: 0xffc66e,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.36
+      }))
+      sp.position.set(gx * DORM_SCALE, BASE_Y + gy * DORM_SCALE, gz * DORM_SCALE)
+      sp.scale.setScalar(sc)
       this.groundsGroup.add(sp)
       this.aveLampHalos.push(sp)
     }
@@ -1134,8 +1186,8 @@ export class Scene {
 
     if (this.painterly) {
       const u = this.painterly.material.uniforms
-      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.35 : 0.40
-      u.uKuwaharaRadius.value = level >= 3 ? 0.95 : level === 2 ? 0.75 : 0.60
+      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.42 : level === 2 ? 0.50 : 0.54
+      u.uKuwaharaRadius.value = level >= 3 ? 1.40 : level === 2 ? 1.15 : 0.90
       if (u.uFastMode) u.uFastMode.value = level <= 2 ? 1.0 : 0.0
     }
 
@@ -1563,7 +1615,9 @@ export class Scene {
       fragmentShader: 'varying vec3 vP; uniform vec3 top; uniform vec3 mid; uniform vec3 bot;\n' +
         'void main(){ float h = normalize(vP).y; vec3 c = h > 0.0 ? mix(mid, top, pow(clamp(h,0.0,1.0),0.7)) : mix(mid, bot, clamp(-h*2.2,0.0,1.0)); gl_FragColor = vec4(c,1.0); }'
     })
-    this.sky = new THREE.Mesh(new THREE.SphereGeometry(3200, 32, 16), this.skyMat)
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(3200, 40, 20), this.skyMat)
+    this.sky.frustumCulled = false
+    this.sky.renderOrder = -10
     this.scene.add(this.sky)
   }
 
@@ -1611,43 +1665,140 @@ export class Scene {
     this.scene.add(this.moonGroup)
   }
 
-  _buildMountains() {
-    const make = (color, y, z, scale) => {
-      const seg = 90, W = 2800
-      const pos = [-W, -200, 0]
-      for (let i = 0; i <= seg; i++) {
-        const x = -W + (i / seg) * W * 2
-        const h = 40 + Math.sin(i * 0.22) * 22 + Math.sin(i * 0.08) * 40 + Math.sin(i * 0.5) * 8
-        pos.push(x, h, 0)
+  _buildClouds() {
+    this.cloudsGroup = new THREE.Group()
+    const mkCloudTex = () => {
+      const c = document.createElement('canvas')
+      c.width = 512; c.height = 160
+      const g = c.getContext('2d')
+      if (g) {
+        g.clearRect(0, 0, 512, 160)
+        for (const [cx, cy, rx, ry, a] of [
+          [140, 96, 86, 36, 0.22],
+          [220, 74, 118, 46, 0.28],
+          [310, 82, 108, 42, 0.25],
+          [385, 100, 78, 32, 0.18],
+          [265, 92, 155, 34, 0.16]
+        ]) {
+          const gr = g.createRadialGradient(cx, cy, 4, cx, cy, rx)
+          gr.addColorStop(0, `rgba(255, 232, 198, ${a})`)
+          gr.addColorStop(0.55, `rgba(182, 198, 240, ${a * 0.55})`)
+          gr.addColorStop(1, 'rgba(120, 140, 196, 0)')
+          g.fillStyle = gr
+          g.beginPath()
+          g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+          g.fill()
+        }
       }
-      pos.push(W, -200, 0)
+      const tex = new THREE.CanvasTexture(c)
+      tex.colorSpace = THREE.SRGBColorSpace
+      return tex
+    }
+    this._cloudTex = mkCloudTex()
+    this._clouds = []
+    for (const [x, y, z, w, h, spd] of [
+      [-640, 290, -1350, 720, 210, 4.5],
+      [80, 355, -1480, 880, 240, 3.2],
+      [760, 275, -1280, 680, 195, 5.1],
+      [-980, 235, -1120, 620, 180, 3.8],
+      [390, 225, -1080, 580, 175, 4.2],
+      [-260, 410, -1580, 920, 250, 2.6]
+    ]) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, h),
+        new THREE.MeshBasicMaterial({ map: this._cloudTex, transparent: true, depthWrite: false, opacity: 0.72, fog: false })
+      )
+      m.position.set(x, y, z)
+      this.cloudsGroup.add(m)
+      this._clouds.push({ mesh: m, baseX: x, spd })
+    }
+    this.scene.add(this.cloudsGroup)
+  }
+
+  _buildMountains() {
+    const makeCurvedRange = (peakColHex, baseColHex, radius, baseY, amp, ridgeBias, pineSpikes = false) => {
+      const seg = 140
+      const startAng = Math.PI * 0.42
+      const spanAng = Math.PI * 1.16
+      const positions = []
+      const colors = []
+      const indices = []
+      const cPeak = new THREE.Color(peakColHex)
+      const cBase = new THREE.Color(baseColHex)
+
+      for (let i = 0; i <= seg; i++) {
+        const u = i / seg
+        const ang = startAng + u * spanAng
+        const x = Math.sin(ang) * radius
+        const z = 240 + Math.cos(ang) * radius
+        const ridge = ridgeBias +
+          Math.sin(i * 0.14 + radius * 0.01) * (amp * 0.48) +
+          Math.sin(i * 0.06 - 0.7) * (amp * 0.36) +
+          Math.cos(i * 0.33) * (amp * 0.16) +
+          (pineSpikes ? ((i % 2 === 0 ? 18 : 0) + Math.sin(i * 0.9) * 14) : 0)
+
+        // Bottom vertex at horizon baseline, top vertex at mountain crest
+        positions.push(x, baseY - 380, z)
+        colors.push(cBase.r, cBase.g, cBase.b)
+        positions.push(x, baseY + ridge, z)
+        colors.push(cPeak.r, cPeak.g, cPeak.b)
+      }
+
+      for (let i = 0; i < seg; i++) {
+        const b0 = i * 2
+        const t0 = i * 2 + 1
+        const b1 = (i + 1) * 2
+        const t1 = (i + 1) * 2 + 1
+        indices.push(b0, b1, t0, t0, b1, t1)
+      }
+
       const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, fog: false }))
-      m.position.set(0, y, z)
-      m.scale.set(scale, scale, 1)
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+      geo.setIndex(indices)
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: false })
+      const m = new THREE.Mesh(geo, mat)
       this.scene.add(m)
       return m
     }
-    this.mtnFar = make(0x1a2547, -120, -1550, 1.45)
-    this.mtnMid = make(0x121a33, -130, -1150, 1.05)
+
+    // 3 overlapping layered twilight mountain ridges curving seamlessly around horizon & flanks
+    this.mtnFar = makeCurvedRange(0x283663, 0x1e2c4f, 1950, -180, 210, 260, false)
+    this.mtnMid = makeCurvedRange(0x1b2848, 0x162238, 1580, -210, 165, 195, true)
+    this.mtnNear = makeCurvedRange(0x15252f, 0x142228, 1320, -230, 105, 135, true)
+
+    // Wide panoramic illuminated town + tree skyline arc behind and beside the campus
+    const arcGeo = new THREE.CylinderGeometry(1180, 1180, 350, 72, 1, true, Math.PI * 0.52, Math.PI * 0.96)
     this.farTown = new THREE.Mesh(
-      new THREE.PlaneGeometry(3800, 300),
-      new THREE.MeshBasicMaterial({ map: rooftopSvg(), transparent: true, depthWrite: false, opacity: 0.92 })
+      arcGeo,
+      new THREE.MeshBasicMaterial({ map: rooftopSvg(), transparent: true, depthWrite: false, side: THREE.BackSide, opacity: 0.94, fog: false })
     )
-    this.farTown.position.set(0, -95, -780)
+    this.farTown.position.set(0, -105, 220)
     this.scene.add(this.farTown)
   }
 
   _buildGround() {
-    // Extended horizon ground plate slightly beneath the GLB plate so panning never reveals void
-    const geo = new THREE.PlaneGeometry(4600, 3000, 1, 1)
+    // Seamless horizon meadow ground blending out to distant twilight haze
+    const geo = new THREE.PlaneGeometry(6400, 4400, 1, 1)
     this.groundMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false,
-      uniforms: { c1: { value: new THREE.Color(0x0d1630) }, c2: { value: new THREE.Color(0x2b3a5e) }, glow: { value: 0 }, wet: { value: 0 } },
+      uniforms: {
+        c1: { value: new THREE.Color(0x162820) },
+        c2: { value: new THREE.Color(0x1e2b44) },
+        glow: { value: 0 },
+        wet: { value: 0 }
+      },
       vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-      fragmentShader: 'varying vec2 vUv; uniform vec3 c1; uniform vec3 c2; uniform float glow; uniform float wet;\n' +
-        'void main(){ vec3 c = mix(c1, c2, smoothstep(0.0, 0.7, vUv.y)); c += vec3(0.45, 0.35, 0.20) * glow * 0.08; gl_FragColor = vec4(c, 1.0); }'
+      fragmentShader:
+        'varying vec2 vUv; uniform vec3 c1; uniform vec3 c2; uniform float glow; uniform float wet;\n' +
+        'void main(){\n' +
+        '  vec2 p = vUv - vec2(0.5, 0.52);\n' +
+        '  float radial = smoothstep(0.10, 0.50, length(p * vec2(1.0, 1.15)));\n' +
+        '  vec3 meadow = mix(vec3(0.09, 0.16, 0.14), c1, 0.55);\n' +
+        '  vec3 c = mix(meadow, c2, radial);\n' +
+        '  c += vec3(0.45, 0.32, 0.16) * glow * 0.08 * (1.0 - radial);\n' +
+        '  gl_FragColor = vec4(c, 1.0);\n' +
+        '}'
     })
     this.ground = new THREE.Mesh(geo, this.groundMat)
     this.ground.rotation.x = -Math.PI / 2
@@ -1827,12 +1978,12 @@ export class Scene {
   }
 
   _buildLights() {
-    this.amb = new THREE.AmbientLight(0x5a6d9a, 0.88)
+    this.amb = new THREE.AmbientLight(0x66739c, 0.90)
     this.scene.add(this.amb)
-    this.hemi = new THREE.HemisphereLight(0xaec6f4, 0x26324d, 1.2)
+    this.hemi = new THREE.HemisphereLight(0xb8cef8, 0x332c38, 1.25)
     this.scene.add(this.hemi)
-    this.fillLight = new THREE.DirectionalLight(0xaec2ff, 0.65)
-    this.fillLight.position.set(-220, 240, 520)
+    this.fillLight = new THREE.DirectionalLight(0xffdfb4, 0.58)
+    this.fillLight.position.set(-240, 220, 540)
     this.scene.add(this.fillLight)
 
     this.moonLight = new THREE.DirectionalLight(0xcbe0ff, 1.35)
@@ -2473,8 +2624,14 @@ export class Scene {
       this.scene.fog.color.set(p.fog)
     }
     this.moonSprite.material.color.set(p.moon)
+    if (this._clouds) {
+      const cCol = new THREE.Color(p.rim).lerp(new THREE.Color(p.warm), 0.35)
+      for (const item of this._clouds) {
+        /** @type {THREE.MeshBasicMaterial} */ (item.mesh.material).color.copy(cCol)
+      }
+    }
     if (this.groundMat) {
-      this.groundMat.uniforms.c1.value.set(p.sky[0]).multiplyScalar(0.6)
+      this.groundMat.uniforms.c1.value.set(p.sky[0]).lerp(new THREE.Color(0x162b22), 0.45)
       this.groundMat.uniforms.c2.value.set(p.fog)
     }
     if (this.doorGlow) this.doorGlow.material.color.set(p.warm)
@@ -2508,14 +2665,16 @@ export class Scene {
     if (this.groundMat) this.groundMat.uniforms.wet.value = isRain ? 1 : 0
     if (this.aveLampHalos) {
       for (const sp of this.aveLampHalos) {
-        sp.scale.setScalar(isFog ? 128 : 74)
-        sp.material.opacity = isFog ? 0.72 : 0.42
+        const base = sp.userData.baseScale || (sp.userData.baseScale = sp.scale.x || 74)
+        const baseOp = sp.userData.baseOpacity !== undefined ? sp.userData.baseOpacity : (sp.userData.baseOpacity = sp.material.opacity)
+        sp.scale.setScalar(base * (isFog ? 1.65 : 1.0))
+        sp.material.opacity = isFog ? Math.min(0.75, baseOp * 1.55) : baseOp
       }
     }
 
     const fog = /** @type {THREE.FogExp2} */ (this.scene.fog)
-    const DENSITY = { light_rain: 0.00024, rain: 0.00024, fog: 0.00050, snow: 0.00022, wind: 0.00016, clear: 0.00015 }
-    fog.density = DENSITY[this.weather] !== undefined ? DENSITY[this.weather] : 0.00017
+    const DENSITY = { light_rain: 0.00028, rain: 0.00028, fog: 0.00052, snow: 0.00026, wind: 0.00022, clear: 0.00023 }
+    fog.density = DENSITY[this.weather] !== undefined ? DENSITY[this.weather] : 0.00023
 
     this._syncSnowVisibility()
     this._refreshNpcSprite()
@@ -2813,6 +2972,11 @@ export class Scene {
     }
 
     this.starMat.uniforms.time.value = t
+    if (this._clouds) {
+      for (const c of this._clouds) {
+        c.mesh.position.x = c.baseX + Math.sin(t * 0.04 + c.spd) * 85
+      }
+    }
     this.fireflyMat.uniforms.time.value = t
     this._windTimeUniform.value = t
     this._windStrength += (this._windTarget - this._windStrength) * Math.min(1, dt * 1.6)
@@ -3020,6 +3184,7 @@ export class Scene {
       this.spillMesh = null
     }
     if (this._spillTex) this._spillTex.dispose()
+    if (this._cloudTex) this._cloudTex.dispose()
     if (this._interiorAtlas) this._interiorAtlas.dispose()
     this.renderer.setAnimationLoop(null)
     document.removeEventListener('visibilitychange', this._onVis)
