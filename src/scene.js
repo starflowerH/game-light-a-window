@@ -873,9 +873,9 @@ export class Scene {
         doorMetrics = {
           x: center.x,
           y: center.y,
-          z: worldBox.max.z + 2.5,
-          w: Math.max(46, size.x * 1.08),
-          h: Math.max(54, size.y * 1.06)
+          z: worldBox.max.z + 0.55,
+          w: Math.max(40, size.x * 1.02),
+          h: Math.max(48, size.y * 1.02)
         }
       }
     }
