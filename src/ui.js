@@ -13,6 +13,7 @@ import {
   ENDINGS,
   GAME_MODES,
   MOOD_TOKENS,
+  QUALITY_MODES,
   SEASONS,
   WEATHER_CATALOG,
   WINDOW_STATES,
@@ -22,6 +23,7 @@ import {
   gameModeDef,
   generateCampusNickname,
   outfitForEnv,
+  qualityModeDef,
   seasonDef
 } from '../shared/constants.js'
 import { NPC_CATALOG, OUTFIT_LABELS, renderNpcPortraitSvg } from './npc-portraits.js'
@@ -351,6 +353,7 @@ export class UI {
    * Floating Campus Hub over live interactive 3D dormitory scene.
    * @param {{
    *   nickname: string, dormId: string, season: string, weather: string, viewId: string,
+   *   qualityMode?: string, onQualityMode?: (id: string) => void,
    *   gameMode: string, aiSource: string, keyEnabled: boolean,
    *   bgmState?: any, onBgmSelect?: (id: string) => void, onBgmUpload?: (f: File) => void, onMute?: () => boolean,
    *   onDorm: (id: string) => void,
@@ -378,6 +381,8 @@ export class UI {
     const bgmMode = opts.bgmState ? opts.bgmState.mode : 'theme'
     const bgmMeta = bgmTrackDef(bgmMode)
     const activeTab = this._hubTab || 'dorm'
+    const qMode = opts.qualityMode || 'auto'
+    const qMeta = qualityModeDef(qMode)
 
     const hub = document.createElement('div')
     hub.id = 'hub'
@@ -445,6 +450,10 @@ export class UI {
               BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') +
               '<label class="chip-sm bgm-upload">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
             '</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">渲染画质 · ' + esc(qMeta.desc) + '</div>' +
+            '<div class="chip-row">' +
+              QUALITY_MODES.map(qm => '<button class="chip-sm ' + (qm.id === qMode ? 'on' : '') + '" data-quality="' + esc(qm.id) + '">' + esc(qm.name) + '</button>').join('') +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -460,6 +469,7 @@ export class UI {
             '<div class="chip-row">' + SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') + '</div>' +
             '<div class="chip-row">' + WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') + '</div>' +
             '<div class="chip-row">' + CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') + '</div>' +
+            '<div class="chip-row">' + QUALITY_MODES.map(qm => '<button class="chip-sm ' + (qm.id === qMode ? 'on' : '') + '" data-quality="' + esc(qm.id) + '">' + esc(qm.name) + '</button>').join('') + '</div>' +
             '<div class="chip-row">' + BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') + '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
           '</div>' +
         '</div>' +
@@ -566,6 +576,9 @@ export class UI {
     }
     for (const b of qsa(hub, '[data-view]')) {
       b.onclick = () => opts.onView(b.getAttribute('data-view') || 'stardew')
+    }
+    for (const b of qsa(hub, '[data-quality]')) {
+      b.onclick = () => opts.onQualityMode && opts.onQualityMode(b.getAttribute('data-quality') || 'auto')
     }
     for (const card of qsa(hub, '.mode-card')) {
       card.onclick = () => opts.onSelectMode(card.getAttribute('data-mode') || 'memory_sequence')

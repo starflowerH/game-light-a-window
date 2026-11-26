@@ -29,7 +29,8 @@ function emptyRecords() {
     preferredDorm: 'university',
     preferredSeason: 'autumn',
     preferredWeather: 'clear',
-    preferredMode: 'memory_sequence'
+    preferredMode: 'memory_sequence',
+    preferredQuality: 'auto'
   }
 }
 

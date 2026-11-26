@@ -332,11 +332,11 @@ export function setPainterlyStyle(pass, mode = 'stardew') {
   if (!pass?.material?.uniforms) return
   const u = pass.material.uniforms
   if (mode === 'oil') {
-    u.strength.value = 0.62
-    u.uKuwaharaRadius.value = 2.4
+    u.strength.value = 0.58
+    u.uKuwaharaRadius.value = 2.15
   } else {
-    u.strength.value = 0.50
-    u.uKuwaharaRadius.value = 1.32
+    u.strength.value = 0.44
+    u.uKuwaharaRadius.value = 1.18
   }
 }
 

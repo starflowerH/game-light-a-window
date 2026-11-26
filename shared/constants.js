@@ -262,6 +262,17 @@ export function gameModeDef(id) {
   return GAME_MODES.find(m => m.id === id) || GAME_MODES[0]
 }
 
+export const QUALITY_MODES = [
+  { id: 'auto', name: '智能 60帧', desc: '高画质起步 · 帧率不足自动切换轻渲染稳 60 帧' },
+  { id: 'ultra', name: '极致原画', desc: '锁定 2.0x 超清 · 全采样油画滤镜 · 不降级' },
+  { id: 'eco', name: '极速畅玩', desc: '直出高速渲染 · 核显/轻薄本稳定 60+ 帧' }
+]
+export const QUALITY_MODE_IDS = QUALITY_MODES.map(q => q.id)
+
+export function qualityModeDef(id) {
+  return QUALITY_MODES.find(q => q.id === id) || QUALITY_MODES[0]
+}
+
 // ---------------------------------------------------------------- residents & window states
 
 export const CORE_RESIDENT_ROOMS = [102, 203, 205, 301, 304, 406]

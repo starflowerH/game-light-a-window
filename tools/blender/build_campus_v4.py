@@ -515,94 +515,153 @@ def add_bicycle(name_prefix, x, y, z, rot_z, mats, frame_mat=None):
     def local(lx, ly, lz):
         return (x + lx * cos_r - ly * sin_r, y + lx * sin_r + ly * cos_r, z + lz)
 
-    torus(f'{name_prefix}_WheelR', local(-0.46, 0, 0.34), 0.33, 0.042, mats['metal_dark'], rot=wheel_rot, seg_maj=14, smooth=True)
-    torus(f'{name_prefix}_WheelF', local(0.46, 0, 0.34), 0.33, 0.042, mats['metal_dark'], rot=wheel_rot, seg_maj=14, smooth=True)
-    torus(f'{name_prefix}_RimR', local(-0.46, 0, 0.34), 0.28, 0.018, mats['metal_light'], rot=wheel_rot, seg_maj=12, smooth=True)
-    torus(f'{name_prefix}_RimF', local(0.46, 0, 0.34), 0.28, 0.018, mats['metal_light'], rot=wheel_rot, seg_maj=12, smooth=True)
+    torus(f'{name_prefix}_WheelR', local(-0.46, 0, 0.34), 0.33, 0.042, mats['metal_dark'], rot=wheel_rot, seg_maj=16, smooth=True)
+    torus(f'{name_prefix}_WheelF', local(0.46, 0, 0.34), 0.33, 0.042, mats['metal_dark'], rot=wheel_rot, seg_maj=16, smooth=True)
+    torus(f'{name_prefix}_RimR', local(-0.46, 0, 0.34), 0.28, 0.018, mats['metal_light'], rot=wheel_rot, seg_maj=14, smooth=True)
+    torus(f'{name_prefix}_RimF', local(0.46, 0, 0.34), 0.28, 0.018, mats['metal_light'], rot=wheel_rot, seg_maj=14, smooth=True)
+    # Cross wire spokes + rear rack
+    for wx_off, wname in ((-0.46, 'R'), (0.46, 'F')):
+        for sp_ang in (0.0, math.pi / 4.0, math.pi / 2.0, math.pi * 0.75):
+            box(f'{name_prefix}_Spk_{wname}_{int(sp_ang * 10)}', local(wx_off, 0, 0.34), (0.56, 0.016, 0.016),
+                mats['metal_light'], bevel=0.0, rot=(0, sp_ang, rot_z))
+    box(f'{name_prefix}_Rack', local(-0.44, 0, 0.70), (0.34, 0.16, 0.03), mats['metal_dark'], bevel=0.0, rot=(0, 0, rot_z))
     box(f'{name_prefix}_TopTube', local(-0.02, 0, 0.64), (0.64, 0.05, 0.05), f_mat, bevel=0.0, rot=(0, 0, rot_z))
     box(f'{name_prefix}_DownTube', local(0.12, 0, 0.48), (0.66, 0.05, 0.05), f_mat, bevel=0.0, rot=(0, 0.52, rot_z))
     box(f'{name_prefix}_SeatPost', local(-0.24, 0, 0.56), (0.05, 0.05, 0.52), f_mat, bevel=0.0, rot=(0, -0.22, rot_z))
     box(f'{name_prefix}_Fork', local(0.38, 0, 0.54), (0.05, 0.09, 0.54), f_mat, bevel=0.0, rot=(0, -0.25, rot_z))
     box(f'{name_prefix}_Seat', local(-0.28, 0, 0.84), (0.24, 0.13, 0.06), mats['wood_warm'], bevel=0.015, rot=(0, 0, rot_z))
     box(f'{name_prefix}_Bar', local(0.34, 0, 0.86), (0.05, 0.38, 0.045), mats['metal_light'], bevel=0.0, rot=(0, 0, rot_z))
-    box(f'{name_prefix}_Basket', local(0.50, 0, 0.72), (0.22, 0.28, 0.18), mats['metal_dark'], bevel=0.015, rot=(0, 0, rot_z))
+    box(f'{name_prefix}_Basket', local(0.50, 0, 0.72), (0.22, 0.28, 0.18), mats['wood_warm'], bevel=0.015, rot=(0, 0, rot_z))
+
+
+def add_urn_bush(prefix, x, y, z, mats, rng):
+    """Turned terracotta garden urn with sculpted multi-lobe topiary bush & blossoms."""
+    cylinder(f'{prefix}_UrnBase', (x, y, z + 0.08), 0.28, 0.16, mats['stone_trim'], verts=12, bevel=0.01, smooth=True)
+    cone(f'{prefix}_UrnPot', (x, y, z + 0.34), 0.22, 0.34, 0.38, mats['terracotta'], verts=12, smooth=True)
+    torus(f'{prefix}_UrnRim', (x, y, z + 0.52), 0.34, 0.045, mats['terracotta'], seg_maj=14, smooth=True)
+    for bi, (bx, by, bz, br) in enumerate([
+        (0.0, 0.0, 0.72, 0.34),
+        (0.14, -0.10, 0.84, 0.22),
+        (-0.14, 0.10, 0.86, 0.21),
+        (0.0, 0.0, 1.04, 0.24),
+    ]):
+        ico(f'{prefix}_Bush_{bi}', (x + bx, y + by, z + bz), br, mats['hedge_leaf'] if bi == 0 else mats['leaf_accent'],
+            sub=1, scale=(1.05, 1.05, 0.92), smooth=True, organic=0.14, seed=bi * 2.3 + x)
+    for fi in range(4):
+        ang = fi * 1.57 + 0.4
+        ico(f'{prefix}_Bl_{fi}', (x + math.cos(ang) * 0.22, y + math.sin(ang) * 0.22, z + 0.88 + (fi % 2) * 0.12),
+            0.055, mats['flower_gold'] if fi % 2 == 0 else mats['flower_coral'], sub=1, smooth=True)
 
 
 def add_tree(prefix, x, y, z, height, canopy_r, mats, rng, is_ginkgo=False, with_planter=False, tree_lantern=False, low_detail=False):
-    """Smooth-shaded sculpted oil-painted tree with organic billowing canopy lobes, roots & optional hanging lantern."""
+    """Ghibli/Stardew multi-cluster botanical tree with gnarled roots, forked limbs & dappled layered crown."""
     if with_planter:
-        cylinder(f'{prefix}_PlanterRing', (x, y, z + 0.12), 0.96, 0.24, mats['stone_trim'], verts=12, bevel=0.015, smooth=True)
-        cylinder(f'{prefix}_PlanterSoil', (x, y, z + 0.18), 0.78, 0.14, mats['trunk'], verts=10)
-        for ri, ang in enumerate((0.3, 2.2, 4.1)):
-            rx = x + math.cos(ang) * 0.34
-            ry = y + math.sin(ang) * 0.34
-            box(f'{prefix}_Root_{ri}', (rx, ry, z + 0.26), (0.36, 0.14, 0.14), mats['trunk'], bevel=0.015, rot=(0, 0.35, ang))
+        cylinder(f'{prefix}_PlanterRing', (x, y, z + 0.13), 1.02, 0.26, mats['stone_trim'], verts=16, bevel=0.02, smooth=True)
+        cylinder(f'{prefix}_PlanterSoil', (x, y, z + 0.19), 0.84, 0.14, mats['trunk'], verts=12)
+        for ri in range(8):
+            ang = ri * (math.pi / 4.0)
+            ico(f'{prefix}_Stone_{ri}', (x + math.cos(ang) * 0.96, y + math.sin(ang) * 0.96, z + 0.24),
+                0.13, mats['stone_ground'], sub=1, scale=(1.2, 0.9, 0.7), smooth=True, organic=0.15, seed=ri + x)
 
-    cone(f'{prefix}_RootFlare', (x, y, z + height * 0.14), 0.36, 0.20, height * 0.28, mats['trunk'], verts=10, smooth=True)
-    cylinder(f'{prefix}_Trunk', (x, y, z + height * 0.44), 0.20, height * 0.72, mats['trunk'], verts=10, smooth=True)
+    for ri, ang in enumerate((0.2, 1.8, 3.4, 5.0)):
+        rx = x + math.cos(ang) * 0.38
+        ry = y + math.sin(ang) * 0.34
+        box(f'{prefix}_Root_{ri}', (rx, ry, z + 0.24), (0.42, 0.16, 0.15), mats['trunk'], bevel=0.02, rot=(0, 0.42, ang))
 
-    if not low_detail:
-        for b_i, ang in enumerate((0.4, 2.5, 4.6)):
-            bx = x + math.cos(ang) * (canopy_r * 0.28)
-            by = y + math.sin(ang) * (canopy_r * 0.24)
-            bz = z + height * 0.74
-            tilt_x = math.sin(ang) * 0.48
-            tilt_y = -math.cos(ang) * 0.48
-            cylinder(f'{prefix}_Branch_{b_i}', (bx, by, bz), 0.10, height * 0.36, mats['trunk'],
-                     verts=8, rot=(tilt_x, tilt_y, 0.0), smooth=True)
+    cone(f'{prefix}_RootFlare', (x, y, z + height * 0.15), 0.40, 0.21, height * 0.30, mats['trunk'], verts=12, smooth=True)
+    cylinder(f'{prefix}_Trunk', (x, y, z + height * 0.43), 0.21, height * 0.68, mats['trunk'], verts=12, smooth=True)
+
+    # Exposed curved primary fork boughs & upper twig struts reaching into the leaf clusters
+    b_count = 3 if low_detail else 4
+    for b_i in range(b_count):
+        ang = (b_i / b_count) * math.pi * 2.0 + 0.45
+        bx = x + math.cos(ang) * (canopy_r * 0.30)
+        by = y + math.sin(ang) * (canopy_r * 0.26)
+        bz = z + height * 0.72
+        tilt_x = math.sin(ang) * 0.56
+        tilt_y = -math.cos(ang) * 0.56
+        cylinder(f'{prefix}_Branch_{b_i}', (bx, by, bz), 0.095, height * 0.42, mats['trunk'],
+                 verts=8, rot=(tilt_x, tilt_y, 0.0), smooth=True)
+        if not low_detail:
+            tx2 = x + math.cos(ang + 0.35) * (canopy_r * 0.52)
+            ty2 = y + math.sin(ang + 0.35) * (canopy_r * 0.46)
+            cylinder(f'{prefix}_Twig_{b_i}', (tx2, ty2, bz + height * 0.14), 0.055, height * 0.26, mats['trunk'],
+                     verts=6, rot=(tilt_x * 1.15, tilt_y * 1.15, 0.0), smooth=True)
 
     mat_a = mats['leaf_main']
     mat_b = mats['leaf_accent']
-    blobs = 5 if low_detail else (8 if not is_ginkgo else 9)
-    for i in range(blobs):
-        if i == blobs - 1:
-            dx, dy = rng.uniform(-0.14, 0.14), rng.uniform(-0.12, 0.12)
-            dz = height * 0.90 + canopy_r * 0.62
-            r = canopy_r * 0.76
-        else:
-            ang = (i / (blobs - 1)) * math.pi * 2.0 + rng.uniform(-0.22, 0.22)
-            rad = canopy_r * rng.uniform(0.30, 0.56)
-            dx = math.cos(ang) * rad
-            dy = math.sin(ang) * rad * 0.85
-            dz = height * 0.76 + (i % 3) * (canopy_r * 0.22)
-            r = canopy_r * rng.uniform(0.56, 0.86)
-        ico(f'Tree_Canopy_{prefix}_{i}', (x + dx, y + dy, z + dz), r, mat_a if i % 2 == 0 else mat_b,
-            sub=1 if low_detail else 2, scale=(1.15, 1.05, 0.82), smooth=True, organic=0.14, seed=i * 2.1 + x)
-        if not low_detail and i >= blobs - 4:
+    if low_detail:
+        specs = []
+        for i in range(6):
+            ang = (i / 6.0) * math.pi * 2.0 + rng.uniform(-0.2, 0.2)
+            rad = canopy_r * rng.uniform(0.32, 0.55)
+            specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.85, height * 0.78 + (i % 2) * canopy_r * 0.25, canopy_r * rng.uniform(0.54, 0.72), i % 2))
+        specs.append((0.0, 0.0, height * 0.92 + canopy_r * 0.56, canopy_r * 0.68, 1))
+    else:
+        # 16 multi-deck sculpted foliage clusters: wide lower boughs, fuller middle canopy, sun-kissed crown puffs
+        specs = []
+        for i in range(6):
+            ang = (i / 6.0) * math.pi * 2.0 + rng.uniform(-0.18, 0.18)
+            rad = canopy_r * rng.uniform(0.46, 0.66)
+            specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.86, height * 0.72 + (i % 2) * canopy_r * 0.14, canopy_r * rng.uniform(0.48, 0.62), 0))
+        for i in range(6):
+            ang = (i / 6.0) * math.pi * 2.0 + 0.52 + rng.uniform(-0.18, 0.18)
+            rad = canopy_r * rng.uniform(0.26, 0.48)
+            specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.86, height * 0.84 + canopy_r * rng.uniform(0.22, 0.36), canopy_r * rng.uniform(0.42, 0.56), 1 if i % 2 == 0 else 0))
+        for i in range(4):
+            ang = (i / 4.0) * math.pi * 2.0 + 0.25
+            rad = canopy_r * 0.22 if i < 3 else 0.0
+            specs.append((math.cos(ang) * rad, math.sin(ang) * rad * 0.82, height * 0.92 + canopy_r * (0.48 if i < 3 else 0.68), canopy_r * (0.38 if i < 3 else 0.46), 1))
+
+    for i, (dx, dy, dz, r, role) in enumerate(specs):
+        lobe_sub = 1 if (low_detail or i < len(specs) - 4) else 2
+        ico(f'Tree_Canopy_{prefix}_{i}', (x + dx, y + dy, z + dz), r, mat_b if role else mat_a,
+            sub=lobe_sub, scale=(1.14, 1.04, 0.80), smooth=True, organic=0.18, seed=i * 2.1 + x + y)
+        if not low_detail and i >= len(specs) - 5:
             ico(f'Season_Snow_Tree_{prefix}_{i}', (x + dx, y + dy, z + dz + r * 0.52), r * 0.72,
-                mats['snow_cap'], sub=1, scale=(1.08, 1.0, 0.36), tint=False, smooth=True)
+                mats['snow_cap'], sub=1, scale=(1.08, 1.0, 0.34), tint=False, smooth=True)
+        elif not low_detail and is_ginkgo and i % 4 == 1:
+            # Golden autumn gingko/osmanthus blossom cluster accents
+            ico(f'{prefix}_Blossom_{i}', (x + dx * 1.15, y + dy - r * 0.45, z + dz - r * 0.15), 0.12,
+                mats['flower_gold'], sub=1, smooth=True)
 
     if tree_lantern:
-        lx, ly, lz = x + canopy_r * 0.45, y - canopy_r * 0.35, z + height * 0.68
-        cylinder(f'{prefix}_LantCord', (lx, ly, lz + 0.18), 0.02, 0.36, mats['metal_dark'], verts=6)
-        ico(f'{prefix}_LantBulb', (lx, ly, lz), 0.13, mats['lantern_warm'], sub=1, scale=(1.0, 1.0, 1.25), tint=False, smooth=True)
+        lx, ly, lz = x + canopy_r * 0.48, y - canopy_r * 0.38, z + height * 0.64
+        cylinder(f'{prefix}_LantCord', (lx, ly, lz + 0.20), 0.02, 0.40, mats['metal_dark'], verts=6)
+        box(f'{prefix}_LantCap', (lx, ly, lz + 0.10), (0.20, 0.20, 0.06), mats['metal_dark'], bevel=0.0)
+        ico(f'{prefix}_LantBulb', (lx, ly, lz - 0.02), 0.13, mats['lantern_warm'], sub=1, scale=(1.0, 1.0, 1.25), tint=False, smooth=True)
 
 
 def add_pine_tree(prefix, x, y, z, height, mats, rng):
-    """Layered evergreen conifer silhouette for misty woodland horizon."""
-    cylinder(f'{prefix}_Trunk', (x, y, z + height * 0.25), 0.16, height * 0.5, mats['trunk'], verts=7, smooth=True)
-    for tier in range(3):
-        frac = tier / 3.0
-        r1 = height * (0.36 - tier * 0.08)
-        h_cone = height * (0.42 - tier * 0.05)
-        tz = z + height * (0.34 + frac * 0.46)
-        cone(f'{prefix}_Tier_{tier}', (x, y, tz), r1, 0.04, h_cone,
-             mats['pine_leaf'] if tier % 2 == 0 else mats['hedge_leaf'], verts=8, smooth=True)
+    """Sculpted 5-tier evergreen spruce/pine silhouette with notched scalloped bough skirts."""
+    cylinder(f'{prefix}_Trunk', (x, y, z + height * 0.24), 0.18, height * 0.48, mats['trunk'], verts=8, smooth=True)
+    for tier in range(5):
+        frac = tier / 4.0
+        r1 = height * (0.36 - frac * 0.22)
+        h_cone = height * (0.28 - frac * 0.06)
+        tz = z + height * (0.28 + frac * 0.58)
+        ob = cone(f'{prefix}_Tier_{tier}', (x, y, tz), r1, 0.05, h_cone,
+                  mats['pine_leaf'] if tier % 2 == 0 else mats['hedge_leaf'], verts=12, rot=(0, 0, tier * 0.26), smooth=True)
+        displace_organic(ob, amp=0.14, seed=tier * 1.9 + x)
 
 
 def add_hedge_strip(prefix, x, y, z, length, height, depth, mats, rng, along_x=True, flowers=False):
-    count = max(3, int(length / 0.72))
+    count = max(4, int(length / 0.58))
     bloom_mats = (mats['flower_coral'], mats['flower_gold'], mats['flower_lavender'])
     for i in range(count):
-        t = (i / max(1, count - 1) - 0.5) * (length - 0.55)
-        hx = x + (t if along_x else rng.uniform(-0.08, 0.08))
-        hy = y + (rng.uniform(-0.08, 0.08) if along_x else t)
-        hr = (height * 0.64) * rng.uniform(0.88, 1.16)
+        t = (i / max(1, count - 1) - 0.5) * (length - 0.50)
+        hx = x + (t if along_x else rng.uniform(-0.10, 0.10))
+        hy = y + (rng.uniform(-0.10, 0.10) if along_x else t)
+        hr = (height * 0.62) * rng.uniform(0.86, 1.18)
         ico(f'{prefix}_{i}', (hx, hy, z + height * 0.42), hr, mats['hedge_leaf'],
-            sub=1, scale=(1.08, depth / max(0.3, height * 0.9), 0.92), smooth=True, organic=0.12, seed=i * 1.4 + hx)
+            sub=1, scale=(1.08, depth / max(0.3, height * 0.9), 0.90), smooth=True, organic=0.16, seed=i * 1.4 + hx)
+        if i % 2 == 1:
+            ico(f'{prefix}_Tuft_{i}', (hx + rng.uniform(-0.08, 0.08), hy + rng.uniform(-0.08, 0.08), z + height * 0.64),
+                hr * 0.56, mats['pine_leaf'], sub=1, smooth=True, organic=0.14, seed=i * 2.7 + hx)
         if flowers and i % 2 == 0:
-            ico(f'{prefix}_Fl_{i}', (hx + rng.uniform(-0.1, 0.1), hy - 0.18, z + height * 0.72),
-                0.09, bloom_mats[i % len(bloom_mats)], sub=1, smooth=True)
+            for fl in range(2):
+                ico(f'{prefix}_Fl_{i}_{fl}', (hx + rng.uniform(-0.16, 0.16), hy - rng.uniform(0.14, 0.24), z + height * rng.uniform(0.74, 0.90)),
+                    rng.uniform(0.085, 0.115), bloom_mats[(i + fl) % len(bloom_mats)], sub=1, smooth=True)
 
 
 # ------------------------------------------------------------------ 4 Dorm Builders + Rich Campus Grounds
@@ -621,10 +680,13 @@ def build_highschool(mats, rng):
     add_crown_cornice(body_w, body_d, body_h, mats['trim_cream'], mats['stone_trim'], dentil=True)
     add_downspouts(front_y, body_w, body_h, mats['copper'], mats['metal_dark'], x_positions=(-8.15, 8.15))
 
-    # Oak rainwater barrel catching right downspout
-    cylinder('HS_RainBarrel', (8.15, front_y - 0.42, 0.46), 0.36, 0.92, mats['wood_warm'], verts=12, smooth=True)
-    torus('HS_BarrelBandA', (8.15, front_y - 0.42, 0.26), 0.365, 0.025, mats['metal_dark'], seg_maj=12, smooth=True)
-    torus('HS_BarrelBandB', (8.15, front_y - 0.42, 0.66), 0.365, 0.025, mats['metal_dark'], seg_maj=12, smooth=True)
+    # Oak rainwater barrel catching right downspout with stone pad & brass faucet
+    box('HS_BarrelPad', (8.15, front_y - 0.42, 0.04), (1.05, 1.05, 0.08), mats['stone_trim'], bevel=0.015)
+    cylinder('HS_RainBarrel', (8.15, front_y - 0.42, 0.50), 0.36, 0.90, mats['wood_warm'], verts=16, smooth=True)
+    cylinder('HS_BarrelWater', (8.15, front_y - 0.42, 0.91), 0.31, 0.04, mats['pond_water'], verts=14, smooth=True)
+    torus('HS_BarrelBandA', (8.15, front_y - 0.42, 0.28), 0.365, 0.025, mats['metal_dark'], seg_maj=16, smooth=True)
+    torus('HS_BarrelBandB', (8.15, front_y - 0.42, 0.72), 0.365, 0.025, mats['metal_dark'], seg_maj=16, smooth=True)
+    cylinder('HS_BarrelTap', (8.15, front_y - 0.80, 0.36), 0.035, 0.14, mats['brass'], verts=8, rot=(math.pi / 2.0, 0, 0), smooth=True)
 
     for r in range(1, rows):
         z = row_z0 + (r - 0.5) * gap_y
@@ -639,16 +701,26 @@ def build_highschool(mats, rng):
     ridge_h = 3.4
     roof_z = body_h + 0.3
     box('Roof_Eaves', (0, 0, body_h + 0.15), (body_w + 1.15, body_d + 1.15, 0.28), mats['trim_cream'], bevel=0.03)
+    for ri in range(19):
+        rx = -body_w * 0.48 + (ri / 18.0) * (body_w * 0.96)
+        box(f'HS_EaveRafter_{ri}', (rx, front_y - 0.54, body_h - 0.05), (0.12, 0.42, 0.14), mats['wood_warm'], bevel=0.015, rot=(0.2, 0, 0))
     gable_prism('Roof_Pitched', (0, 0, roof_z), roof_w, roof_d, ridge_h, mats['roof_terracotta'], bevel=0.03)
     box('Roof_Ridge', (0, 0, roof_z + ridge_h + 0.04), (roof_w + 0.18, 0.30, 0.22), mats['trim_cream'], bevel=0.02)
     for sx in (-1.0, 1.0):
         ico(f'Roof_Finial_{int(sx)}', (sx * (roof_w * 0.47), 0, roof_z + ridge_h + 0.30), 0.20, mats['brass'], sub=1, smooth=True)
+    # Brass weathervane spire & rear terracotta chimney pots
+    cylinder('HS_VanePost', (0, 0, roof_z + ridge_h + 0.58), 0.04, 0.95, mats['brass'], verts=8, smooth=True)
+    box('HS_VaneArrow', (0, 0, roof_z + ridge_h + 0.96), (0.85, 0.04, 0.14), mats['brass'], bevel=0.0)
+    box('HS_Chimney', (-4.8, 1.25, roof_z + ridge_h - 0.15), (0.96, 0.96, 1.75), mats['brick_red'], bevel=0.02)
+    box('HS_ChimneyCap', (-4.8, 1.25, roof_z + ridge_h + 0.78), (1.16, 1.16, 0.16), mats['stone_trim'], bevel=0.02)
+    cylinder('HS_ChimneyPotA', (-5.0, 1.25, roof_z + ridge_h + 0.98), 0.12, 0.34, mats['terracotta'], verts=10, smooth=True)
+    cylinder('HS_ChimneyPotB', (-4.6, 1.25, roof_z + ridge_h + 0.98), 0.12, 0.34, mats['terracotta'], verts=10, smooth=True)
 
     slope_len = math.hypot(roof_d / 2.0, ridge_h)
     slope_ang = math.atan2(ridge_h, roof_d / 2.0)
-    for ri in range(15):
-        rx = -roof_w * 0.46 + (ri / 14.0) * (roof_w * 0.92)
-        if abs(rx) < 1.35:
+    for ri in range(21):
+        rx = -roof_w * 0.47 + (ri / 20.0) * (roof_w * 0.94)
+        if abs(rx) < 1.38 or 4.45 < abs(rx) < 5.95:
             continue
         for side_s, ang_s in ((-1.0, slope_ang), (1.0, -slope_ang)):
             ry = side_s * (roof_d * 0.25)
@@ -658,9 +730,11 @@ def build_highschool(mats, rng):
 
     box('Dormer_Box', (0, front_y * 0.42, body_h + 1.6), (2.4, 2.2, 1.8), mats['plaster_cream'], bevel=0.03)
     gable_prism('Dormer_Roof', (0, front_y * 0.42, body_h + 2.5), 2.75, 2.55, 1.12, mats['roof_terracotta'], bevel=0.02)
+    box('Dormer_GableBeam', (0, front_y * 0.42 - 1.28, body_h + 2.58), (0.14, 0.08, 0.72), mats['wood_warm'], bevel=0.0)
     box('Dormer_Frame', (0, front_y * 0.42 - 1.09, body_h + 1.55), (1.32, 0.14, 1.18), mats['wood_green'], bevel=0.015)
     box('Dormer_Glass', (0, front_y * 0.42 - 1.15, body_h + 1.55), (1.06, 0.08, 0.94), mats['lamp_glow'], bevel=0.0, tint=False)
     box('Dormer_Mullion', (0, front_y * 0.42 - 1.20, body_h + 1.55), (0.07, 0.04, 0.96), mats['wood_green'], bevel=0.0)
+    box('Dormer_MullionH', (0, front_y * 0.42 - 1.20, body_h + 1.55), (1.06, 0.04, 0.07), mats['wood_green'], bevel=0.0)
     for side, dx in (('L', -5.2), ('R', 5.2)):
         box(f'SideDormer_{side}', (dx, front_y * 0.44, body_h + 1.35), (1.25, 1.45, 1.05), mats['plaster_cream'], bevel=0.02)
         gable_prism(f'SideDormerRoof_{side}', (dx, front_y * 0.44, body_h + 1.88), 1.5, 1.7, 0.65, mats['roof_terracotta'], bevel=0.02)
@@ -671,6 +745,8 @@ def build_highschool(mats, rng):
     add_grand_entrance(mats, 0.0, front_y, door_w=1.88, door_h=2.06, z_thresh=0.34,
                        frame_mat=mats['brick_red'], trim_mat=mats['stone_trim'],
                        door_metal_mat=mats['wood_green'], with_steps=True, with_pilasters=True, with_sconces=True)
+    add_urn_bush('HS_Urn_L', -2.05, front_y - 1.35, 0.0, mats, rng)
+    add_urn_bush('HS_Urn_R', 2.05, front_y - 1.35, 0.0, mats, rng)
     box('Entrance_Canopy', (0, front_y - 0.85, 2.66), (3.4, 1.65, 0.18), mats['roof_terracotta'], bevel=0.03)
     box('Entrance_CanopyTrim', (0, front_y - 0.85, 2.55), (3.5, 1.74, 0.09), mats['trim_cream'], bevel=0.015)
     box('Entrance_Plaque', (0, front_y - 1.70, 2.64), (1.42, 0.08, 0.34), mats['brass'], bevel=0.015)
@@ -679,7 +755,7 @@ def build_highschool(mats, rng):
     add_festoon_garland('HS_CanopyFestoon', -1.55, 1.55, front_y - 1.68, 2.50, 0.14, 7, mats)
     box('Season_Snow_Canopy', (0, front_y - 0.85, 2.79), (3.3, 1.58, 0.09), mats['snow_cap'], bevel=0.03, tint=False)
 
-    # Bulletin board + festoon light string
+    # Bulletin board + festoon light string + cozy reading crates & wooden bench
     box('Board_Post_L', (-7.2, front_y - 1.5, 1.12), (0.16, 0.16, 2.24), mats['wood_warm'], bevel=0.02)
     box('Board_Post_R', (-4.4, front_y - 1.5, 1.12), (0.16, 0.16, 2.24), mats['wood_warm'], bevel=0.02)
     box('Board_Frame', (-5.8, front_y - 1.5, 1.56), (3.05, 0.18, 1.54), mats['wood_warm'], bevel=0.02)
@@ -690,6 +766,8 @@ def build_highschool(mats, rng):
     box('Season_Snow_Board', (-5.8, front_y - 1.5, 2.74), (3.2, 0.72, 0.08), mats['snow_cap'], bevel=0.02, tint=False)
     for ni, (nx, nz, nmat) in enumerate([(-6.5, 1.72, mats['laundry_c']), (-5.8, 1.65, mats['laundry_b']), (-5.1, 1.74, mats['laundry_a'])]):
         box(f'Board_Note_{ni}', (nx, front_y - 1.64, nz), (0.48, 0.03, 0.54), nmat, bevel=0.0, tint=False)
+    box('HS_CrateA', (-7.9, front_y - 1.55, 0.24), (0.56, 0.44, 0.44), mats['wood_warm'], bevel=0.015)
+    box('HS_CrateBook', (-7.9, front_y - 1.55, 0.50), (0.34, 0.26, 0.09), mats['laundry_a'], bevel=0.0)
 
     # Corrugated bike shed + 4 detailed bicycles + book crate stool
     shed_x, shed_y = 10.6, -1.2
@@ -734,8 +812,10 @@ def build_university(mats, rng):
         box(f'Wing_Cap_{side}', (wx, 0.5, 11.12), (2.05, 4.9, 0.28), mats['roof_slate'], bevel=0.03)
         box(f'Wing_Cornice_{side}', (wx, 0.5, 10.92), (1.95, 4.8, 0.14), mats['trim_cream'], bevel=0.02)
         for sz in (2.5, 5.3, 8.1):
-            box(f'Wing_WinFrame_{side}_{sz}', (wx, -1.82, sz), (0.62, 0.12, 1.35), mats['frame_dark'], bevel=0.015)
+            box(f'Wing_WinFrame_{side}_{sz}', (wx, -1.82, sz), (0.64, 0.14, 1.38), mats['frame_dark'], bevel=0.015)
             box(f'Wing_WinGlow_{side}_{sz}', (wx, -1.86, sz), (0.44, 0.06, 1.15), mats['lantern_warm'], bevel=0.0, tint=False)
+            box(f'Wing_WinBarH_{side}_{sz}', (wx, -1.90, sz), (0.48, 0.04, 0.06), mats['frame_dark'], bevel=0.0)
+            box(f'Wing_WinSill_{side}_{sz}', (wx, -1.90, sz - 0.68), (0.72, 0.14, 0.08), mats['stone_trim'], bevel=0.0)
 
     for r in range(1, rows):
         z = row_z0 + (r - 0.5) * gap_y
@@ -769,18 +849,19 @@ def build_university(mats, rng):
         box(f'Laundry_SleeveR_{idx}', (x + 0.01, front_y - 0.37, z + 0.14), (0.14, 0.05, 0.20), lmat, bevel=0.0, rot=(0, -0.35, 0))
         box(f'Laundry_Towel_{idx}', (x + 0.32, front_y - 0.37, z + 0.04), (0.30, 0.05, 0.42), mats['trim_cream'], bevel=0.0)
 
-    # Open ground colonnade + festoon string lights
+    # Open ground colonnade + festoon string lights + flanking terracotta urns
     walk_y = front_y - 1.35
     box('Corridor_Floor', (0, walk_y, 0.12), (body_w - 0.3, 2.7, 0.24), mats['stone_ground'], bevel=0.03)
     box('Corridor_StepEdge', (0, walk_y - 1.36, 0.06), (body_w - 0.1, 0.24, 0.12), mats['stone_trim'], bevel=0.015)
     box('Corridor_Canopy', (0, walk_y, 2.94), (body_w - 0.2, 2.74, 0.22), mats['trim_cream'], bevel=0.03)
+    box('Corridor_CanopyRim', (0, walk_y - 1.36, 2.94), (body_w - 0.1, 0.14, 0.26), mats['stone_trim'], bevel=0.02)
     box('Corridor_Lintels', (0, walk_y - 1.18, 2.76), (body_w - 1.6, 0.28, 0.18), mats['stone_trim'], bevel=0.02)
     box('Season_Snow_Corridor', (0, walk_y, 3.09), (body_w - 0.35, 2.62, 0.09), mats['snow_cap'], bevel=0.03, tint=False)
     for i in range(cols):
         cx = (i - (cols - 1) / 2.0) * gap_x
-        cylinder(f'Corridor_Col_{i}', (cx, walk_y - 1.18, 1.54), 0.135, 2.40, mats['trim_cream'], verts=12, smooth=True)
+        cylinder(f'Corridor_Col_{i}', (cx, walk_y - 1.18, 1.54), 0.135, 2.40, mats['trim_cream'], verts=16, smooth=True)
         box(f'Corridor_Base_{i}', (cx, walk_y - 1.18, 0.34), (0.38, 0.38, 0.24), mats['stone_trim'], bevel=0.02)
-        box(f'Corridor_Cap_{i}', (cx, walk_y - 1.18, 2.72), (0.40, 0.40, 0.16), mats['stone_trim'], bevel=0.02)
+        box(f'Corridor_Cap_{i}', (cx, walk_y - 1.18, 2.72), (0.42, 0.42, 0.18), mats['stone_trim'], bevel=0.02)
         if i < cols - 1:
             nx = (i + 1 - (cols - 1) / 2.0) * gap_x
             add_festoon_garland(f'Uni_ColFestoon_{i}', cx + 0.18, nx - 0.18, walk_y - 1.18, 2.68, 0.22, 4, mats)
@@ -790,50 +871,70 @@ def build_university(mats, rng):
     add_grand_entrance(mats, 0.0, front_y, door_w=1.88, door_h=2.48, z_thresh=0.25,
                        frame_mat=mats['frame_dark'], trim_mat=mats['stone_trim'],
                        door_metal_mat=mats['metal_dark'], with_steps=False, with_pilasters=True, with_sconces=True)
+    add_urn_bush('Uni_Urn_L', -2.15, walk_y - 1.50, 0.0, mats, rng)
+    add_urn_bush('Uni_Urn_R', 2.15, walk_y - 1.50, 0.0, mats, rng)
 
-    # Cozy cat corner + curved sleeping cat cushion + parcel crates
-    box('Cat_House', (-2.85, walk_y - 0.65, 0.44), (0.66, 0.58, 0.48), mats['wood_warm'], bevel=0.02)
-    box('Cat_House_Door', (-2.85, walk_y - 0.95, 0.40), (0.28, 0.06, 0.32), mats['metal_dark'], bevel=0.015)
-    gable_prism('Cat_House_Roof', (-2.85, walk_y - 0.65, 0.68), 0.78, 0.70, 0.34, mats['roof_terracotta'], bevel=0.015)
-    ico('Dorm_Orange_Cat', (-2.18, walk_y - 0.68, 0.36), 0.14, mats['cat_orange'], sub=1, scale=(1.15, 0.9, 1.0), smooth=True)
-    ico('Dorm_Orange_CatHead', (-2.04, walk_y - 0.74, 0.50), 0.09, mats['cat_orange'], sub=1, smooth=True)
-    cylinder('Dorm_CatBowl_A', (-2.46, walk_y - 0.92, 0.26), 0.09, 0.06, mats['terracotta'], verts=10, smooth=True)
-    cylinder('Dorm_CatBowl_B', (-2.26, walk_y - 0.94, 0.26), 0.09, 0.06, mats['laundry_b'], verts=10, smooth=True)
+    # Cozy cat corner + curved sleeping cat cushion + parcel boxes + dormitory mailbox
+    box('Cat_House', (-3.25, walk_y - 0.65, 0.44), (0.68, 0.58, 0.48), mats['wood_warm'], bevel=0.02)
+    box('Cat_House_Door', (-3.25, walk_y - 0.95, 0.40), (0.28, 0.06, 0.32), mats['metal_dark'], bevel=0.015)
+    gable_prism('Cat_House_Roof', (-3.25, walk_y - 0.65, 0.68), 0.80, 0.70, 0.34, mats['roof_terracotta'], bevel=0.015)
+    ico('Dorm_Orange_Cat', (-2.55, walk_y - 0.68, 0.36), 0.14, mats['cat_orange'], sub=1, scale=(1.15, 0.9, 1.0), smooth=True)
+    ico('Dorm_Orange_CatHead', (-2.42, walk_y - 0.74, 0.50), 0.09, mats['cat_orange'], sub=1, smooth=True)
+    cylinder('Dorm_CatBowl_A', (-2.85, walk_y - 0.92, 0.26), 0.09, 0.06, mats['terracotta'], verts=10, smooth=True)
+    cylinder('Dorm_CatBowl_B', (-2.65, walk_y - 0.94, 0.26), 0.09, 0.06, mats['laundry_b'], verts=10, smooth=True)
+    box('Uni_Parcel_A', (3.15, walk_y - 0.55, 0.42), (0.48, 0.40, 0.34), mats['wing_warm'], bevel=0.015)
+    box('Uni_Parcel_B', (3.55, walk_y - 0.60, 0.36), (0.36, 0.32, 0.24), mats['plaster_cream'], bevel=0.015)
 
-    # Rooftop + full wrought balustrade + water tower + timber rooftop pergola garden bench
+    # Rooftop + wrought balustrade + stargazing pergola deck + potted flowers + braced water tower
     box('Roof_Slab', (0, 0, body_h + 0.22), (body_w + 0.75, body_d + 0.75, 0.44), mats['roof_slate'], bevel=0.03)
     box('Roof_Trim', (0, 0, body_h + 0.50), (body_w + 0.92, body_d + 0.92, 0.14), mats['trim_cream'], bevel=0.02)
     box('Season_Snow_RoofSlab', (0, 0, body_h + 0.61), (body_w + 0.62, body_d + 0.62, 0.11), mats['snow_cap'], bevel=0.04, tint=False)
     for x in (-8.8, -4.4, 0.0, 4.4, 8.8):
         for y in (-3.25, 3.25):
             box(f'Roof_Post_{x}_{y}', (x, y, body_h + 0.92), (0.11, 0.11, 0.80), mats['trim_cream'], bevel=0.015)
-    for si in range(19):
-        sx = -8.4 + si * (16.8 / 18.0)
+    for si in range(25):
+        sx = -8.6 + si * (17.2 / 24.0)
         box(f'Roof_Spindle_F_{si}', (sx, -3.25, body_h + 0.90), (0.04, 0.04, 0.72), mats['metal_dark'], bevel=0.0)
         box(f'Roof_Spindle_B_{si}', (sx, 3.25, body_h + 0.90), (0.04, 0.04, 0.72), mats['metal_dark'], bevel=0.0)
     box('Roof_Rail_F', (0, -3.25, body_h + 1.30), (17.7, 0.09, 0.09), mats['trim_cream'], bevel=0.0)
     box('Roof_Rail_B', (0, 3.25, body_h + 1.30), (17.7, 0.09, 0.09), mats['trim_cream'], bevel=0.0)
 
-    # Rooftop cozy wooden arbor pergola with string lights
-    px0 = -2.2
+    # Rooftop timber stargazing pergola garden with climbing ivy, lanterns & brass telescope
+    px0 = -2.0
+    box('UniRoof_Deck', (px0 + 0.6, -0.35, body_h + 0.49), (4.6, 2.7, 0.09), mats['wood_warm'], bevel=0.015)
     for px in (px0 - 1.3, px0 + 1.3):
         for py in (-1.2, 0.6):
-            box(f'UniRoof_PergPost_{px}_{py}', (px, py, body_h + 1.48), (0.12, 0.12, 2.0), mats['wood_warm'], bevel=0.015)
-    for ri in range(5):
-        ry = -1.2 + ri * 0.45
-        box(f'UniRoof_PergBar_{ri}', (px0, ry, body_h + 2.48), (3.1, 0.10, 0.10), mats['wood_warm'], bevel=0.0)
+            box(f'UniRoof_PergPost_{px}_{py}', (px, py, body_h + 1.48), (0.13, 0.13, 2.0), mats['wood_warm'], bevel=0.015)
+    for ri in range(6):
+        ry = -1.3 + ri * 0.40
+        box(f'UniRoof_PergBar_{ri}', (px0, ry, body_h + 2.48), (3.2, 0.10, 0.10), mats['wood_warm'], bevel=0.0)
     add_festoon_garland('UniRoof_Festoon', px0 - 1.25, px0 + 1.25, -1.2, body_h + 2.40, 0.14, 5, mats)
-    box('UniRoof_Bench', (px0, -0.3, body_h + 0.72), (1.8, 0.56, 0.42), mats['wood_warm'], bevel=0.018)
+    for vi in range(5):
+        ico(f'Season_Vines_UniPerg_{vi}', (px0 - 1.1 + vi * 0.55, -1.18, body_h + 2.52), 0.16,
+            mats['leaf_accent'] if vi % 2 else mats['leaf_main'], sub=1, scale=(1.2, 0.9, 0.8), smooth=True)
+    box('UniRoof_Bench', (px0, -0.3, body_h + 0.75), (1.85, 0.56, 0.42), mats['wood_warm'], bevel=0.018)
+    box('UniRoof_Cushion', (px0, -0.3, body_h + 0.98), (1.50, 0.46, 0.07), mats['laundry_a'], bevel=0.015)
+    add_flower_cluster('UniRoof_Planter', px0 + 1.85, -1.0, body_h + 0.68, 0.72, mats, rng)
+    box('UniRoof_PlanterBox', (px0 + 1.85, -1.0, body_h + 0.60), (0.82, 0.34, 0.22), mats['wood_warm'], bevel=0.015)
+    # Brass stargazing telescope on tripod beside pergola
+    sc_x, sc_y = px0 + 1.85, 0.15
+    for ti in range(3):
+        ang = ti * (math.pi * 2.0 / 3.0) + 0.3
+        cylinder(f'UniRoof_TriLeg_{ti}', (sc_x + math.cos(ang) * 0.22, sc_y + math.sin(ang) * 0.22, body_h + 0.88),
+                 0.03, 0.78, mats['wood_warm'], verts=6, rot=(math.sin(ang) * 0.32, -math.cos(ang) * 0.32, 0.0))
+    cylinder('UniRoof_ScopeTube', (sc_x, sc_y, body_h + 1.32), 0.075, 0.92, mats['brass'], verts=10, rot=(0.55, 0.0, -0.25), smooth=True)
 
     tx, ty = 4.6, 0.8
     for dx, dy in ((-0.8, -0.8), (0.8, -0.8), (-0.8, 0.8), (0.8, 0.8)):
         cylinder(f'Tower_Leg_{dx}_{dy}', (tx + dx, ty + dy, body_h + 1.35), 0.09, 1.7, mats['metal_dark'], verts=8, smooth=True)
-    box('Tower_Platform', (tx, ty, body_h + 2.12), (2.2, 2.2, 0.14), mats['metal_dark'], bevel=0.02)
-    cylinder('Tower_Tank', (tx, ty, body_h + 2.98), 1.15, 1.65, mats['roof_slate'], verts=18, smooth=True)
+    box('Tower_XBraceF', (tx, ty - 0.8, body_h + 1.30), (1.85, 0.05, 0.05), mats['metal_dark'], bevel=0.0, rot=(0, 0.55, 0))
+    box('Tower_XBraceB', (tx, ty + 0.8, body_h + 1.30), (1.85, 0.05, 0.05), mats['metal_dark'], bevel=0.0, rot=(0, -0.55, 0))
+    box('Tower_Platform', (tx, ty, body_h + 2.12), (2.25, 2.25, 0.14), mats['metal_dark'], bevel=0.02)
+    cylinder('Tower_Tank', (tx, ty, body_h + 2.98), 1.15, 1.65, mats['roof_slate'], verts=20, smooth=True)
     for ring_z in (body_h + 2.55, body_h + 3.00, body_h + 3.45):
-        torus(f'Tower_Band_{ring_z}', (tx, ty, ring_z), 1.17, 0.035, mats['metal_light'], seg_maj=18, smooth=True)
-    cone('Tower_Cap', (tx, ty, body_h + 4.04), 1.32, 0.14, 0.56, mats['roof_slate'], verts=18, smooth=True)
-    cylinder('Tower_Spire', (tx, ty, body_h + 4.46), 0.04, 0.36, mats['metal_light'], verts=8, smooth=True)
+        torus(f'Tower_Band_{ring_z}', (tx, ty, ring_z), 1.17, 0.035, mats['metal_light'], seg_maj=20, smooth=True)
+    cone('Tower_Cap', (tx, ty, body_h + 4.04), 1.34, 0.14, 0.58, mats['roof_slate'], verts=20, smooth=True)
+    cylinder('Tower_Spire', (tx, ty, body_h + 4.48), 0.04, 0.40, mats['brass'], verts=8, smooth=True)
     cone('Season_Snow_Tower', (tx, ty, body_h + 4.14), 1.26, 0.12, 0.48, mats['snow_cap'], verts=18, tint=False, smooth=True)
     for lx_off in (-0.18, 0.18):
         cylinder(f'Tower_LadderRail_{lx_off}', (tx - 1.24, ty + lx_off, body_h + 2.15), 0.025, 3.2, mats['metal_light'], verts=6)
@@ -871,6 +972,7 @@ def build_grad(mats, rng):
     for c in range(1, cols):
         fx = (c - cols / 2.0) * gap_x
         box(f'Facade_Fin_{c}', (fx, front_y - 0.06, fin_z0 + fin_h / 2.0), (0.24, 0.24, fin_h), mats['stone_trim'], bevel=0.02)
+        box(f'Facade_FinCap_{c}', (fx, front_y - 0.08, body_h - 0.28), (0.36, 0.32, 0.18), mats['metal_light'], bevel=0.015)
 
     for r in range(1, rows):
         z = row_z0 + (r - 0.5) * gap_y
@@ -903,10 +1005,13 @@ def build_grad(mats, rng):
     for sx in (-1.95, 1.95):
         box(f'Portico_Col_{sx}', (sx, front_y - 1.82, 1.34), (0.24, 0.24, 2.38), mats['stone_trim'], bevel=0.02)
         box(f'Portico_ColBase_{sx}', (sx, front_y - 1.82, 0.16), (0.34, 0.34, 0.26), mats['frame_dark'], bevel=0.02)
-    # Entrance plaza bollards
+        box(f'Portico_ColCap_{sx}', (sx, front_y - 1.82, 2.48), (0.34, 0.34, 0.14), mats['stone_trim'], bevel=0.015)
+    # Entrance plaza bollards + topiary terracotta urns
     for side, bx in (('L', -2.75), ('R', 2.75)):
         cylinder(f'Grad_Bollard_{side}', (bx, front_y - 1.9, 0.42), 0.13, 0.84, mats['frame_dark'], verts=10, smooth=True)
         ico(f'Grad_BollardGlow_{side}', (bx, front_y - 1.9, 0.88), 0.11, mats['lantern_warm'], sub=1, tint=False, smooth=True)
+    add_urn_bush('Grad_Urn_L', -3.65, front_y - 1.55, 0.0, mats, rng)
+    add_urn_bush('Grad_Urn_R', 3.65, front_y - 1.55, 0.0, mats, rng)
     box('Season_Snow_Awning', (0, front_y - 1.05, 2.75), (4.45, 1.90, 0.09), mats['snow_cap'], bevel=0.03, tint=False)
 
     box('Roof_Slab', (0, 0, body_h + 0.22), (body_w + 0.55, body_d + 0.55, 0.44), mats['frame_dark'], bevel=0.03)
@@ -918,6 +1023,7 @@ def build_grad(mats, rng):
     box('Greenhouse_Glass', (gx, 0, body_h + 1.65), (5.0, 3.0, 1.4), mats['glass_rail'], bevel=0.0, tint=False)
     gable_prism('Greenhouse_Roof', (gx, 0, body_h + 2.35), 5.3, 3.3, 1.0, mats['glass_rail'], bevel=0.015)
     box('Greenhouse_Ridge', (gx, 0, body_h + 3.38), (5.35, 0.12, 0.10), mats['metal_dark'], bevel=0.0)
+    box('Greenhouse_Cupola', (gx, 0, body_h + 3.55), (1.4, 0.72, 0.26), mats['frame_dark'], bevel=0.015)
     for rx in (-5.6, -4.4, -3.2, -2.0, -0.8):
         box(f'Greenhouse_Rib_{rx}', (rx, -1.52, body_h + 1.65), (0.08, 0.08, 1.45), mats['metal_dark'], bevel=0.0)
         box(f'Greenhouse_RibB_{rx}', (rx, 1.52, body_h + 1.65), (0.08, 0.08, 1.45), mats['metal_dark'], bevel=0.0)
@@ -925,12 +1031,15 @@ def build_grad(mats, rng):
 
     cx = 4.6
     box('Patio_Deck', (cx, -0.2, body_h + 0.48), (4.6, 3.4, 0.12), mats['wood_warm'], bevel=0.02)
-    cylinder('Patio_Table', (cx, -0.4, body_h + 0.90), 0.78, 0.08, mats['wood_warm'], verts=14, bevel=0.015, smooth=True)
+    cylinder('Patio_Table', (cx, -0.4, body_h + 0.90), 0.78, 0.08, mats['wood_warm'], verts=16, bevel=0.015, smooth=True)
+    ico('Patio_TableLantern', (cx + 0.22, -0.4, body_h + 1.02), 0.10, mats['lantern_warm'], sub=1, tint=False, smooth=True)
     cylinder('Patio_Leg', (cx, -0.4, body_h + 0.68), 0.07, 0.44, mats['metal_dark'], verts=8, smooth=True)
     cylinder('Patio_Pole', (cx, -0.4, body_h + 1.72), 0.045, 1.75, mats['metal_light'], verts=8, smooth=True)
-    cone('Patio_Umbrella', (cx, -0.4, body_h + 2.62), 1.45, 0.12, 0.50, mats['laundry_a'], verts=12, smooth=True)
+    cone('Patio_Umbrella', (cx, -0.4, body_h + 2.62), 1.48, 0.12, 0.52, mats['laundry_a'], verts=16, smooth=True)
+    ico('Patio_UmbrellaFinial', (cx, -0.4, body_h + 2.90), 0.08, mats['brass'], sub=1, smooth=True)
     for side, ox in (('L', cx - 1.15), ('R', cx + 1.15)):
         box(f'Patio_ChairSeat_{side}', (ox, -0.4, body_h + 0.74), (0.46, 0.46, 0.06), mats['wood_warm'], bevel=0.015)
+        box(f'Patio_ChairPad_{side}', (ox, -0.4, body_h + 0.78), (0.38, 0.38, 0.04), mats['laundry_c'], bevel=0.0)
         box(f'Patio_ChairBack_{side}', (ox + (-0.20 if side == 'L' else 0.20), -0.4, body_h + 0.98), (0.06, 0.46, 0.46), mats['wood_warm'], bevel=0.015)
         cylinder(f'Patio_ChairLeg_{side}', (ox, -0.4, body_h + 0.62), 0.04, 0.22, mats['metal_dark'], verts=8)
     add_festoon_garland('Grad_PatioFestoon', 2.4, 6.8, -1.65, body_h + 2.35, 0.18, 6, mats)
@@ -971,8 +1080,8 @@ def build_staff(mats, rng):
     ridge_h = 3.8
     roof_z = body_h + 0.28
     box('Roof_Eaves', (0, 0, body_h + 0.15), (body_w + 1.3, body_d + 1.3, 0.24), mats['wood_warm'], bevel=0.03)
-    for ri in range(13):
-        rx = -body_w * 0.48 + (ri / 12.0) * (body_w * 0.96)
+    for ri in range(17):
+        rx = -body_w * 0.48 + (ri / 16.0) * (body_w * 0.96)
         box(f'Roof_Rafter_F_{ri}', (rx, front_y - 0.56, body_h - 0.06), (0.14, 0.48, 0.16), mats['wood_warm'], bevel=0.015, rot=(0.24, 0, 0))
     gable_prism('Roof_Pitched', (0, 0, roof_z), roof_w, roof_d, ridge_h, mats['roof_moss'], bevel=0.03)
     box('Roof_Ridge', (0, 0, roof_z + ridge_h + 0.04), (roof_w + 0.15, 0.28, 0.22), mats['wood_warm'], bevel=0.02)
@@ -980,8 +1089,8 @@ def build_staff(mats, rng):
 
     slope_len = math.hypot(roof_d / 2.0, ridge_h)
     slope_ang = math.atan2(ridge_h, roof_d / 2.0)
-    for ri in range(13):
-        rx = -roof_w * 0.46 + (ri / 12.0) * (roof_w * 0.92)
+    for ri in range(17):
+        rx = -roof_w * 0.46 + (ri / 16.0) * (roof_w * 0.92)
         if 3.6 < rx < 5.2:
             continue
         for side_s, ang_s in ((-1.0, slope_ang), (1.0, -slope_ang)):
@@ -995,7 +1104,7 @@ def build_staff(mats, rng):
     cylinder('Chimney_Pot_R', (4.65, 1.2, body_h + 4.78), 0.14, 0.42, mats['terracotta'], verts=10, smooth=True)
     # Soft drifting stylized chimney smoke puffs
     for si, (sx, sy, sz, sr) in enumerate([(4.15, 1.25, body_h + 5.35, 0.24), (4.0, 1.38, body_h + 5.85, 0.34), (3.85, 1.52, body_h + 6.45, 0.44)]):
-        ico(f'Chimney_Smoke_{si}', (sx, sy, sz), sr, mats['smoke_wisp'], sub=1, scale=(1.2, 1.0, 0.85), tint=False, smooth=True)
+        ico(f'Chimney_Smoke_{si}', (sx, sy, sz), sr, mats['smoke_wisp'], sub=2, scale=(1.2, 1.0, 0.85), tint=False, smooth=True, organic=0.14, seed=si)
     box('Season_Snow_Chimney', (4.4, 1.2, body_h + 4.64), (1.3, 1.3, 0.11), mats['snow_cap'], bevel=0.03, tint=False)
 
     add_grand_entrance(mats, 0.0, front_y, door_w=1.90, door_h=2.02, z_thresh=0.34,
@@ -1008,13 +1117,22 @@ def build_staff(mats, rng):
         box(f'Porch_Brace_{px}', (px, front_y - 1.18, 2.26), (0.12, 0.64, 0.12), mats['wood_warm'], bevel=0.0, rot=(-0.55, 0, 0))
     box('Porch_HangLantern', (0, front_y - 1.54, 2.34), (0.24, 0.24, 0.28), mats['lantern_warm'], bevel=0.02, tint=False)
     gable_prism('Season_Snow_Porch', (0, front_y - 0.88, 2.57), 3.48, 1.90, 0.76, mats['snow_cap'], bevel=0.03, tint=False)
+    # Cozy wooden garden arbor trellis archway leading toward front stepping stones
+    box('Staff_ArborPostL', (-1.55, front_y - 2.30, 1.25), (0.14, 0.14, 2.50), mats['wood_warm'], bevel=0.015)
+    box('Staff_ArborPostR', (1.55, front_y - 2.30, 1.25), (0.14, 0.14, 2.50), mats['wood_warm'], bevel=0.015)
+    box('Staff_ArborBeam', (0.0, front_y - 2.30, 2.55), (3.65, 0.26, 0.14), mats['wood_warm'], bevel=0.015)
+    for ai in range(4):
+        ico(f'Season_Vines_StaffArb_{ai}', (-1.2 + ai * 0.8, front_y - 2.30, 2.66), 0.18,
+            mats['leaf_accent'] if ai % 2 else mats['leaf_main'], sub=1, scale=(1.2, 0.9, 0.8), smooth=True)
+    add_urn_bush('Staff_Urn_L', -2.25, front_y - 1.65, 0.0, mats, rng)
 
-    # Stacked cozy firewood log rack on right porch wall
-    box('WoodRack_Frame', (2.35, front_y - 0.45, 0.56), (1.1, 0.44, 0.96), mats['wood_warm'], bevel=0.015)
-    for row_i in range(2):
+    # Stacked cozy firewood log rack under miniature shed roof
+    box('WoodRack_Frame', (2.35, front_y - 0.45, 0.56), (1.15, 0.46, 0.96), mats['wood_warm'], bevel=0.015)
+    box('WoodRack_Cap', (2.35, front_y - 0.48, 1.10), (1.28, 0.62, 0.10), mats['roof_moss'], bevel=0.015, rot=(-0.15, 0, 0))
+    for row_i in range(3):
         for col_i in range(4):
-            cylinder(f'Firewood_{row_i}_{col_i}', (1.98 + col_i * 0.24, front_y - 0.46, 0.24 + row_i * 0.22),
-                     0.10, 0.38, mats['trunk'], verts=8, rot=(math.pi / 2.0, 0, 0), smooth=True)
+            cylinder(f'Firewood_{row_i}_{col_i}', (1.98 + col_i * 0.24, front_y - 0.46, 0.20 + row_i * 0.21),
+                     0.095, 0.40, mats['trunk'], verts=10, rot=(math.pi / 2.0, 0, 0), smooth=True)
 
     for side, sx in (('L', -body_w / 2.0 + 0.45), ('R', body_w / 2.0 - 0.45)):
         for k in range(10):
@@ -1050,31 +1168,50 @@ def build_staff(mats, rng):
 
 
 def _build_detailed_neighbor(name, nx, ny, nw, nd, nh, wall_mat, roof_mat, pitched, mats, rng):
-    """Build a multi-mass campus neighbor hall/cottage with forward wing projection, cornices, window frames & porch."""
-    box(f'{name}_Plinth', (nx, ny, 0.45), (nw + 0.4, nd + 0.4, 0.9), mats['stone_ground'], bevel=0.03, top_z=18.0, half_w=48.0)
+    """Build an intricate multi-mass neighbor hall/cottage with 4-pane windows, shutters, quoins, chimney pots & dormer."""
+    box(f'{name}_Plinth', (nx, ny, 0.45), (nw + 0.44, nd + 0.44, 0.9), mats['stone_ground'], bevel=0.03, top_z=18.0, half_w=48.0)
     box(f'{name}_Body', (nx, ny, nh / 2.0), (nw, nd, nh), wall_mat, bevel=0.04, top_z=18.0, half_w=48.0)
-    box(f'{name}_Cornice', (nx, ny, nh - 0.18), (nw + 0.52, nd + 0.52, 0.34), roof_mat, bevel=0.02)
+    box(f'{name}_Cornice', (nx, ny, nh - 0.16), (nw + 0.58, nd + 0.58, 0.32), mats['trim_cream'], bevel=0.02)
+    box(f'{name}_CorniceTop', (nx, ny, nh + 0.04), (nw + 0.72, nd + 0.72, 0.12), roof_mat, bevel=0.02)
+    # Corner stone quoins framing cottage silhouette
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            box(f'{name}_Pilaster_{int(sx)}_{int(sy)}', (nx + sx * (nw * 0.48), ny + sy * (nd * 0.48), nh * 0.50),
+                (0.36, 0.36, nh - 0.5), mats['stone_trim'], bevel=0.02)
 
-    # Forward-projecting side wing annex so silhouette is stepped cleanly in front of main body
+    # Forward-projecting side wing annex so silhouette steps forward naturally
     side_dir = 1.0 if nx < 0 else -1.0
-    annex_w = nw * 0.36
-    annex_d = nd * 0.78
-    annex_h = nh * 0.72
+    annex_w = nw * 0.38
+    annex_d = nd * 0.80
+    annex_h = nh * 0.74
     ax = nx + side_dir * (nw * 0.36)
     ay = ny - nd * 0.24
     box(f'{name}_Annex', (ax, ay, annex_h / 2.0), (annex_w, annex_d, annex_h), wall_mat, bevel=0.03, top_z=18.0, half_w=48.0)
-    box(f'{name}_AnnexPlinth', (ax, ay, 0.45), (annex_w + 0.24, annex_d + 0.24, 0.9), mats['stone_ground'], bevel=0.02)
-    gable_prism(f'{name}_AnnexRoof', (ax, ay, annex_h), annex_w + 0.45, annex_d + 0.45, 1.65, roof_mat, bevel=0.02)
+    box(f'{name}_AnnexPlinth', (ax, ay, 0.45), (annex_w + 0.26, annex_d + 0.26, 0.9), mats['stone_ground'], bevel=0.02)
+    box(f'{name}_AnnexEave', (ax, ay, annex_h + 0.02), (annex_w + 0.48, annex_d + 0.48, 0.16), mats['trim_cream'], bevel=0.02)
+    gable_prism(f'{name}_AnnexRoof', (ax, ay, annex_h + 0.08), annex_w + 0.54, annex_d + 0.54, 1.72, roof_mat, bevel=0.02)
+    box(f'{name}_AnnexRidge', (ax, ay, annex_h + 1.82), (annex_w + 0.60, 0.22, 0.14), mats['trim_cream'], bevel=0.0)
 
     if pitched:
-        gable_prism(f'{name}_Roof', (nx, ny, nh), nw + 0.9, nd + 0.9, 2.8, roof_mat, bevel=0.02)
-        box(f'{name}_Ridge', (nx, ny, nh + 2.82), (nw + 0.95, 0.25, 0.18), mats['metal_dark'], bevel=0.0)
-        box(f'{name}_Chimney', (nx - nw * 0.28, ny + 0.6, nh + 2.1), (0.85, 0.85, 2.0), mats['brick_red'], bevel=0.02)
+        gable_prism(f'{name}_Roof', (nx, ny, nh + 0.08), nw + 1.05, nd + 1.05, 2.95, roof_mat, bevel=0.02)
+        box(f'{name}_Ridge', (nx, ny, nh + 3.05), (nw + 1.12, 0.26, 0.18), mats['trim_cream'], bevel=0.0)
+        box(f'{name}_Chimney', (nx - nw * 0.28, ny + 0.6, nh + 2.2), (0.92, 0.92, 2.1), mats['brick_red'], bevel=0.02)
+        box(f'{name}_ChimCap', (nx - nw * 0.28, ny + 0.6, nh + 3.30), (1.10, 1.10, 0.14), mats['stone_trim'], bevel=0.015)
+        cylinder(f'{name}_ChimPot', (nx - nw * 0.28, ny + 0.6, nh + 3.50), 0.14, 0.34, mats['terracotta'], verts=10, smooth=True)
+        # Pitched gable attic dormer overlooking plaza
+        dx_d = nx - side_dir * (nw * 0.14)
+        dy_d = ny - nd * 0.26
+        box(f'{name}_DormBox', (dx_d, dy_d, nh + 1.15), (1.85, 1.65, 1.25), wall_mat, bevel=0.02)
+        gable_prism(f'{name}_DormRoof', (dx_d, dy_d, nh + 1.78), 2.15, 1.95, 0.78, roof_mat, bevel=0.015)
+        box(f'{name}_DormGlass', (dx_d, dy_d - 0.85, nh + 1.18), (0.86, 0.08, 0.72), mats['lantern_warm'], bevel=0.0, tint=False)
+        box(f'{name}_DormCrossV', (dx_d, dy_d - 0.90, nh + 1.18), (0.06, 0.04, 0.74), mats['frame_dark'], bevel=0.0)
     else:
-        box(f'{name}_Roof', (nx, ny, nh + 0.26), (nw + 0.65, nd + 0.65, 0.52), roof_mat, bevel=0.03)
-        box(f'{name}_Penthouse', (nx - nw * 0.16, ny, nh + 1.05), (nw * 0.30, nd * 0.48, 1.25), roof_mat, bevel=0.02)
+        box(f'{name}_Roof', (nx, ny, nh + 0.26), (nw + 0.72, nd + 0.72, 0.52), roof_mat, bevel=0.03)
+        box(f'{name}_ParapetTrim', (nx, ny - nd / 2.0 - 0.16, nh + 0.60), (nw + 0.74, 0.22, 0.18), mats['stone_trim'], bevel=0.02)
+        box(f'{name}_Penthouse', (nx - nw * 0.18, ny, nh + 1.05), (nw * 0.30, nd * 0.48, 1.25), roof_mat, bevel=0.02)
+        box(f'{name}_PentTrim', (nx - nw * 0.18, ny, nh + 1.72), (nw * 0.34, nd * 0.52, 0.12), mats['stone_trim'], bevel=0.015)
 
-    # Framed architectural windows on clear bays outside annex footprint
+    # Multi-pane framed architectural windows with crossbars, stone hoods & occasional flower boxes
     skip_col = 3 if side_dir > 0 else 0
     for r in range(3):
         for c in range(4):
@@ -1083,33 +1220,47 @@ def _build_detailed_neighbor(name, nx, ny, nw, nd, nh, wall_mat, roof_mat, pitch
             wx = nx + (c - 1.5) * (nw * 0.22)
             wz = 2.65 + r * (nh * 0.24)
             wy = ny - nd / 2.0
-            box(f'{name}_WFrame_{r}_{c}', (wx, wy - 0.04, wz), (1.02, 0.10, 1.32), mats['frame_dark'], bevel=0.0)
-            box(f'{name}_WSill_{r}_{c}', (wx, wy - 0.10, wz - 0.68), (1.16, 0.18, 0.10), mats['stone_trim'], bevel=0.0)
-            is_lit = rng.random() > 0.38
-            box(f'{name}_WGlass_{r}_{c}', (wx, wy - 0.08, wz), (0.80, 0.06, 1.10),
+            box(f'{name}_WFrame_{r}_{c}', (wx, wy - 0.05, wz), (1.12, 0.14, 1.40), mats['trim_cream'], bevel=0.015)
+            box(f'{name}_WHood_{r}_{c}', (wx, wy - 0.12, wz + 0.74), (1.26, 0.22, 0.12), mats['stone_trim'], bevel=0.015)
+            box(f'{name}_WSill_{r}_{c}', (wx, wy - 0.12, wz - 0.72), (1.24, 0.20, 0.12), mats['stone_trim'], bevel=0.015)
+            is_lit = rng.random() > 0.36
+            box(f'{name}_WGlass_{r}_{c}', (wx, wy - 0.08, wz), (0.84, 0.06, 1.14),
                 mats['lantern_warm'] if is_lit else mats['glass_dark'], bevel=0.0, tint=False)
+            # 4-pane window mullions in front of glass so every neighbor window reads clean
+            box(f'{name}_WCrossV_{r}_{c}', (wx, wy - 0.13, wz), (0.065, 0.05, 1.16), mats['frame_dark'], bevel=0.0)
+            box(f'{name}_WCrossH_{r}_{c}', (wx, wy - 0.13, wz + 0.06), (0.86, 0.05, 0.065), mats['frame_dark'], bevel=0.0)
+            if pitched and (r + c) % 2 == 0 and r > 0:
+                box(f'{name}_WPbox_{r}_{c}', (wx, wy - 0.20, wz - 0.62), (0.64, 0.18, 0.14), mats['wood_warm'], bevel=0.015)
+                add_flower_cluster(f'{name}_WFl_{r}_{c}', wx, wy - 0.20, wz - 0.52, 0.56, mats, rng)
 
-    # Upper annex windows + flush ground annex doorway porch
+    # Upper annex framed windows + stone-stepped doorway porch & sconces
     af_y = ay - annex_d / 2.0
     for r in (1, 2):
         wz = 2.65 + r * (nh * 0.24)
         if wz + 0.8 < annex_h:
-            box(f'{name}_AWFrame_{r}', (ax, af_y - 0.04, wz), (0.98, 0.10, 1.26), mats['frame_dark'], bevel=0.0)
-            box(f'{name}_AWSill_{r}', (ax, af_y - 0.10, wz - 0.65), (1.12, 0.18, 0.10), mats['stone_trim'], bevel=0.0)
-            box(f'{name}_AWGlass_{r}', (ax, af_y - 0.08, wz), (0.76, 0.06, 1.04), mats['lantern_warm'], bevel=0.0, tint=False)
-    box(f'{name}_PorchCanopy', (ax, af_y - 0.44, 2.38), (1.9, 0.92, 0.14), roof_mat, bevel=0.02)
-    box(f'{name}_PorchGlow', (ax, af_y - 0.06, 1.18), (1.05, 0.10, 1.95), mats['door_glow'], bevel=0.0, tint=False)
-    for sx_p in (ax - 0.78, ax + 0.78):
-        box(f'{name}_PorchPost_{sx_p}', (sx_p, af_y - 0.78, 1.18), (0.12, 0.12, 2.30), mats['wood_warm'], bevel=0.0)
+            box(f'{name}_AWFrame_{r}', (ax, af_y - 0.05, wz), (1.06, 0.14, 1.32), mats['trim_cream'], bevel=0.015)
+            box(f'{name}_AWSill_{r}', (ax, af_y - 0.12, wz - 0.67), (1.20, 0.20, 0.12), mats['stone_trim'], bevel=0.015)
+            box(f'{name}_AWGlass_{r}', (ax, af_y - 0.08, wz), (0.80, 0.06, 1.08), mats['lantern_warm'], bevel=0.0, tint=False)
+            box(f'{name}_AWCrossV_{r}', (ax, af_y - 0.13, wz), (0.06, 0.05, 1.10), mats['frame_dark'], bevel=0.0)
+            box(f'{name}_AWCrossH_{r}', (ax, af_y - 0.13, wz + 0.05), (0.82, 0.05, 0.06), mats['frame_dark'], bevel=0.0)
+    box(f'{name}_PorchStep', (ax, af_y - 0.42, 0.14), (1.55, 0.85, 0.28), mats['stone_trim'], bevel=0.015)
+    box(f'{name}_PorchCanopy', (ax, af_y - 0.46, 2.40), (2.05, 1.00, 0.16), roof_mat, bevel=0.02)
+    box(f'{name}_PorchFrame', (ax, af_y - 0.05, 1.24), (1.28, 0.12, 2.06), mats['wood_warm'], bevel=0.015)
+    box(f'{name}_PorchGlow', (ax, af_y - 0.09, 1.22), (1.02, 0.08, 1.90), mats['door_glow'], bevel=0.0, tint=False)
+    box(f'{name}_PorchSconce', (ax + 0.72, af_y - 0.14, 1.78), (0.16, 0.16, 0.20), mats['lantern_warm'], bevel=0.015, tint=False)
+    for sx_p in (ax - 0.82, ax + 0.82):
+        box(f'{name}_PorchPost_{sx_p}', (sx_p, af_y - 0.82, 1.20), (0.13, 0.13, 2.34), mats['wood_warm'], bevel=0.015)
+        box(f'{name}_PorchPostBase_{sx_p}', (sx_p, af_y - 0.82, 0.16), (0.22, 0.22, 0.24), mats['stone_trim'], bevel=0.015)
 
 
 def build_campus_grounds(mats, rng):
-    """Shared Stardew-Oil campus world plate: cobblestone avenue, brick-pier wrought fence, left park gazebo,
-    right lotus pond & wooden bridge, perimeter brick clocktower, horizon grove, benches & crosswalk.
+    """Shared Stardew-Oil campus world plate: cobblestone avenue, brick-pier wrought fence, ornate gazebo pavilion,
+    lily-blooming lotus pond & arched footbridge, collegiate brick clocktower, multi-cluster botanical trees & grove.
     """
     # Expanded soft ground apron (Campus_Grass_* and Campus_Road* preserve shadow exclusion)
     box('Campus_Grass_Base', (0, 6.0, -0.4), (104.0, 68.0, 0.8), mats['lawn_grass'], bevel=0.05, top_z=4.0, half_w=52.0)
-    box('Campus_Stone_Plaza', (0, -3.5, 0.02), (25.4, 12.2, 0.12), mats['stone_ground'], bevel=0.03)
+    box('Campus_Stone_Plaza', (0, -3.5, 0.02), (25.6, 12.4, 0.12), mats['stone_ground'], bevel=0.03)
+    box('Campus_PlazaBorder', (0, -6.95, 0.09), (25.8, 0.34, 0.16), mats['stone_trim'], bevel=0.015)
     box('Campus_Road', (0, -9.2, 0.04), (104.0, 4.4, 0.12), mats['cobble'], bevel=0.02)
     box('Campus_Curb_N', (0, -7.0, 0.08), (104.0, 0.30, 0.18), mats['trim_cream'], bevel=0.015)
     box('Campus_Curb_S', (0, -11.4, 0.08), (104.0, 0.30, 0.18), mats['trim_cream'], bevel=0.015)
@@ -1118,24 +1269,32 @@ def build_campus_grounds(mats, rng):
         cx = -3.6 + ci * 1.2
         box(f'Campus_Road_Crosswalk_{ci}', (cx, -9.2, 0.11), (0.62, 3.3, 0.03), mats['stone_trim'], bevel=0.0)
 
+    # Cozy campus wooden welcome signpost beside plaza east entrance
+    box('Plaza_SignPost', (10.8, -6.25, 0.95), (0.14, 0.14, 1.90), mats['wood_warm'], bevel=0.015)
+    box('Plaza_SignBoardA', (10.8, -6.28, 1.62), (1.05, 0.10, 0.28), mats['wood_warm'], bevel=0.015, rot=(0, 0, -0.06))
+    box('Plaza_SignBoardB', (10.8, -6.28, 1.24), (0.95, 0.10, 0.24), mats['plaster_cream'], bevel=0.015, rot=(0, 0, 0.08))
+
     # Vintage avenue street lamps (KEEP exact bulb positions at (-12.2/12.2/-26/26, -7.92, 4.86)!)
     for i, lx in enumerate((-12.2, 12.2, -26.0, 26.0)):
         ly = -7.2
-        cylinder(f'AveLamp_Foot_{i}', (lx, ly, 0.14), 0.32, 0.28, mats['stone_trim'], verts=10, bevel=0.02, smooth=True)
-        cylinder(f'AveLamp_Base_{i}', (lx, ly, 0.55), 0.20, 0.62, mats['metal_dark'], verts=10, smooth=True)
-        cylinder(f'AveLamp_Pole_{i}', (lx, ly, 2.85), 0.075, 4.4, mats['metal_dark'], verts=10, smooth=True)
-        torus(f'AveLamp_Collar_{i}', (lx, ly, 1.05), 0.16, 0.035, mats['brass'], smooth=True)
+        cylinder(f'AveLamp_Foot_{i}', (lx, ly, 0.14), 0.34, 0.28, mats['stone_trim'], verts=12, bevel=0.02, smooth=True)
+        cylinder(f'AveLamp_Base_{i}', (lx, ly, 0.55), 0.21, 0.62, mats['metal_dark'], verts=12, smooth=True)
+        cylinder(f'AveLamp_Pole_{i}', (lx, ly, 2.85), 0.08, 4.4, mats['metal_dark'], verts=12, smooth=True)
+        torus(f'AveLamp_Collar_{i}', (lx, ly, 1.05), 0.17, 0.04, mats['brass'], seg_maj=14, smooth=True)
+        torus(f'AveLamp_MidRing_{i}', (lx, ly, 2.85), 0.11, 0.028, mats['brass'], seg_maj=12, smooth=True)
         box(f'AveLamp_Arm_{i}', (lx, ly - 0.35, 5.08), (0.10, 0.80, 0.10), mats['metal_dark'], bevel=0.0)
         box(f'AveLamp_Bracket_{i}', (lx, ly - 0.24, 4.82), (0.06, 0.42, 0.06), mats['brass'], bevel=0.0, rot=(-0.65, 0, 0))
         box(f'AveLamp_Bulb_{i}', (lx, ly - 0.72, 4.86), (0.38, 0.38, 0.38), mats['lamp_glow'], bevel=0.02, tint=False)
-        cone(f'AveLamp_Cap_{i}', (lx, ly - 0.72, 5.15), 0.36, 0.06, 0.25, mats['metal_dark'], verts=8, smooth=True)
-        ico(f'AveLamp_Tip_{i}', (lx, ly - 0.72, 5.30), 0.06, mats['brass'], sub=1, smooth=True)
+        for rx_c in (-0.18, 0.18):
+            box(f'AveLamp_Cage_{i}_{rx_c}', (lx + rx_c, ly - 0.72, 4.86), (0.03, 0.38, 0.40), mats['metal_dark'], bevel=0.0)
+        cone(f'AveLamp_Cap_{i}', (lx, ly - 0.72, 5.15), 0.38, 0.06, 0.26, mats['metal_dark'], verts=8, smooth=True)
+        ico(f'AveLamp_Tip_{i}', (lx, ly - 0.72, 5.30), 0.065, mats['brass'], sub=1, smooth=True)
 
     # Warm campus café festoon string lights draped along left & right avenue lampposts
     add_festoon_garland('Ave_String_L', -26.0, -12.2, -7.2, 4.75, 0.65, 11, mats)
     add_festoon_garland('Ave_String_R', 12.2, 26.0, -7.2, 4.75, 0.65, 11, mats)
 
-    # 4 Slatted wooden campus benches + red postal pillar box + notice kiosk
+    # 4 Slatted wooden campus benches + red postal pillar box
     for bi, bx in enumerate((-16.2, -8.8, 8.8, 16.2)):
         by = -6.28
         box(f'Bench_Seat_{bi}', (bx, by, 0.44), (1.9, 0.52, 0.08), mats['wood_warm'], bevel=0.015)
@@ -1143,29 +1302,35 @@ def build_campus_grounds(mats, rng):
         for lx_off in (-0.78, 0.78):
             box(f'Bench_Leg_{bi}_{lx_off}', (bx + lx_off, by, 0.22), (0.10, 0.50, 0.44), mats['metal_dark'], bevel=0.0)
             box(f'Bench_Arm_{bi}_{lx_off}', (bx + lx_off, by, 0.62), (0.08, 0.52, 0.06), mats['metal_dark'], bevel=0.0)
-    # Vintage campus postbox beside left avenue bench
-    cylinder('Campus_Postbox', (-14.1, -6.3, 0.62), 0.22, 1.15, mats['roof_terracotta'], verts=12, smooth=True)
-    cone('Campus_PostboxCap', (-14.1, -6.3, 1.28), 0.26, 0.14, 0.18, mats['roof_terracotta'], verts=12, smooth=True)
+    cylinder('Campus_Postbox', (-14.1, -6.3, 0.62), 0.23, 1.15, mats['roof_terracotta'], verts=14, smooth=True)
+    torus('Campus_PostboxTrim', (-14.1, -6.3, 0.96), 0.24, 0.03, mats['brass'], seg_maj=14, smooth=True)
+    cone('Campus_PostboxCap', (-14.1, -6.3, 1.28), 0.27, 0.14, 0.18, mats['roof_terracotta'], verts=14, smooth=True)
 
-    # ---- LEFT GARDEN: Stardew Timber & Terracotta Gazebo Pavilion (lantern at (-19.5, 0.5, 3.25)) ----
+    # ---- LEFT GARDEN: Ornate Hexagonal Gazebo Pavilion (lantern at (-19.5, 0.5, 3.25)) ----
     gx, gy = -19.5, 0.5
-    cylinder('Gazebo_Plinth', (gx, gy, 0.14), 2.65, 0.28, mats['stone_trim'], verts=12, bevel=0.02, smooth=True)
-    cylinder('Gazebo_Step', (gx, gy - 2.65, 0.07), 1.05, 0.14, mats['stone_trim'], verts=10, bevel=0.015, smooth=True)
+    cylinder('Gazebo_Plinth', (gx, gy, 0.14), 2.75, 0.28, mats['stone_trim'], verts=16, bevel=0.02, smooth=True)
+    cylinder('Gazebo_InnerPad', (gx, gy, 0.28), 2.38, 0.06, mats['cobble'], verts=14, smooth=True)
+    cylinder('Gazebo_Step', (gx, gy - 2.68, 0.07), 1.10, 0.14, mats['stone_trim'], verts=12, bevel=0.015, smooth=True)
     for gi in range(6):
-        ang = gi * (math.pi / 3.0) + 0.52
+        ang = gi * (math.pi / 3.0) + math.pi / 6.0
         px = gx + math.cos(ang) * 2.15
         py = gy + math.sin(ang) * 2.15
-        cylinder(f'Gazebo_Post_{gi}', (px, py, 1.65), 0.12, 2.75, mats['wood_warm'], verts=8, smooth=True)
-        box(f'Gazebo_Foot_{gi}', (px, py, 0.34), (0.30, 0.30, 0.20), mats['stone_trim'], bevel=0.015)
+        cylinder(f'Gazebo_Post_{gi}', (px, py, 1.65), 0.125, 2.75, mats['wood_warm'], verts=10, smooth=True)
+        box(f'Gazebo_Foot_{gi}', (px, py, 0.34), (0.32, 0.32, 0.22), mats['stone_trim'], bevel=0.015)
+        # Flush downward-sloping roof hip rib running along hexagon corner ridge to eave
+        box(f'Gazebo_HipRib_{gi}', (gx + math.cos(ang) * 1.68, gy + math.sin(ang) * 1.68, 3.74),
+            (3.15, 0.11, 0.12), mats['wood_warm'], bevel=0.0, rot=(0.0, 0.44, ang))
         if gi not in (3, 4):  # leave south-facing avenue opening clear
             mid_ang = ang + math.pi / 6.0
             mx = gx + math.cos(mid_ang) * 1.92
             my = gy + math.sin(mid_ang) * 1.92
-            box(f'Gazebo_Bench_{gi}', (mx, my, 0.62), (1.65, 0.40, 0.12), mats['wood_warm'], bevel=0.015, rot=(0, 0, mid_ang + math.pi / 2.0))
-    cone('Gazebo_Roof', (gx, gy, 3.72), 3.15, 0.22, 1.45, mats['roof_terracotta'], verts=6)
-    cone('Gazebo_RoofRim', (gx, gy, 2.98), 3.22, 3.05, 0.16, mats['wood_warm'], verts=6)
-    ico('Gazebo_Finial', (gx, gy, 4.55), 0.18, mats['brass'], sub=1, smooth=True)
-    cone('Season_Snow_Gazebo', (gx, gy, 3.84), 3.08, 0.20, 1.38, mats['snow_cap'], verts=6, tint=False)
+            box(f'Gazebo_Bench_{gi}', (mx, my, 0.62), (1.68, 0.42, 0.12), mats['wood_warm'], bevel=0.015, rot=(0, 0, mid_ang + math.pi / 2.0))
+            box(f'Gazebo_Rail_{gi}', (mx, my, 2.74), (1.92, 0.10, 0.16), mats['wood_warm'], bevel=0.0, rot=(0, 0, mid_ang + math.pi / 2.0))
+    cone('Gazebo_Roof', (gx, gy, 3.72), 3.22, 0.24, 1.48, mats['roof_terracotta'], verts=6, rot=(0, 0, math.pi / 6.0))
+    cone('Gazebo_RoofCupola', (gx, gy, 4.44), 1.15, 0.18, 0.58, mats['roof_terracotta'], verts=6, rot=(0, 0, math.pi / 6.0))
+    cone('Gazebo_RoofRim', (gx, gy, 2.98), 3.28, 3.10, 0.16, mats['wood_warm'], verts=6, rot=(0, 0, math.pi / 6.0))
+    ico('Gazebo_Finial', (gx, gy, 4.82), 0.18, mats['brass'], sub=1, smooth=True)
+    cone('Season_Snow_Gazebo', (gx, gy, 3.84), 3.14, 0.20, 1.40, mats['snow_cap'], verts=6, rot=(0, 0, math.pi / 6.0), tint=False)
     cylinder('Gazebo_LanternCord', (gx, gy, 3.55), 0.025, 0.50, mats['metal_dark'], verts=6)
     box('Gazebo_Lantern', (gx, gy, 3.25), (0.38, 0.38, 0.42), mats['lantern_warm'], bevel=0.02, tint=False)
     # Winding cobblestone footpath from avenue to gazebo
@@ -1173,44 +1338,65 @@ def build_campus_grounds(mats, rng):
         t = pi / 5.0
         px = -17.0 - math.sin(t * 1.4) * 2.4
         py = -6.2 + t * 4.2
-        cylinder(f'Gazebo_Path_{pi}', (px, py, 0.04), 0.54, 0.08, mats['cobble'], verts=10, bevel=0.015, smooth=True)
+        cylinder(f'Gazebo_Path_{pi}', (px, py, 0.04), 0.54, 0.08, mats['cobble'], verts=12, bevel=0.015, smooth=True)
     add_hedge_strip('Gazebo_FlowerBed_L', -22.5, -1.6, 0.0, 3.6, 0.68, 0.58, mats, rng, flowers=True)
     add_hedge_strip('Gazebo_FlowerBed_R', -16.6, 2.6, 0.0, 3.4, 0.65, 0.55, mats, rng, flowers=True)
 
-    # ---- RIGHT GARDEN: Campus Lotus Pond & Arched Wooden Footbridge (lanterns at (16.8/22.2, -1.6, 1.55)) ----
+    # ---- RIGHT GARDEN: Lotus Pond, Cattails, Blossoms & Balustrade Footbridge (lanterns at (16.8/22.2, -1.6, 1.55)) ----
     px_c, py_c = 19.5, -0.8
-    # Oval pond water matching elliptical shoreline boulders
-    pond_ob = cylinder('Pond_WaterDisc', (px_c, py_c, 0.07), 4.15, 0.08, mats['pond_water'], verts=24, smooth=True)
+    pond_ob = cylinder('Pond_WaterDisc', (px_c, py_c, 0.07), 4.15, 0.08, mats['pond_water'], verts=28, smooth=True)
     pond_ob.data.transform(Matrix.Diagonal((1.0, 0.785, 1.0, 1.0)))
-    # Sculpted boulders framing the lotus pond shoreline
-    for ri in range(20):
-        ang = (ri / 20.0) * math.pi * 2.0
-        rx = px_c + math.cos(ang) * (4.18 + rng.uniform(-0.12, 0.14))
-        ry = py_c + math.sin(ang) * (3.26 + rng.uniform(-0.10, 0.12))
-        ico(f'Pond_Rock_{ri}', (rx, ry, 0.16), rng.uniform(0.32, 0.54), mats['stone_trim'],
-            sub=1, scale=(1.2, 1.0, 0.62), smooth=True, organic=0.16, seed=ri * 1.7)
-    # Floating lily pads & lotus blossoms
-    for li, (lx_o, ly_o, has_fl) in enumerate([(-2.2, 1.2, True), (-1.4, 1.8, False), (1.8, 1.5, True), (2.4, 0.4, False), (-0.8, -2.0, True)]):
-        cylinder(f'Pond_Lily_{li}', (px_c + lx_o, py_c + ly_o, 0.12), 0.34, 0.04, mats['leaf_main'], verts=10, smooth=True)
+    # Multi-layered mossy shoreline boulders & scattered river pebbles
+    for ri in range(26):
+        ang = (ri / 26.0) * math.pi * 2.0
+        rx = px_c + math.cos(ang) * (4.18 + rng.uniform(-0.14, 0.16))
+        ry = py_c + math.sin(ang) * (3.26 + rng.uniform(-0.12, 0.14))
+        ico(f'Pond_Rock_{ri}', (rx, ry, 0.16), rng.uniform(0.30, 0.56), mats['stone_trim'] if ri % 2 == 0 else mats['stone_ground'],
+            sub=1, scale=(1.22, 1.0, 0.60), smooth=True, organic=0.18, seed=ri * 1.7)
+    # Shoreline cattail reeds framing the water edge
+    for cr_i, (rx_c, ry_c) in enumerate([(-3.5, 1.4), (-3.8, 0.9), (3.4, 1.6), (3.7, 1.1), (-2.9, -2.1)]):
+        for stalk in range(3):
+            sx = px_c + rx_c + (stalk - 1) * 0.16
+            sy = py_c + ry_c + rng.uniform(-0.14, 0.14)
+            cylinder(f'Pond_Reed_{cr_i}_{stalk}', (sx, sy, 0.45), 0.032, 0.85 + stalk * 0.12,
+                     mats['pine_leaf'], verts=6, rot=(rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12), 0), smooth=True)
+            if stalk == 1:
+                cylinder(f'Pond_Cattail_{cr_i}', (sx, sy, 0.82), 0.055, 0.22, mats['trunk'], verts=7, smooth=True)
+    # 7 floating lily pads & 4 multi-petal lotus blossoms
+    for li, (lx_o, ly_o, has_fl) in enumerate([
+        (-2.2, 1.2, True), (-1.4, 1.8, False), (1.8, 1.5, True), (2.4, 0.4, False),
+        (-0.8, -2.0, True), (1.1, 2.0, True), (-2.5, -0.5, False)
+    ]):
+        cylinder(f'Pond_Lily_{li}', (px_c + lx_o, py_c + ly_o, 0.12), 0.36, 0.04, mats['leaf_main'], verts=12, smooth=True)
         if has_fl:
-            ico(f'Pond_Lotus_{li}', (px_c + lx_o, py_c + ly_o, 0.18), 0.13, mats['flower_coral'], sub=1, scale=(1.1, 1.1, 0.8), smooth=True)
+            for pi in range(5):
+                p_ang = pi * (math.pi * 2.0 / 5.0)
+                ico(f'Pond_LotusPetal_{li}_{pi}',
+                    (px_c + lx_o + math.cos(p_ang) * 0.11, py_c + ly_o + math.sin(p_ang) * 0.11, 0.17),
+                    0.09, mats['flower_coral'], sub=1, scale=(1.2, 0.8, 0.9), smooth=True)
+            ico(f'Pond_LotusCore_{li}', (px_c + lx_o, py_c + ly_o, 0.20), 0.065, mats['flower_gold'], sub=1, smooth=True)
 
-    # Arched wooden footbridge spanning pond at y = -1.6
+    # Arched wooden footbridge spanning pond at y = -1.6 with baluster rails & arch stringers
     by_br = -1.6
-    for bi in range(9):
-        t = (bi / 8.0) - 0.5
+    for bi in range(11):
+        t = (bi / 10.0) - 0.5
         bx = px_c + t * 5.2
-        arch_z = 0.22 + (1.0 - (t * 2.0) ** 2) * 0.56
+        arch_z = 0.22 + (1.0 - (t * 2.0) ** 2) * 0.58
         pitch = -t * 0.36
-        box(f'Bridge_Plank_{bi}', (bx, by_br, arch_z), (0.58, 1.68, 0.10), mats['wood_warm'], bevel=0.015, rot=(0, pitch, 0))
+        box(f'Bridge_Plank_{bi}', (bx, by_br, arch_z), (0.48, 1.72, 0.10), mats['wood_warm'], bevel=0.015, rot=(0, pitch, 0))
     for side_y in (by_br - 0.78, by_br + 0.78):
-        box(f'Bridge_Rail_{side_y}', (px_c, side_y, 1.08), (5.5, 0.09, 0.09), mats['wood_warm'], bevel=0.0)
+        box(f'Bridge_Rail_{side_y}', (px_c, side_y, 1.10), (5.5, 0.09, 0.09), mats['wood_warm'], bevel=0.0)
+        box(f'Bridge_Stringer_{side_y}', (px_c, side_y, 0.52), (5.35, 0.11, 0.16), mats['wood_warm'], bevel=0.0)
+        for pki in range(7):
+            pkx = px_c - 2.1 + pki * 0.70
+            box(f'Bridge_Picket_{side_y}_{pki}', (pkx, side_y, 0.82), (0.06, 0.06, 0.52), mats['wood_warm'], bevel=0.0)
     # 4 corner bridge posts + 2 front bridge lanterns matching _mountGroundsGlb halos
     for side_x in (16.8, 22.2):
         for side_y in (by_br - 0.78, by_br + 0.78):
-            box(f'Bridge_Post_{side_x}_{side_y}', (side_x, side_y, 0.78), (0.14, 0.14, 1.22), mats['wood_warm'], bevel=0.015)
+            box(f'Bridge_Post_{side_x}_{side_y}', (side_x, side_y, 0.78), (0.15, 0.15, 1.24), mats['wood_warm'], bevel=0.015)
+            ico(f'Bridge_PostCap_{side_x}_{side_y}', (side_x, side_y, 1.44), 0.08, mats['brass'], sub=1, smooth=True)
         box(f'Bridge_Lantern_{side_x}', (side_x, by_br, 1.55), (0.24, 0.24, 0.28), mats['lantern_warm'], bevel=0.015, tint=False)
-        cone(f'Bridge_LantCap_{side_x}', (side_x, by_br, 1.75), 0.22, 0.04, 0.16, mats['metal_dark'], verts=4)
+        cone(f'Bridge_LantCap_{side_x}', (side_x, by_br, 1.75), 0.24, 0.04, 0.16, mats['metal_dark'], verts=4)
     add_hedge_strip('Pond_FlowerBed', 15.8, 2.2, 0.0, 4.2, 0.66, 0.55, mats, rng, flowers=True)
 
     # ---- PERIMETER BRICK & WROUGHT-IRON BOUNDARY WALL ----
@@ -1221,8 +1407,8 @@ def build_campus_grounds(mats, rng):
     box('Back_Iron_Rail_Mid', (0, wall_y, 1.32), (94.0, 0.06, 0.06), mats['metal_dark'], bevel=0.0)
     for pi in range(13):
         px = -42.0 + pi * 7.0
-        box(f'Back_Pier_{pi}', (px, wall_y, 1.15), (0.92, 0.92, 2.30), mats['brick_red'], bevel=0.03)
-        box(f'Back_PierCap_{pi}', (px, wall_y, 2.36), (1.12, 1.12, 0.18), mats['stone_trim'], bevel=0.02)
+        box(f'Back_Pier_{pi}', (px, wall_y, 1.15), (0.94, 0.94, 2.30), mats['brick_red'], bevel=0.03)
+        box(f'Back_PierCap_{pi}', (px, wall_y, 2.36), (1.14, 1.14, 0.18), mats['stone_trim'], bevel=0.02)
         if pi % 2 == 1:
             box(f'Back_PierLamp_{pi}', (px, wall_y, 2.60), (0.34, 0.34, 0.30), mats['lantern_warm'], bevel=0.015, tint=False)
             cone(f'Back_PierRoof_{pi}', (px, wall_y, 2.86), 0.34, 0.06, 0.20, mats['metal_dark'], verts=4)
@@ -1232,20 +1418,33 @@ def build_campus_grounds(mats, rng):
             continue
         box(f'Wall_Picket_{xi}', (px, wall_y, 1.44), (0.05, 0.05, 1.05), mats['metal_dark'], bevel=0.0)
 
-    # ---- CAMPUS BRICK & SLATE BELL CLOCKTOWER LANDMARK at (-19.5, 17.5) ----
+    # ---- COLLEGIATE BRICK & SLATE BELL CLOCKTOWER LANDMARK at (-19.5, 17.5) ----
     tx_c, ty_c = -19.5, 17.5
     box('ClockTower_Base', (tx_c, ty_c, 3.0), (4.6, 4.6, 6.0), mats['brick_red'], bevel=0.04, top_z=24.0, half_w=48.0)
-    box('ClockTower_BeltA', (tx_c, ty_c, 6.1), (4.9, 4.9, 0.28), mats['stone_trim'], bevel=0.02)
+    for csx in (-2.25, 2.25):
+        for csy in (-2.25, 2.25):
+            box(f'CT_Buttress_{csx}_{csy}', (tx_c + csx, ty_c + csy, 6.5), (0.55, 0.55, 13.0), mats['stone_trim'], bevel=0.02)
+    box('ClockTower_BeltA', (tx_c, ty_c, 6.1), (4.95, 4.95, 0.28), mats['stone_trim'], bevel=0.02)
     box('ClockTower_Shaft', (tx_c, ty_c, 10.6), (3.9, 3.9, 8.8), mats['brick_red'], bevel=0.04, top_z=24.0, half_w=48.0)
-    box('ClockTower_BeltB', (tx_c, ty_c, 15.1), (4.3, 4.3, 0.28), mats['stone_trim'], bevel=0.02)
-    # Illuminated round clock dials facing front (-Y) and side (+X)
-    cylinder('ClockTower_DialFrame', (tx_c, ty_c - 1.98, 14.2), 1.05, 0.16, mats['stone_trim'], verts=16, rot=(math.pi / 2.0, 0, 0), smooth=True)
-    cylinder('ClockTower_DialGlow', (tx_c, ty_c - 2.04, 14.2), 0.86, 0.10, mats['lantern_warm'], verts=16, rot=(math.pi / 2.0, 0, 0), tint=False, smooth=True)
-    box('ClockTower_HandH', (tx_c, ty_c - 2.11, 14.42), (0.08, 0.04, 0.46), mats['frame_dark'], bevel=0.0)
-    box('ClockTower_HandM', (tx_c + 0.22, ty_c - 2.11, 14.2), (0.48, 0.04, 0.07), mats['frame_dark'], bevel=0.0)
-    cone('ClockTower_Spire', (tx_c, ty_c, 18.2), 3.15, 0.14, 6.0, mats['roof_slate'], verts=4)
-    cone('Season_Snow_ClockTower', (tx_c, ty_c, 18.3), 3.05, 0.12, 5.8, mats['snow_cap'], verts=4, tint=False)
-    cylinder('ClockTower_Vane', (tx_c, ty_c, 21.8), 0.06, 1.4, mats['brass'], verts=8, smooth=True)
+    # Recessed belfry window openings glowing warm gold + gothic bell arch
+    box('CT_BelfryFrame', (tx_c, ty_c - 1.98, 10.2), (1.55, 0.16, 2.5), mats['stone_trim'], bevel=0.02)
+    box('CT_BelfryGlow', (tx_c, ty_c - 2.02, 10.2), (1.18, 0.08, 2.1), mats['lantern_warm'], bevel=0.0, tint=False)
+    box('CT_BelfryMull', (tx_c, ty_c - 2.08, 10.2), (0.09, 0.05, 2.14), mats['frame_dark'], bevel=0.0)
+    box('ClockTower_BeltB', (tx_c, ty_c, 15.1), (4.4, 4.4, 0.30), mats['stone_trim'], bevel=0.02)
+    # Illuminated round clock dial + brass ring + hour ticks + hands facing plaza
+    cylinder('ClockTower_DialFrame', (tx_c, ty_c - 1.98, 14.2), 1.08, 0.18, mats['stone_trim'], verts=20, rot=(math.pi / 2.0, 0, 0), smooth=True)
+    torus('ClockTower_BrassRim', (tx_c, ty_c - 2.08, 14.2), 0.94, 0.055, mats['brass'], rot=(math.pi / 2.0, 0, 0), seg_maj=20, smooth=True)
+    cylinder('ClockTower_DialGlow', (tx_c, ty_c - 2.04, 14.2), 0.88, 0.10, mats['lantern_warm'], verts=20, rot=(math.pi / 2.0, 0, 0), tint=False, smooth=True)
+    for tick_i in range(4):
+        ta = tick_i * (math.pi / 2.0)
+        box(f'CT_Tick_{tick_i}', (tx_c + math.sin(ta) * 0.72, ty_c - 2.11, 14.2 + math.cos(ta) * 0.72),
+            (0.08, 0.04, 0.14), mats['frame_dark'], bevel=0.0, rot=(0, ta, 0))
+    box('ClockTower_HandH', (tx_c, ty_c - 2.12, 14.42), (0.08, 0.04, 0.46), mats['frame_dark'], bevel=0.0)
+    box('ClockTower_HandM', (tx_c + 0.22, ty_c - 2.12, 14.2), (0.48, 0.04, 0.07), mats['frame_dark'], bevel=0.0)
+    cone('ClockTower_Spire', (tx_c, ty_c, 18.2), 3.22, 0.14, 6.0, mats['roof_slate'], verts=4)
+    cone('Season_Snow_ClockTower', (tx_c, ty_c, 18.3), 3.12, 0.12, 5.8, mats['snow_cap'], verts=4, tint=False)
+    ico('ClockTower_OrbFinial', (tx_c, ty_c, 21.35), 0.18, mats['brass'], sub=1, smooth=True)
+    cylinder('ClockTower_Vane', (tx_c, ty_c, 21.85), 0.06, 1.4, mats['brass'], verts=8, smooth=True)
 
     # ---- DETAILED MULTI-WING CAMPUS NEIGHBOR BUILDINGS ----
     neighbors = [
@@ -1257,7 +1456,7 @@ def build_campus_grounds(mats, rng):
     for name, (nx, ny, _nz), (nw, nd, nh), wmat, rmat, pitched in neighbors:
         _build_detailed_neighbor(name, nx, ny, nw, nd, nh, wmat, rmat, pitched, mats, rng)
 
-    # ---- FOREGROUND SCULPTED GARDEN TREES (smooth-shaded) ----
+    # ---- FOREGROUND BOTANICAL GARDEN TREES & AUTUMN LEAF SCATTER ----
     add_hedge_strip('Campus_Hedge_FL', -14.2, -6.5, 0.0, 4.4, 0.72, 0.55, mats, rng, flowers=True)
     add_hedge_strip('Campus_Hedge_FR', 14.2, -6.5, 0.0, 4.4, 0.72, 0.55, mats, rng, flowers=True)
     for i, (tx, ty, th, tr, ginkgo) in enumerate([
@@ -1269,6 +1468,16 @@ def build_campus_grounds(mats, rng):
         (14.2, 8.8, 5.6, 1.98, True),
     ]):
         add_tree(f'Campus_Tree_{i}', tx, ty, 0.0, th, tr, mats, rng, is_ginkgo=ginkgo, with_planter=True)
+
+    # Fallen botanical autumn leaf scatter along curb & under trees
+    leaf_mats = (mats['flower_gold'], mats['flower_coral'], mats['leaf_accent'])
+    for li in range(18):
+        lx = -26.0 + li * 3.05 + rng.uniform(-0.6, 0.6)
+        ly = -6.55 + rng.uniform(-0.35, 0.35)
+        if abs(lx) < 9.5:
+            continue
+        ico(f'Campus_FallenLeaf_{li}', (lx, ly, 0.08), rng.uniform(0.09, 0.16),
+            leaf_mats[li % len(leaf_mats)], sub=1, scale=(1.4, 1.1, 0.25), smooth=True)
 
     # ---- CONTINUOUS WOODED HORIZON GROVE BEHIND FENCE (positioned cleanly clear of neighbor footprints) ----
     horizon_spots = [

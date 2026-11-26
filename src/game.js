@@ -84,6 +84,7 @@ export class Game {
     this.weather = this.records.preferredWeather || 'clear'
     this.viewId = 'stardew'
     this.gameMode = this.records.preferredMode || 'memory_sequence'
+    this.qualityMode = this.records.preferredQuality || 'auto'
 
     // v3 story run state
     this.moodToken = 'lamp'
@@ -236,6 +237,7 @@ export class Game {
       this.scene.ready,
       new Promise(r => setTimeout(r, 2200))
     ])
+    if (this.scene.setQualityMode) this.scene.setQualityMode(this.qualityMode)
     this.scene.setSeason(this.season)
     this.scene.setWeatherFx(this.weather)
     if (this.dormId !== 'university') await this.scene.switchDorm(this.dormId, true)
@@ -410,6 +412,7 @@ export class Game {
       season: this.season,
       weather: this.weather,
       viewId: this.viewId,
+      qualityMode: this.qualityMode,
       gameMode: this.gameMode,
       aiSource: this.aiSource,
       keyEnabled: getUserApiKeyStatus().enabled,
@@ -422,6 +425,7 @@ export class Game {
       onSeason: id => this.changeSeason(id),
       onWeather: id => this.changeWeather(id),
       onView: id => this.changeView(id),
+      onQualityMode: id => this.changeQualityMode(id),
       onSelectMode: id => { this.gameMode = id; this.records.preferredMode = id; saveRecords(this.records); this.showHub() },
       onLaunchMode: id => this.launchGame(id),
       onReplayDialogue: () => this.replayDialogue(),
@@ -484,6 +488,17 @@ export class Game {
   changeView(viewId) {
     this.viewId = CAMERA_VIEW_IDS.includes(viewId) ? viewId : 'stardew'
     this.scene.setCameraView(this.viewId, false)
+    if (this.state === 'hub') this.showHub()
+  }
+
+  changeQualityMode(modeId) {
+    if (this.audio) this.audio.unlock()
+    this.qualityMode = ['auto', 'ultra', 'eco'].includes(modeId) ? modeId : 'auto'
+    this.records.preferredQuality = this.qualityMode
+    saveRecords(this.records)
+    if (this.scene.setQualityMode) this.scene.setQualityMode(this.qualityMode)
+    const label = this.qualityMode === 'ultra' ? '极致原画 · 已解锁 2.0x 超清' : this.qualityMode === 'eco' ? '极速畅玩 · 直出稳 60+ 帧' : '智能 60帧 · 自动满血优化'
+    this.ui.toast('渲染画质已切换', label)
     if (this.state === 'hub') this.showHub()
   }
 

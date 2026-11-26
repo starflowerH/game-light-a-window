@@ -314,10 +314,11 @@ function rooftopSvg() {
 
 function createInteriorAtlas() {
   const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 512
+  canvas.width = 1024
+  canvas.height = 1024
   const ctx = canvas.getContext('2d')
   if (!ctx) return new THREE.Texture()
+  ctx.scale(2, 2)
 
   ctx.fillStyle = '#0f121d'
   ctx.fillRect(0, 0, 512, 512)
@@ -588,8 +589,10 @@ export class Scene {
     this._harmonyUntil = 0
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
-    this._pixelRatioCap = matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
+    const isCoarse = matchMedia('(pointer: coarse)').matches
+    this._pixelRatioCap = isCoarse ? 1.65 : 2.0
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this._pixelRatioCap))
+    this._maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy?.() || 4)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.18
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -617,8 +620,11 @@ export class Scene {
     this.controls.target.set(0, -32, 0)
 
     const pmrem = new THREE.PMREMGenerator(this.renderer)
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this._envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    pmrem.dispose()
+    this.scene.environment = this._envTex
     this.scene.environmentIntensity = 0.28
+    this._useComposer = true
 
     this._haloTex = brushHaloTexture()
     this._beaconTex = beaconTexture()
@@ -635,9 +641,11 @@ export class Scene {
     this._floorSigns = new Map()
     this._pings = []
 
-    // Adaptive quality controller state (Features A1/A6 · 60fps target)
+    // Adaptive quality controller state (auto | ultra | eco)
     this._targetFps = 60
+    this._qualityMode = 'auto'
     this._quality = 3
+    this._pondWaterMat = null
     this._frameTimes = new Float32Array(60)
     this._frameTimeIdx = 0
     this._frameCount = 0
@@ -776,12 +784,19 @@ export class Scene {
 
       const texSet = this._texKit[matName]
       if (texSet && mat.isMeshStandardMaterial) {
+        if (texSet.map.anisotropy !== this._maxAniso) texSet.map.anisotropy = this._maxAniso
+        if (texSet.normalMap.anisotropy !== this._maxAniso) texSet.normalMap.anisotropy = this._maxAniso
         mat.map = texSet.map
         mat.normalMap = texSet.normalMap
-        mat.normalScale = new THREE.Vector2(0.36, 0.36)
+        const nStr = (matName === 'Mat_Trim_Cream' || matName === 'Mat_Stone_Trim') ? 0.24 : 0.42
+        mat.normalScale = new THREE.Vector2(nStr, nStr)
         // Brighten albedo multiplier when vertex colors & diffuse texture combine
         if (mat.color) mat.color.lerp(new THREE.Color(0xffffff), 0.78)
-        mat.roughness = Math.max(0.58, mat.roughness || 0.82)
+        mat.roughness = matName === 'Mat_Pond_Water' ? 0.16 : Math.max(0.54, mat.roughness || 0.82)
+        if (matName === 'Mat_Pond_Water') {
+          mat.metalness = 0.28
+          this._pondWaterMat = mat
+        }
         mat.needsUpdate = true
       }
 
@@ -826,6 +841,7 @@ export class Scene {
   /** @param {THREE.Object3D} sceneClone */
   _mountGroundsGlb(sceneClone) {
     this._clearGroup(this.groundsGroup)
+    this._pondWaterMat = null
     this.groundsRoot = sceneClone.clone(true)
     this._styleGlbHierarchy(this.groundsRoot, true)
     this.groundsGroup.add(this.groundsRoot)
@@ -1023,6 +1039,16 @@ export class Scene {
         uniform float uTime;
 
         void main() {
+          float edgeDist = min(vUv.x, min(1.0 - vUv.x, min(vUv.y, 1.0 - vUv.y)));
+          float frame = smoothstep(0.015, 0.040, edgeDist);
+          vec3 frameCol = vec3(0.07, 0.06, 0.10);
+
+          if (uState < 0.5) {
+            vec3 darkGlass = vec3(0.036, 0.052, 0.102) * (0.82 + 0.22 * vUv.y);
+            gl_FragColor = vec4(mix(frameCol, darkGlass, frame), 1.0);
+            return;
+          }
+
           vec3 boxMin = vec3(-uWinSize.x * 0.5, -uWinSize.y * 0.5, -uRoomDepth);
           vec3 boxMax = vec3(uWinSize.x * 0.5, uWinSize.y * 0.5, 0.0);
 
@@ -1054,9 +1080,7 @@ export class Scene {
           vec4 roomTex = texture2D(uAtlas, atlasUv);
 
           vec3 col;
-          if (uState < 0.5) {
-            col = roomTex.rgb * 0.035 + vec3(0.03, 0.045, 0.09) * (0.8 + 0.2 * vUv.y);
-          } else if (uState >= 2.5 && uState < 3.5) {
+          if (uState >= 2.5 && uState < 3.5) {
             float flick = 0.94 + 0.06 * sin(uTime * 16.0 + uRoomIndex);
             col = roomTex.rgb * vec3(0.40, 0.70, 1.15) * flick;
           } else if (uState >= 4.5 && uState < 5.5) {
@@ -1068,11 +1092,7 @@ export class Scene {
             col = roomTex.rgb * uWarmColor * breath;
           }
 
-          float edgeDist = min(vUv.x, min(1.0 - vUv.x, min(vUv.y, 1.0 - vUv.y)));
-          float frame = smoothstep(0.015, 0.040, edgeDist);
-          vec3 frameCol = vec3(0.07, 0.06, 0.10);
           col = mix(frameCol, col, frame);
-
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -1166,18 +1186,62 @@ export class Scene {
     return this._quality
   }
 
+  getQualityMode() {
+    return this._qualityMode
+  }
+
+  /** @param {'auto'|'ultra'|'eco'} mode */
+  setQualityMode(mode) {
+    const m = (mode === 'ultra' || mode === 'eco') ? mode : 'auto'
+    this._qualityMode = m
+    this._degradeTimer = 0
+    this._upgradeTimer = 0
+    if (m === 'ultra') {
+      this._quality = -1
+      this.setQuality(3)
+    } else if (m === 'eco') {
+      this._quality = -1
+      this.setQuality(0)
+    } else {
+      this._quality = -1
+      this.setQuality(3)
+    }
+  }
+
   setQuality(q) {
     const level = Math.max(0, Math.min(3, Math.floor(q)))
     if (this._quality === level) return
     this._quality = level
 
     const coarse = matchMedia('(pointer: coarse)').matches
-    const dpr = level === 3 ? (coarse ? 1.25 : 1.5) : level === 2 ? (coarse ? 1.15 : 1.25) : level === 1 ? 1.1 : 1.0
+    const ultra = this._qualityMode === 'ultra'
+    const dpr = level === 3
+      ? (ultra ? 2.0 : (coarse ? 1.35 : 1.5))
+      : level === 2
+        ? (coarse ? 1.25 : 1.35)
+        : level === 1 ? 1.1 : (this._qualityMode === 'eco' ? (coarse ? 1.0 : 1.1) : 1.0)
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, dpr))
     this._resize()
 
+    if (this.scene && this._envTex !== undefined) {
+      this.scene.environment = level >= 2 ? this._envTex : null
+    }
+
+    if (this.moonLight && this.moonLight.shadow) {
+      const targetShadow = level >= 2 ? 2048 : 1024
+      if (this.moonLight.shadow.mapSize.x !== targetShadow) {
+        this.moonLight.shadow.mapSize.set(targetShadow, targetShadow)
+        if (this.moonLight.shadow.map) {
+          this.moonLight.shadow.map.dispose()
+          this.moonLight.shadow.map = null
+        }
+        this._bakeShadows()
+      }
+    }
+
+    this._useComposer = level >= 1
     if (this.spillMesh) {
-      this.spillMesh.visible = level >= 2
+      this.spillMesh.visible = level >= 2 || this._qualityMode === 'eco'
     }
 
     if (this.bloom) {
@@ -1186,30 +1250,24 @@ export class Scene {
 
     if (this.painterly) {
       const u = this.painterly.material.uniforms
-      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.42 : level === 2 ? 0.50 : 0.54
-      u.uKuwaharaRadius.value = level >= 3 ? 1.40 : level === 2 ? 1.15 : 0.90
-      if (u.uFastMode) u.uFastMode.value = level <= 2 ? 1.0 : 0.0
+      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.36 : level === 2 ? 0.42 : 0.44
+      u.uKuwaharaRadius.value = level >= 3 ? 1.18 : level === 2 ? 1.05 : 0.85
+      if (u.uFastMode) u.uFastMode.value = (level <= 2 && !ultra) ? 1.0 : 0.0
     }
 
     if (this.mistGroup) {
       this.mistGroup.visible = (level >= 2) && (this._fogStrength > 0.015)
     }
 
-    // Keep Interior Mapping enabled across tiers 1-3 to avoid shader recompile spikes; only downgrade at tier 0
+    // Keep Interior Mapping enabled across all tiers cleanly via dark-window early-out
     for (const w of this.windows) {
       const isShader = Boolean(w.glass.material && /** @type {any} */ (w.glass.material).uniforms)
-      if (level >= 1 && !isShader) {
+      if (!isShader) {
         const winW = w.winW || 34
         const winH = w.winH || 44
         const oldMat = /** @type {any} */ (w.glass.material)
         if (oldMat && oldMat.dispose) oldMat.dispose()
         w.glass.material = this._createInteriorMaterial(w.idx, winW, winH)
-        w.texKey = ''
-        this._paintWindow(w)
-      } else if (level === 0 && isShader) {
-        const oldMat = /** @type {any} */ (w.glass.material)
-        if (oldMat && oldMat.dispose) oldMat.dispose()
-        w.glass.material = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
         w.texKey = ''
         this._paintWindow(w)
       }
@@ -1242,13 +1300,9 @@ export class Scene {
     silhouette.position.z = 0.8
     group.add(silhouette)
 
-    const glassMat = this._quality >= 1
-      ? this._createInteriorMaterial(idx, winW, winH)
-      : new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true })
-    if (this._quality >= 1) {
-      backPanel.visible = false
-      silhouette.visible = false
-    }
+    const glassMat = this._createInteriorMaterial(idx, winW, winH)
+    backPanel.visible = false
+    silhouette.visible = false
 
     const glass = new THREE.Mesh(
       new THREE.PlaneGeometry(winW, winH),
@@ -1612,8 +1666,22 @@ export class Scene {
       depthWrite: false, side: THREE.BackSide,
       uniforms: { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, bot: { value: new THREE.Color() } },
       vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'varying vec3 vP; uniform vec3 top; uniform vec3 mid; uniform vec3 bot;\n' +
-        'void main(){ float h = normalize(vP).y; vec3 c = h > 0.0 ? mix(mid, top, pow(clamp(h,0.0,1.0),0.7)) : mix(mid, bot, clamp(-h*2.2,0.0,1.0)); gl_FragColor = vec4(c,1.0); }'
+      fragmentShader:
+        'varying vec3 vP; uniform vec3 top; uniform vec3 mid; uniform vec3 bot;\n' +
+        'float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n' +
+        'float n2(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);\n' +
+        '  return mix(mix(h2(i),h2(i+vec2(1.0,0.0)),u.x), mix(h2(i+vec2(0.0,1.0)),h2(i+vec2(1.0,1.0)),u.x), u.y); }\n' +
+        'void main(){\n' +
+        '  vec3 d = normalize(vP);\n' +
+        '  float h = d.y;\n' +
+        '  vec3 c = h > 0.0 ? mix(mid, top, pow(clamp(h,0.0,1.0),0.68)) : mix(mid, bot, clamp(-h*2.2,0.0,1.0));\n' +
+        '  float milky = exp(-pow((d.x * 0.72 + d.y * 0.65 - 0.34) * 3.8, 2.0)) * smoothstep(0.04, 0.55, h);\n' +
+        '  float neb = n2(d.xy * 11.0) * 0.65 + n2(d.xz * 21.0) * 0.35;\n' +
+        '  c += mix(vec3(0.14, 0.20, 0.38), vec3(0.26, 0.22, 0.42), neb) * milky * 0.32;\n' +
+        '  float horiz = exp(-abs(h - 0.02) * 14.0);\n' +
+        '  c += mix(mid, vec3(0.55, 0.42, 0.34), 0.35) * horiz * 0.16;\n' +
+        '  gl_FragColor = vec4(c, 1.0);\n' +
+        '}'
     })
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(3200, 40, 20), this.skyMat)
     this.sky.frustumCulled = false
@@ -1986,18 +2054,19 @@ export class Scene {
     this.fillLight.position.set(-240, 220, 540)
     this.scene.add(this.fillLight)
 
-    this.moonLight = new THREE.DirectionalLight(0xcbe0ff, 1.35)
+    this.moonLight = new THREE.DirectionalLight(0xcbe0ff, 1.38)
     this.moonLight.position.set(340, 460, 280)
     this.moonLight.castShadow = true
-    this.moonLight.shadow.mapSize.set(1024, 1024)
+    this.moonLight.shadow.mapSize.set(2048, 2048)
     this.moonLight.shadow.camera.near = 60
     this.moonLight.shadow.camera.far = 1600
-    const d = 560
+    const d = 480
     this.moonLight.shadow.camera.left = -d
     this.moonLight.shadow.camera.right = d
     this.moonLight.shadow.camera.top = d
     this.moonLight.shadow.camera.bottom = -d
-    this.moonLight.shadow.bias = -0.0005
+    this.moonLight.shadow.bias = -0.00035
+    this.moonLight.shadow.normalBias = 0.40
     this.scene.add(this.moonLight)
 
     this.warmLight = new THREE.PointLight(0xffb060, 0, 720, 1.8)
@@ -2847,7 +2916,8 @@ export class Scene {
     this.renderer.setSize(w, h)
     this.composer.setSize(w, h)
     if (this.bloom) {
-      this.bloom.setSize(Math.max(1, Math.floor(w * 0.5)), Math.max(1, Math.floor(h * 0.5)))
+      const bloomMul = this._qualityMode === 'ultra' ? 0.70 : 0.42
+      this.bloom.setSize(Math.max(1, Math.floor(w * bloomMul)), Math.max(1, Math.floor(h * bloomMul)))
     }
     this._canvasRect = this.renderer.domElement.getBoundingClientRect()
     if (this.painterly) {
@@ -2876,22 +2946,22 @@ export class Scene {
     this._frameTimeIdx = (this._frameTimeIdx + 1) % 60
     this._frameCount = Math.min(60, this._frameCount + 1)
 
-    if (this._frameCount >= 60) {
+    if (this._qualityMode === 'auto' && this._frameCount >= 60) {
       let sum = 0
       for (let i = 0; i < 60; i++) sum += this._frameTimes[i]
       const avgMs = sum / 60
 
-      if (avgMs > 18.8) {
+      if (avgMs > 19.8) {
         this._degradeTimer += dt
         this._upgradeTimer = 0
-        if (this._degradeTimer >= 1.2 && this._quality > 0) {
+        if (this._degradeTimer >= 1.5 && this._quality > 0) {
           this.setQuality(this._quality - 1)
           this._degradeTimer = 0
         }
-      } else if (avgMs < 13.5) {
+      } else if (avgMs < 15.0) {
         this._upgradeTimer += dt
         this._degradeTimer = 0
-        if (this._upgradeTimer >= 5.0 && this._quality < 3) {
+        if (this._upgradeTimer >= 3.5 && this._quality < 3) {
           this.setQuality(this._quality + 1)
           this._upgradeTimer = 0
         }
@@ -2899,6 +2969,10 @@ export class Scene {
         this._degradeTimer = Math.max(0, this._degradeTimer - dt)
         this._upgradeTimer = Math.max(0, this._upgradeTimer - dt)
       }
+    }
+
+    if (this._pondWaterMat && this._pondWaterMat.normalMap) {
+      this._pondWaterMat.normalMap.offset.set((t * 0.022) % 1, (t * 0.016) % 1)
     }
 
     // Facade bloom, exposure & puddle glow easing linked to lit window ratio (zero alloc loop)
@@ -2943,7 +3017,7 @@ export class Scene {
     }
 
     // Update Interior Mapping uniforms only when camera moved or window is lit
-    if (this._quality >= 1) {
+    if (this._quality >= 0) {
       const camPos = this.camera.position
       const camMoved = this._lastCamPos.distanceToSquared(camPos) > 1e-4
       if (camMoved) this._lastCamPos.copy(camPos)
@@ -3171,7 +3245,12 @@ export class Scene {
       u.uRainAmount.value = this._rain
       u.uDawn.value = this._dawn
     }
-    this.composer.render()
+    if (this._useComposer) {
+      this.composer.render()
+    } else {
+      this.renderer.setRenderTarget(null)
+      this.renderer.render(this.scene, this.camera)
+    }
   }
 
   dispose() {
@@ -3185,6 +3264,7 @@ export class Scene {
     }
     if (this._spillTex) this._spillTex.dispose()
     if (this._cloudTex) this._cloudTex.dispose()
+    if (this._envTex) this._envTex.dispose()
     if (this._interiorAtlas) this._interiorAtlas.dispose()
     this.renderer.setAnimationLoop(null)
     document.removeEventListener('visibilitychange', this._onVis)

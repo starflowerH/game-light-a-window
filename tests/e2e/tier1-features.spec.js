@@ -1278,7 +1278,7 @@ test.describe('Tier 1: Feature Coverage (20 Features)', () => {
       })
 
       expect(renderAudit).not.toBeNull()
-      expect(renderAudit.initialStrength).toBeCloseTo(0.40, 2)
+      expect(renderAudit.initialStrength).toBeCloseTo(0.44, 2)
       expect(renderAudit.updatedStrength).toBe(0.60)
       expect(renderAudit.glError).toBe(0)
     })
@@ -1410,7 +1410,7 @@ test.describe('Tier 1: Feature Coverage (20 Features)', () => {
       expect(fxState.groundWet).toBe(true)
       expect(fxState.snowVisible).toBe(true)
       expect(fxState.mistVisible).toBe(true)
-      expect(fxState.fogDensity).toBeCloseTo(0.00050, 5)
+      expect(fxState.fogDensity).toBeCloseTo(0.00052, 5)
     })
 
     test('18.3: season settings update palette and foliage materials', async ({ page }) => {
