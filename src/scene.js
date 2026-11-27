@@ -2441,8 +2441,8 @@ export class Scene {
     const aspect = this.camera.aspect || 1
     const v = new THREE.Vector3(...look)
     if (aspect < 0.85 && (this.cameraView === 'front' || this.cameraView === 'stardew')) {
-      // Shift look target up slightly on tall mobile portrait viewports so building sits nicely below top HUD without excessive road whitespace
-      v.y = this.dormId === 'grad' ? 14 : 6
+      // Balance vertical framing on portrait phones so windows scale larger without excess lower lawn whitespace
+      v.y = this.dormId === 'grad' ? -18 : -26
     }
     return v
   }
@@ -2452,7 +2452,7 @@ export class Scene {
     const v = new THREE.Vector3(...pos)
     // Scale distance proportionally on narrow portrait viewports so all 6 columns remain visible
     if (aspect < 1.0) {
-      const portraitZoom = Math.min(2.02, Math.max(1.08, 0.85 / Math.max(0.42, aspect)))
+      const portraitZoom = Math.min(1.88, Math.max(1.06, 0.79 / Math.max(0.42, aspect)))
       v.multiplyScalar(portraitZoom)
     }
     if (this.dormId === 'grad') v.multiplyScalar(1.07)

@@ -205,6 +205,36 @@ export class MusicDial {
   _bindEvents() {
     // Vertically draggable edge capsule: tap expands turntable, drag moves dock height smoothly
     let pillPtr = null
+    const onPillMove = e => {
+      if (!pillPtr || e.pointerId !== pillPtr.id) return
+      const dy = e.clientY - pillPtr.startY
+      if (!pillPtr.moved && Math.abs(dy) >= 6) {
+        pillPtr.moved = true
+        this.root.classList.add('pill-dragging')
+      }
+      if (pillPtr.moved) {
+        if (e.cancelable) e.preventDefault()
+        const h = pillPtr.vh || window.innerHeight || 800
+        const nextY = Math.max(74, Math.min(h - 86, pillPtr.startTopPx + dy))
+        this._pillTopPct = (nextY / h) * 100
+        this._applyDockPosition()
+      }
+    }
+    const finishPillPtr = e => {
+      if (!pillPtr || e.pointerId !== pillPtr.id) return
+      const moved = pillPtr.moved
+      pillPtr = null
+      if (typeof removeEventListener === 'function') {
+        removeEventListener('pointermove', onPillMove, true)
+        removeEventListener('pointerup', finishPillPtr, true)
+        removeEventListener('pointercancel', finishPillPtr, true)
+      }
+      if (moved) {
+        this.root.classList.remove('pill-dragging')
+        this._saveTopPct(this._pillTopPct)
+        this._suppressPillClickUntil = performance.now() + 220
+      }
+    }
     this._pill.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       const rect = this._pill.getBoundingClientRect()
@@ -216,36 +246,12 @@ export class MusicDial {
         moved: false,
         vh: h
       }
-    })
-    this._pill.addEventListener('pointermove', e => {
-      if (!pillPtr || e.pointerId !== pillPtr.id) return
-      const dy = e.clientY - pillPtr.startY
-      if (!pillPtr.moved && Math.abs(dy) >= 6) {
-        pillPtr.moved = true
-        this.root.classList.add('pill-dragging')
-        if (this._pill.setPointerCapture) {
-          try { this._pill.setPointerCapture(e.pointerId) } catch {}
-        }
-      }
-      if (pillPtr.moved) {
-        e.preventDefault()
-        const h = pillPtr.vh || window.innerHeight || 800
-        const nextY = Math.max(74, Math.min(h - 86, pillPtr.startTopPx + dy))
-        this._pillTopPct = (nextY / h) * 100
-        this._applyDockPosition()
+      if (typeof addEventListener === 'function') {
+        addEventListener('pointermove', onPillMove, { capture: true, passive: false })
+        addEventListener('pointerup', finishPillPtr, true)
+        addEventListener('pointercancel', finishPillPtr, true)
       }
     })
-    const finishPillPtr = e => {
-      if (!pillPtr || e.pointerId !== pillPtr.id) return
-      if (pillPtr.moved) {
-        this.root.classList.remove('pill-dragging')
-        this._saveTopPct(this._pillTopPct)
-        this._suppressPillClickUntil = performance.now() + 180
-      }
-      pillPtr = null
-    }
-    this._pill.addEventListener('pointerup', finishPillPtr)
-    this._pill.addEventListener('pointercancel', finishPillPtr)
     this._pill.onclick = () => {
       if (performance.now() < this._suppressPillClickUntil) return
       this.toggle()
@@ -270,15 +276,71 @@ export class MusicDial {
       }
     }
 
-    // Continuous finger & mouse rotary spin across expanded wheel & slots
+    // Continuous finger & mouse rotary spin across expanded wheel & slots (capture + window listeners so fast swipes anywhere never drop)
     let wheelPtr = null
     const pivotAngle = (cx, cy, x, y) => Math.atan2(y - cy, Math.max(32, cx - x))
+
+    this._wheel.addEventListener('click', e => {
+      if (performance.now() < this._wheelSuppressClickUntil) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }, true)
+
+    const onWheelMove = e => {
+      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
+      const dist = Math.hypot(e.clientX - wheelPtr.startX, e.clientY - wheelPtr.startY)
+      if (!wheelPtr.dragging && dist >= 7) {
+        wheelPtr.dragging = true
+        this._isWheelDragging = true
+        this.root.classList.add('is-dragging')
+      }
+      if (wheelPtr.dragging) {
+        if (e.cancelable) e.preventDefault()
+        const curA = pivotAngle(wheelPtr.cx, wheelPtr.cy, e.clientX, e.clientY)
+        const dAngle = curA - wheelPtr.startA
+        const vertBlend = (e.clientY - wheelPtr.startY) / (window.innerWidth <= 600 ? 130 : 165)
+        const slotsDelta = Math.abs(dAngle) > 0.02 ? (dAngle / 0.42 + vertBlend) * 0.58 : vertBlend
+        this._dragSlotDelta = slotsDelta
+        this._layoutWheel(slotsDelta)
+        if (this._vinylEl) {
+          this._vinylEl.style.transform = `rotate(${(slotsDelta * 36).toFixed(1)}deg)`
+        }
+      }
+    }
+
+    const finishWheelPtr = e => {
+      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
+      const wasDrag = wheelPtr.dragging
+      wheelPtr = null
+      if (typeof removeEventListener === 'function') {
+        removeEventListener('pointermove', onWheelMove, true)
+        removeEventListener('pointerup', finishWheelPtr, true)
+        removeEventListener('pointercancel', finishWheelPtr, true)
+      }
+      if (wasDrag) {
+        this._isWheelDragging = false
+        this.root.classList.remove('is-dragging')
+        if (this._vinylEl) this._vinylEl.style.transform = ''
+        const n = BGM_TRACKS.length
+        const activeIdx = Math.max(0, BGM_TRACKS.findIndex(t => t.id === this._state.mode))
+        const steps = Math.round(-this._dragSlotDelta)
+        this._dragSlotDelta = 0
+        this._wheelSuppressClickUntil = performance.now() + 240
+        if (steps !== 0 && this._handlers.onSelectTrack) {
+          const nextIdx = ((activeIdx + steps) % n + n) % n
+          this._handlers.onSelectTrack(BGM_TRACKS[nextIdx].id)
+        } else {
+          this._layoutWheel(0)
+        }
+      }
+    }
 
     this._wheel.addEventListener('pointerdown', e => {
       if (!this.expanded) return
       if (e.pointerType === 'mouse' && e.button !== 0) return
       const tgt = e.target
-      if (tgt instanceof Element && tgt.closest('.md-core-controls button, .md-core-controls label')) return
+      if (tgt instanceof Element && tgt.closest('input[type="file"], .md-upload')) return
       const dr = this._wheel.getBoundingClientRect()
       const cy = dr.top || (window.innerHeight || 800) / 2
       const cx = window.innerWidth || 1200
@@ -291,57 +353,12 @@ export class MusicDial {
         startA: pivotAngle(cx, cy, e.clientX, e.clientY),
         dragging: false
       }
-    })
-
-    this._wheel.addEventListener('pointermove', e => {
-      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
-      const dist = Math.hypot(e.clientX - wheelPtr.startX, e.clientY - wheelPtr.startY)
-      if (!wheelPtr.dragging && dist >= 7) {
-        wheelPtr.dragging = true
-        this._isWheelDragging = true
-        this.root.classList.add('is-dragging')
-        if (this._wheel.setPointerCapture) {
-          try { this._wheel.setPointerCapture(e.pointerId) } catch {}
-        }
+      if (typeof addEventListener === 'function') {
+        addEventListener('pointermove', onWheelMove, { capture: true, passive: false })
+        addEventListener('pointerup', finishWheelPtr, true)
+        addEventListener('pointercancel', finishWheelPtr, true)
       }
-      if (wheelPtr.dragging) {
-        e.preventDefault()
-        const curA = pivotAngle(wheelPtr.cx, wheelPtr.cy, e.clientX, e.clientY)
-        const dAngle = curA - wheelPtr.startA
-        // Combine angular rotation with vertical swipe sensitivity so dragging anywhere spins intuitively
-        const vertBlend = (e.clientY - wheelPtr.startY) / (window.innerWidth <= 600 ? 150 : 195)
-        const slotsDelta = Math.abs(dAngle) > 0.02 ? (dAngle / 0.42 + vertBlend) * 0.55 : vertBlend
-        this._dragSlotDelta = slotsDelta
-        this._layoutWheel(slotsDelta)
-        if (this._vinylEl) {
-          this._vinylEl.style.transform = `rotate(${(slotsDelta * 36).toFixed(1)}deg)`
-        }
-      }
-    })
-
-    const finishWheelPtr = e => {
-      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
-      const wasDrag = wheelPtr.dragging
-      wheelPtr = null
-      if (wasDrag) {
-        this._isWheelDragging = false
-        this.root.classList.remove('is-dragging')
-        if (this._vinylEl) this._vinylEl.style.transform = ''
-        const n = BGM_TRACKS.length
-        const activeIdx = Math.max(0, BGM_TRACKS.findIndex(t => t.id === this._state.mode))
-        const steps = Math.round(-this._dragSlotDelta)
-        this._dragSlotDelta = 0
-        this._wheelSuppressClickUntil = performance.now() + 180
-        if (steps !== 0 && this._handlers.onSelectTrack) {
-          const nextIdx = ((activeIdx + steps) % n + n) % n
-          this._handlers.onSelectTrack(BGM_TRACKS[nextIdx].id)
-        } else {
-          this._layoutWheel(0)
-        }
-      }
-    }
-    this._wheel.addEventListener('pointerup', finishWheelPtr)
-    this._wheel.addEventListener('pointercancel', finishWheelPtr)
+    }, true)
 
     // Mouse-wheel rotary scroll on desktop
     this._wheel.addEventListener('wheel', e => {
