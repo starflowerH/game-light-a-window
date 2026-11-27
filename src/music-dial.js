@@ -330,13 +330,14 @@ export class MusicDial {
         cancelAnimationFrame(this._raf)
         this._raf = 0
       }
-      for (const el of this._eqBars) {
-        const bar = /** @type {HTMLElement} */ (el)
-        bar.style.transform = 'scaleY(0.24)'
+      const idleHeights = [0.32, 0.68, 0.46, 0.84, 0.54]
+      for (let i = 0; i < this._eqBars.length; i++) {
+        const bar = /** @type {HTMLElement} */ (this._eqBars[i])
+        bar.style.transform = `scaleY(${idleHeights[i] ?? 0.36})`
       }
-      for (const el of this._radialBars) {
-        const rbar = /** @type {HTMLElement} */ (el)
-        rbar.style.transform = 'rotate(var(--rdeg)) scaleX(0.35)'
+      for (let i = 0; i < this._radialBars.length; i++) {
+        const rbar = /** @type {HTMLElement} */ (this._radialBars[i])
+        rbar.style.transform = `rotate(var(--rdeg)) scaleX(${(0.35 + (i % 3) * 0.14).toFixed(2)})`
       }
     }
   }
