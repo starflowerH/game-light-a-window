@@ -28,6 +28,7 @@ import {
 import { buildOfflinePlan, buildOfflineEvolution, buildOfflineEpilogue } from './narrative-graph.js'
 import { buildOfflineDialogue } from './npc-portraits.js'
 import { ENDING_IDS, MOOD_TOKEN_IDS, dormDef, gameModeDef } from '../shared/constants.js'
+import { evaluateRunTier } from '../shared/ranks.js'
 
 export const DIRECT_BASE = 'https://api.deepseek.com/v1'
 
@@ -480,15 +481,26 @@ export class AIClient {
    * @param {{ gameMode?: string, dormType?: string, stageReached?: number, accuracyPct?: number, score?: number, playerNick?: string }} input
    */
   async requestInspectorDebrief(input = {}) {
+    const modeId = input.gameMode || 'memory_sequence'
     const dorm = dormDef(input.dormType || 'university')
-    const mode = gameModeDef(input.gameMode || 'memory_sequence')
+    const mode = gameModeDef(modeId)
     const acc = Math.max(0, Math.min(100, Math.round(Number(input.accuracyPct) || 0)))
     const stage = Math.max(1, Number(input.stageReached) || 1)
+    const score = Math.max(0, Number(input.score) || 0)
+    const tier = evaluateRunTier({ gameMode: modeId, score, stageReached: stage, accuracyPct: acc })
 
     const offline = () => {
-      const rankTitle = acc >= 92 ? '精准夜巡官' : acc >= 75 ? '细心守灯人' : '温柔见习生'
-      const auntComment = `${dorm.shortName}今晚的第 ${stage} 关巡查记录妥当，准确率 ${acc}%，宿管室的热茶给你留着。`
-      const deanComment = acc >= 85 ? '周副校长在巡查本旁记了一句“路线熟悉，值得表扬”。' : '周副校长点点头：记住先看楼层参考窗，下次会更稳。'
+      const rankTitle = (tier.tierIndex >= 3 && acc >= 90)
+        ? `精准${tier.title}`
+        : (tier.tierIndex >= 2 && acc >= 75)
+          ? `稳健${tier.title}`
+          : tier.title
+      const auntComment = `${dorm.shortName}${tier.milestoneText}，准确率 ${acc}% · 得分 ${score}（${tier.code}级·${tier.title}），宿管室的热茶给你留着。`
+      const deanComment = (tier.tierIndex >= 3 && acc >= 85)
+        ? '周副校长在巡查本旁记了一句“路线熟悉，值得表扬”。'
+        : tier.nextTier
+          ? `周副校长点点头：距 ${tier.nextTier.code}·${tier.nextTier.title} 还差 ${tier.pointsToNext} 分，多连击更稳。`
+          : '周副校长在巡查本上郑重盖了金章：全校夜巡标杆！'
       this._report('offline')
       return {
         source: 'offline',
@@ -506,7 +518,7 @@ export class AIClient {
       try {
         const raw = await this._callDirect(
           DEBRIEF_SYSTEM_PROMPT,
-          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score: Number(input.score) || 0, playerNick: input.playerNick || '夜巡员' }),
+          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score, tierCode: tier.code, tierTitle: tier.title, playerNick: input.playerNick || '夜巡员' }),
           600
         )
         const payload = normalizeDebriefPayload(raw)

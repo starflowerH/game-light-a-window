@@ -23,9 +23,9 @@ export const PainterlyShader = {
     uDawn: { value: 0 },
     uKuwaharaRadius: { value: 0.95 },
     uComboVignette: { value: 0 },
-    uTiltShiftAmount: { value: 0.55 },
+    uTiltShiftAmount: { value: 0.34 },
     uTiltShiftCenter: { value: 0.46 },
-    uTiltShiftRange: { value: 0.24 },
+    uTiltShiftRange: { value: 0.34 },
     uFastMode: { value: 0.0 },
     uExposure: { value: 1.18 },
     uOutputToScreen: { value: 1.0 }
@@ -165,7 +165,7 @@ export const PainterlyShader = {
       // ---- 1. tilt-shift radius + fused Kuwahara + Sobel ---------------
       float distFromFocal = abs(uv.y - uTiltShiftCenter);
       float dof = smoothstep(uTiltShiftRange * 0.5, uTiltShiftRange * 2.2, distFromFocal);
-      float tiltRadius = uKuwaharaRadius * (1.0 + dof * 2.2 * uTiltShiftAmount);
+      float tiltRadius = uKuwaharaRadius * (1.0 + dof * 1.55 * uTiltShiftAmount);
       // Shrink radius on glowing window cores so interior silhouettes stay sharp
       float kr = max(0.6, tiltRadius * (1.0 - 0.62 * smoothstep(0.72, 0.96, baseLum)));
       vec2 stepK = px * kr;

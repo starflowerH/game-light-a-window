@@ -18,6 +18,7 @@ import {
   telemetryBucket
 } from '../shared/ai-schema.js'
 import { MOOD_TOKEN_IDS, ENDING_IDS, DORM_IDS, GAME_MODE_IDS, dormDef, gameModeDef } from '../shared/constants.js'
+import { evaluateRunTier } from '../shared/ranks.js'
 import { buildOfflineEpilogue, buildOfflineEvolution, buildOfflinePlan } from '../src/narrative-graph.js'
 import { buildOfflineDialogue } from '../src/npc-portraits.js'
 
@@ -396,20 +397,29 @@ export function createAgentHub({
       const stage = Math.max(1, Math.min(99, Number(input.stageReached) || 1))
       const acc = Math.max(0, Math.min(100, Math.round(Number(input.accuracyPct) || 0)))
       const score = Math.max(0, Number(input.score) || 0)
+      const tier = evaluateRunTier({ gameMode: modeId, score, stageReached: stage, accuracyPct: acc })
 
       const offline = () => ({
         source: 'offline',
         payload: {
-          rankTitle: acc >= 92 ? '17号楼夜巡特种兵' : acc >= 75 ? '秋裤战神副队长' : '宿管室摸鱼见习生',
-          auntComment: `${dorm.shortName}第 ${stage} 关被你巡得明明白白，准确率 ${acc}%，宿管室没收的红糖糍粑分你两块！`,
-          deanComment: acc >= 85 ? '周副校长在保温杯旁记了一笔：“眼神比我找招财猫还准，通报嘉奖！”' : '周副校长背着手清了清嗓子：“下次先盯准角上那扇偷吃泡面的窗，稳得很。”',
+          rankTitle: (tier.tierIndex >= 3 && acc >= 90)
+            ? `精准${tier.title}`
+            : (tier.tierIndex >= 2 && acc >= 75)
+              ? `稳健${tier.title}`
+              : tier.title,
+          auntComment: `${dorm.shortName}${tier.milestoneText} · 得分 ${score}（${tier.code}级），准确率 ${acc}%！`,
+          deanComment: (tier.tierIndex >= 3 && acc >= 85)
+            ? '周副校长在保温杯旁记了一笔：“手眼配合堪比专业宿管，通报嘉奖！”'
+            : tier.nextTier
+              ? `周副校长背着手清了清嗓子：“多打连击涨分，下一场冲刺 ${tier.nextTier.code}·${tier.nextTier.title}！”`
+              : '周副校长郑重盖上金章：“全校夜巡标杆，无人能及！”',
           sleepTip: '巡完这趟快把手机扣桌上，趁热泡面味散了抓紧钻被窝！',
-          whisperSuggestion: `今晚在${dorm.shortName}抓完偷亮灯，祝整栋楼好梦不秃头。`
+          whisperSuggestion: `今晚在${dorm.shortName}巡完夜灯，祝整栋楼好梦不秃头。`
         }
       })
       if (!configured) return offline()
 
-      const cacheKey = 'debrief_v6|' + fnv1a([modeId, dormType, stage, Math.floor(acc / 10)].join('|'))
+      const cacheKey = 'debrief_v7|' + fnv1a([modeId, dormType, stage, tier.code, Math.floor(acc / 15)].join('|'))
       const cached = db.getCachedAiPayload(cacheKey)
       if (cached) {
         const normalised = normalizeDebriefPayload(cached)
@@ -418,7 +428,7 @@ export function createAgentHub({
       try {
         const raw = await callModel(
           DEBRIEF_SYSTEM_PROMPT,
-          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score, playerNick: sanitizeText(input.playerNick, 8) || '夜巡员' }),
+          JSON.stringify({ modeName: mode.name, dormName: dorm.name, stage, accuracyPct: acc, score, tierCode: tier.code, tierTitle: tier.title, playerNick: sanitizeText(input.playerNick, 8) || '夜巡员' }),
           600
         )
         const payload = normalizeDebriefPayload(raw)

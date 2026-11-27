@@ -103,12 +103,19 @@ export class UI {
     this.hudEl = null
     this._hv4 = null
     this._nightTierEl = null
+    this._comboBarEl = null
+    this._comboDecayEl = null
+    this._timeEl = null
     this._dirty = { sec: -1, warmth: -1, combo: -1, lit: -1 }
   }
 
   // -------------------------------------------------------------- loading
 
   showLoading(text) {
+    if (this._cur && this._cur.querySelector('.spin')) {
+      const h2 = qs(this._cur, 'h2')
+      if (h2) { h2.textContent = text || '正在点亮校园星夜'; return }
+    }
     this.hideAll()
     const s = this._layer()
     s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '正在点亮校园星夜') + '</h2><p class="lede center">载入建筑与光影…</p></div>'
@@ -160,6 +167,7 @@ export class UI {
       '<div class="title-hero">' +
         '<h1 class="title-h1">今晚，亮一盏灯</h1>' +
         '<p class="title-sub">点亮星夜里的每一扇晚安窗</p>' +
+        '<p class="title-guide">点按或滑动点亮微光窗 · 拖拽可环顾 3D 校园夜色</p>' +
         '<div class="title-actions">' +
           '<button class="btn primary" data-act="enter">进入校园夜巡</button>' +
           '<button class="btn ghost" data-act="start">三夜剧情</button>' +
@@ -497,7 +505,7 @@ export class UI {
         '<div class="hub-modes">' +
           GAME_MODES.map(m =>
             '<div class="mode-card ' + (m.id === opts.gameMode ? 'on' : '') + (m.id === 'star_sweep' ? ' hero-mode' : '') + '" data-mode="' + esc(m.id) + '">' +
-              '<div class="mode-card-head"><b>' + esc(m.shortName) + '</b><button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始</button></div>' +
+              '<div class="mode-card-head"><span class="mode-title-wrap"><b>' + esc(m.shortName) + '</b>' + (m.id === 'star_sweep' ? '<em class="mode-rec-badge">首推</em>' : '') + '</span><button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始</button></div>' +
               '<span class="mc-desc">' + esc(m.desc) + '</span>' +
             '</div>'
           ).join('') +
@@ -776,7 +784,9 @@ export class UI {
           '<div class="cell"><b>' + (summary.score || 0) + '</b><span>夜巡积分</span></div>' +
           '<div class="cell"><b>' + (summary.accuracyPct ?? 100) + '%</b><span>准确率</span></div>' +
           '<div class="cell"><b>第 ' + (summary.stageReached || 1) + '/' + tier.maxStage + ' ' + (summary.gameMode === 'patrol_reflex' ? '波' : '关') + '</b><span>挑战深度</span></div>' +
-          '<div class="cell"><b>' + (summary.correctCount || 0) + '</b><span>正确点亮</span></div>' +
+          (summary.gameMode === 'patrol_reflex'
+            ? '<div class="cell"><b>' + (summary.correctCount || 0) + ' / ' + (summary.missedOwls || 0) + '</b><span>捕获 / 漏网</span></div>'
+            : '<div class="cell"><b>' + (summary.correctCount || 0) + '</b><span>正确点亮</span></div>') +
         '</div>' +
         (rank || (myRank && myRank.rank)
           ? '<div class="rank-line">当前榜单第 <b>#' + (myRank?.rank || rank) + '</b> 名' + (myRank ? ' · 领先 ' + myRank.percentile + '% 同学' : '') + '</div>'
@@ -988,7 +998,7 @@ export class UI {
         '<div class="stats">' +
           '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
           '<div class="warmbar"><i data-warmbar></i></div>' +
-          '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
+          '<div class="stat combo-stat"><div class="stat-main"><span class="lab">连击</span><b data-combo>0</b></div><span class="combo-decay"><i data-combobar></i></span></div>' +
           '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/' + totalWindows + '</span></div>' +
           '<div class="stat time"><span class="lab">余时</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
           '<span class="tier-pill tier-d" data-tier>🕯️ D · 见习点灯生</span>' +
@@ -1071,6 +1081,8 @@ export class UI {
     this._warmEl = qs(hud, 'b[data-warm]')
     this._barEl = qs(hud, 'i[data-warmbar]')
     this._comboEl = qs(hud, 'b[data-combo]')
+    this._comboBarEl = qs(hud, 'i[data-combobar]')
+    this._comboDecayEl = qs(hud, '.combo-decay')
     this._timeEl = qs(hud, 'b[data-time]')
     this._litEl = qs(hud, 'b[data-lit]')
     this._ledger = qs(hud, '#ledger')
@@ -1089,7 +1101,28 @@ export class UI {
       this._timeEl.classList.toggle('urgent', sec <= 10)
     }
     this.setStats(game)
+    this.updateComboDecay(game)
     this.updateWindowTags(game)
+  }
+
+  updateComboDecay(game) {
+    if (!this._comboBarEl || !game.night) return
+    const n = game.night
+    if (!n.combo || n.combo <= 0) {
+      this._comboBarEl.style.setProperty('--p', '0')
+      if (this._comboDecayEl) this._comboDecayEl.classList.remove('frozen')
+      return
+    }
+    const now = performance.now()
+    const frozen = Boolean(game._choiceOpen) || now <= (game._comboFreezeUntil || 0)
+    if (this._comboDecayEl) this._comboDecayEl.classList.toggle('frozen', frozen)
+    if (frozen) {
+      this._comboBarEl.style.setProperty('--p', '1')
+      return
+    }
+    const winMs = (n.cfg && n.cfg.comboWindowMs) || 2100
+    const leftRatio = Math.max(0, Math.min(1, 1 - (now - (game._lastTap || now)) / winMs))
+    this._comboBarEl.style.setProperty('--p', leftRatio.toFixed(3))
   }
 
   setStats(game) {
@@ -1351,7 +1384,7 @@ export class UI {
 
     card.innerHTML = '<div class="choice-card glass">' +
       '<div class="choice-head"><span class="kicker">' + esc(resident ? resident.resident : '窗后的小事') + '</span>' +
-        '<span class="freeze">⏱ 倒计时已暂停 · 安心抉择</span></div>' +
+        '<span class="freeze" data-choice-cd>⏱ 倒计时与连击已冻结 · 20s</span></div>' +
       '<p class="choice-text">' + esc(story.text) + '</p>' +
       whisperHtml +
       '<div class="choice-opts">' + options + '</div>' +
@@ -1376,12 +1409,21 @@ export class UI {
         if (typeof n === 'number') qs(likeBtn, 'b').textContent = String(n)
       }
     }
+    const cdEl = qs(card, '[data-choice-cd]')
+    let remainSec = 20
+    clearInterval(this._choiceCountdown)
+    this._choiceCountdown = setInterval(() => {
+      remainSec = Math.max(0, remainSec - 1)
+      if (cdEl) cdEl.textContent = '⏱ 倒计时与连击已冻结 · ' + remainSec + 's'
+      if (remainSec <= 0) clearInterval(this._choiceCountdown)
+    }, 1000)
     this._choiceTimer = setTimeout(() => { this.hideChoice(); onTimeout() }, 20000)
     this._choiceEl = card
   }
 
   hideChoice() {
     clearTimeout(this._choiceTimer)
+    clearInterval(this._choiceCountdown)
     if (this._choiceEl) { this._choiceEl.remove(); this._choiceEl = null }
     const n = document.getElementById('choice')
     if (n) n.remove()
@@ -1454,6 +1496,42 @@ export class UI {
       ? '距 <b>' + tier.nextTier.icon + ' ' + tier.nextTier.code + ' · ' + esc(tier.nextTier.title) + '</b> 还差 <b>' + tier.pointsToNext + '</b> 温暖'
       : '👑 已达成三夜传奇守灯传说！'
 
+    const unlockedSet = new Set((records && records.unlockedEndings) || [])
+    const winCount = dorm.windowCount || 24
+    const fullLitNights = (run.nights || []).filter(n => ((n.litRooms && n.litRooms.length) || 0) >= winCount).length
+    const warmLeft = Math.max(0, 480 - (run.totalWarmth || 0))
+    const stampsLeft = Math.max(0, 7 - (run.stampsEarned || 0))
+    const fullLeft = Math.max(0, 2 - fullLitNights)
+    const litLeft = Math.max(0, 54 - (run.litTotal || 0))
+    const awokenLeft = Math.max(0, 4 - ((run.residentsAwoken && run.residentsAwoken.length) || 0))
+    const choicesLeft = Math.max(0, 3 - ((run.choices && run.choices.length) || 0))
+    const hiddenLeft = ['ENDING_C_STARGAZER', 'ENDING_D_HARMONY'].filter(id => !unlockedSet.has(id)).length
+
+    const progressRows = []
+    if (!unlockedSet.has('ENDING_A_WARMTH')) {
+      const parts = []
+      if (litLeft > 0) parts.push('累计点亮还差 <b>' + litLeft + '</b> 窗')
+      if (awokenLeft > 0) parts.push('唤醒住户还差 <b>' + awokenLeft + '</b> 位')
+      progressRows.push('<div class="ep-row">🏮 <b>万家灯火</b>：' + (parts.length ? parts.join(' · ') : '条件已齐！') + '</div>')
+    }
+    if (!unlockedSet.has('ENDING_B_COMPANION')) {
+      progressRows.push('<div class="ep-row">🍵 <b>留一盏夜灯</b>：' + (choicesLeft > 0 ? '微光抉择还差 <b>' + choicesLeft + '</b> 次（留意 301/304 窗）' : '留心点亮 301 或 304 室即可达成') + '</div>')
+    }
+    if (!unlockedSet.has('ENDING_E_DAWN')) {
+      const parts = []
+      if (warmLeft > 0) parts.push('温暖差 <b>' + warmLeft + '</b>')
+      if (stampsLeft > 0) parts.push('火漆差 <b>' + stampsLeft + '</b> 枚')
+      if (fullLeft > 0) parts.push('整栋全亮差 <b>' + fullLeft + '</b> 晚')
+      progressRows.push('<div class="ep-row">🌅 <b>破晓第一缕光</b>：' + (parts.length ? parts.join(' · ') : '巅峰条件已齐！') + '</div>')
+    }
+    const endingProgHtml = (progressRows.length || hiddenLeft > 0)
+      ? '<div class="ending-progress-box">' +
+          '<div class="ep-head">🎯 结局图鉴进度（已解锁 ' + unlockedSet.size + '/6）</div>' +
+          progressRows.join('') +
+          (hiddenLeft > 0 ? '<div class="ep-hidden">✦ 尚有 <b>' + hiddenLeft + '</b> 条隐藏分支结局待探索（剧情夜巡中会有特殊线索）</div>' : '') +
+        '</div>'
+      : ''
+
     const s = this._layer()
     s.classList.add('result-screen')
     s.innerHTML = '<div class="result-scroll">' +
@@ -1469,6 +1547,7 @@ export class UI {
           '<div class="tmc-next">' + storyNext + '</div>' +
         '</div>' +
         '<div class="ending-chip"><span class="badge" data-icon="star"></span><span>' + esc(ending.name) + '</span><em>' + esc(run.archetype) + '</em></div>' +
+        endingProgHtml +
         '<img class="postcard" alt="今晚的明信片" src="' + postcard + '"/>' +
         '<a class="btn ghost" data-act="save" download="light-a-window-' + Date.now() + '.png" href="' + postcard + '"><span data-icon="download"></span>保存明信片</a>' +
         '<div class="statgrid">' +

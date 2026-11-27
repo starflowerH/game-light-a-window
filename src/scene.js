@@ -649,8 +649,11 @@ export class Scene {
     // Adaptive quality controller state (auto | ultra | eco)
     this._targetFps = 60
     this._qualityMode = 'auto'
-    this._quality = 3
+    this._quality = isCoarse ? 2 : 3
     this._pondWaterMat = null
+    this.glbFallback = false
+    this._resizeTimer = null
+    this._prewarmTimer = null
     this._frameTimes = new Float32Array(60)
     this._frameTimeIdx = 0
     this._frameCount = 0
@@ -701,7 +704,11 @@ export class Scene {
     this.setWeatherFx(this.weather)
     this.setCameraView(this.cameraView, true)
     this._resize()
-    addEventListener('resize', () => this._resize())
+    this._onResize = () => {
+      clearTimeout(this._resizeTimer)
+      this._resizeTimer = setTimeout(() => this._resize(), 150)
+    }
+    addEventListener('resize', this._onResize)
     this._onVis = () => {
       if (document.hidden) this.renderer.setAnimationLoop(null)
       else this.renderer.setAnimationLoop(this._boundTick)
@@ -743,13 +750,29 @@ export class Scene {
       if (uniGltf && uniGltf.scene) {
         const snapshot = this.windows.map(w => w.state)
         this._mountDormGlb(uniGltf.scene, this.dormId, snapshot)
+        this.glbFallback = false
+      } else {
+        this.glbFallback = true
       }
-      // Pre-warm remaining 3 dorm models quietly in background
-      for (const id of DORM_IDS) {
-        if (id !== this.dormId) this._loadGlb(dormDef(id).modelUrl)
+      // Sequentially pre-warm remaining dorm models only during browser idle
+      const others = DORM_IDS.filter(id => id !== this.dormId)
+      const warmNext = () => {
+        if (!others.length) return
+        const nextId = others.shift()
+        const runLoad = () => {
+          this._loadGlb(dormDef(nextId).modelUrl).finally(() => {
+            if (others.length) this._prewarmTimer = setTimeout(warmNext, 2500)
+          })
+        }
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(runLoad, { timeout: 3000 })
+        } else {
+          runLoad()
+        }
       }
+      if (others.length) this._prewarmTimer = setTimeout(warmNext, 4500)
     } catch {
-      // Procedural dorm fallback already active
+      this.glbFallback = true
     }
   }
 
@@ -1116,14 +1139,29 @@ export class Scene {
         uniform vec3 uWarmColor;
         uniform float uTime;
 
+        float segDist(vec2 p, vec2 a, vec2 b) {
+          vec2 pa = p - a, ba = b - a;
+          float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-5), 0.0, 1.0);
+          return length(pa - ba * h);
+        }
+
         void main() {
           float edgeDist = min(vUv.x, min(1.0 - vUv.x, min(vUv.y, 1.0 - vUv.y)));
-          float frame = smoothstep(0.015, 0.040, edgeDist);
+          float frame = smoothstep(0.018, 0.046, edgeDist);
+          float bevel = smoothstep(0.068, 0.042, edgeDist) * (1.0 - smoothstep(0.020, 0.004, edgeDist));
           vec3 frameCol = vec3(0.07, 0.06, 0.10);
 
           if (uState < 0.5) {
-            vec3 darkGlass = vec3(0.036, 0.052, 0.102) * (0.82 + 0.22 * vUv.y);
-            gl_FragColor = vec4(mix(frameCol, darkGlass, frame), 1.0);
+            vec3 darkGlass = vec3(0.024, 0.036, 0.082) * (0.80 + 0.25 * vUv.y);
+            float sheenBand = smoothstep(0.18, 0.0, abs((vUv.x * 0.72 + (1.0 - vUv.y) * 0.68) - 0.52));
+            darkGlass += vec3(0.08, 0.13, 0.22) * sheenBand * 0.45;
+            float mullionV = 1.0 - smoothstep(0.012, 0.028, abs(vUv.x - 0.5));
+            float mullionH = 1.0 - smoothstep(0.012, 0.028, abs(vUv.y - 0.56));
+            float mullion = max(mullionV, mullionH);
+            vec3 paneCol = mix(darkGlass, vec3(0.11, 0.16, 0.27), mullion * 0.68);
+            vec3 framed = mix(vec3(0.12, 0.15, 0.25), paneCol, frame);
+            framed += vec3(0.18, 0.25, 0.40) * bevel * 0.55;
+            gl_FragColor = vec4(framed, 1.0);
             return;
           }
 
@@ -1159,18 +1197,60 @@ export class Scene {
 
           vec3 col;
           if (uState >= 2.5 && uState < 3.5) {
-            float flick = 0.94 + 0.06 * sin(uTime * 16.0 + uRoomIndex);
-            col = roomTex.rgb * vec3(0.40, 0.70, 1.15) * flick;
+            float flick = 0.93 + 0.07 * sin(uTime * 15.0 + uRoomIndex);
+            float scan = 0.88 + 0.12 * sin(vUv.y * 105.0);
+            col = roomTex.rgb * vec3(0.38, 0.68, 1.18) * flick * scan;
           } else if (uState >= 4.5 && uState < 5.5) {
-            col = roomTex.rgb * vec3(0.45, 1.10, 0.65);
+            col = roomTex.rgb * vec3(0.42, 1.12, 0.64);
           } else if (uState >= 5.5 && uState < 6.5) {
-            col = roomTex.rgb * vec3(1.15, 0.55, 0.35);
+            col = roomTex.rgb * vec3(1.18, 0.52, 0.34);
+          } else if (uState >= 8.5) {
+            col = roomTex.rgb * vec3(0.56, 1.05, 0.76);
           } else {
             float breath = 1.0 + 0.04 * sin(uTime * 2.8 + uRoomIndex * 1.5);
             col = roomTex.rgb * uWarmColor * breath;
           }
 
           col = mix(frameCol, col, frame);
+
+          // Second-channel (non-color) cues for actionable & patrol states
+          float innerRing = smoothstep(0.036, 0.062, edgeDist) * (1.0 - smoothstep(0.088, 0.118, edgeDist));
+          float pulse = 0.65 + 0.35 * sin(uTime * 4.4 + uRoomIndex * 1.3);
+
+          if ((uState >= 1.5 && uState < 2.5) || (uState >= 3.5 && uState < 4.5) || (uState >= 6.5 && uState < 8.5)) {
+            vec3 ringCol = (uState >= 7.5 && uState < 8.5) ? vec3(0.52, 0.95, 1.0) : vec3(1.0, 0.86, 0.50);
+            col = mix(col, ringCol, innerRing * (0.55 + 0.35 * pulse));
+            float starD = length(vUv - vec2(0.79, 0.80));
+            float starGlow = (1.0 - smoothstep(0.025, 0.070, starD)) * (0.60 + 0.40 * pulse);
+            col += vec3(1.0, 0.95, 0.82) * starGlow;
+          } else if (uState >= 2.5 && uState < 3.5) {
+            col = mix(col, vec3(0.62, 0.84, 1.0), innerRing * (0.58 + 0.32 * pulse));
+            float moonOuter = 1.0 - smoothstep(0.085, 0.105, length(vUv - vec2(0.76, 0.78)));
+            float moonCut = smoothstep(0.065, 0.085, length(vUv - vec2(0.81, 0.81)));
+            col = mix(col, vec3(0.88, 0.95, 1.0), clamp(moonOuter * moonCut, 0.0, 1.0) * 0.90);
+          } else if (uState >= 8.5) {
+            float doubleRing = smoothstep(0.045, 0.065, edgeDist) * (1.0 - smoothstep(0.075, 0.095, edgeDist));
+            col = mix(col, vec3(0.80, 1.0, 0.86), doubleRing * 0.62);
+            // Open study book icon near bottom-center
+            float pageL = segDist(vUv, vec2(0.34, 0.25), vec2(0.49, 0.22));
+            float pageR = segDist(vUv, vec2(0.51, 0.22), vec2(0.66, 0.25));
+            float spine = segDist(vUv, vec2(0.50, 0.22), vec2(0.50, 0.33));
+            float book = 1.0 - smoothstep(0.018, 0.036, min(spine, min(pageL, pageR)));
+            col = mix(col, vec3(0.92, 1.0, 0.94), book * 0.85);
+          } else if (uState >= 4.5 && uState < 5.5) {
+            float dCheck = min(
+              segDist(vUv, vec2(0.28, 0.50), vec2(0.44, 0.34)),
+              segDist(vUv, vec2(0.44, 0.34), vec2(0.74, 0.68))
+            );
+            col = mix(col, vec3(0.92, 1.0, 0.95), (1.0 - smoothstep(0.032, 0.056, dCheck)) * 0.92);
+          } else if (uState >= 5.5 && uState < 6.5) {
+            float dX = min(
+              segDist(vUv, vec2(0.32, 0.32), vec2(0.68, 0.68)),
+              segDist(vUv, vec2(0.68, 0.32), vec2(0.32, 0.68))
+            );
+            col = mix(col, vec3(1.0, 0.94, 0.90), (1.0 - smoothstep(0.032, 0.056, dX)) * 0.92);
+          }
+
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -1281,8 +1361,9 @@ export class Scene {
       this._quality = -1
       this.setQuality(0)
     } else {
+      const startTier = matchMedia('(pointer: coarse)').matches ? 2 : 3
       this._quality = -1
-      this.setQuality(3)
+      this.setQuality(startTier)
     }
   }
 
@@ -1328,8 +1409,11 @@ export class Scene {
 
     if (this.painterly) {
       const u = this.painterly.material.uniforms
-      u.strength.value = level === 0 ? 0.0 : level === 1 ? 0.36 : level === 2 ? 0.42 : 0.44
-      u.uKuwaharaRadius.value = level >= 3 ? 1.18 : level === 2 ? 1.05 : 0.85
+      const mobileSoft = coarse && !ultra
+      const baseStrength = level === 0 ? 0.0 : level === 1 ? 0.36 : level === 2 ? 0.42 : 0.44
+      const baseKuwahara = level >= 3 ? 1.18 : level === 2 ? 1.05 : 0.85
+      u.strength.value = level === 0 ? 0.0 : Math.max(0.24, baseStrength - (mobileSoft ? 0.07 : 0))
+      u.uKuwaharaRadius.value = mobileSoft ? baseKuwahara * 0.86 : baseKuwahara
       if (u.uFastMode) u.uFastMode.value = (level <= 2 && !ultra) ? 1.0 : 0.0
     }
 
@@ -3387,6 +3471,9 @@ export class Scene {
     if (this._envTex) this._envTex.dispose()
     if (this._interiorAtlas) this._interiorAtlas.dispose()
     this.renderer.setAnimationLoop(null)
+    clearTimeout(this._resizeTimer)
+    clearTimeout(this._prewarmTimer)
+    if (this._onResize) removeEventListener('resize', this._onResize)
     document.removeEventListener('visibilitychange', this._onVis)
     if (this.controls) this.controls.dispose()
     if (this.vfx) this.vfx.dispose()

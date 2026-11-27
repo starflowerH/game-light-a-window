@@ -30,7 +30,8 @@ function emptyRecords() {
     preferredSeason: 'autumn',
     preferredWeather: 'clear',
     preferredMode: 'memory_sequence',
-    preferredQuality: 'auto'
+    preferredQuality: 'auto',
+    seenOpening: false
   }
 }
 

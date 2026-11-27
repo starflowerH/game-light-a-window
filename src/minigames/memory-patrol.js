@@ -27,9 +27,9 @@ export function computeMemoryDifficulty(level, totalWindows = 24) {
   const W = Math.max(6, Math.floor(Number(totalWindows) || 24))
   const maxTargets = Math.min(W - 1, Math.max(4, Math.floor(W * 0.72)))
   const targetCount = Math.min(maxTargets, 3 + Math.floor((L - 1) * 0.95))
-  const stepShowMs = Math.max(210, Math.round(740 - (L - 1) * 62))
+  const stepShowMs = Math.max(210, Math.round(860 - (L - 1) * 72))
   const stepGapMs = Math.max(65, Math.round(210 - (L - 1) * 18))
-  const snapshotShowMs = Math.max(650, Math.round(2400 - (L - 1) * 210))
+  const snapshotShowMs = Math.max(650, Math.round(2700 - (L - 1) * 235))
   const decoyCount = L >= 9 ? 4 : L >= 7 ? 3 : L >= 5 ? 2 : L >= 3 ? 1 : 0
   const interleaveDecoys = L >= 4
   const blackoutMs = L >= 6 ? Math.min(900, 350 + (L - 6) * 140) : 0

@@ -41,13 +41,22 @@ const game = new Game({ scene, ui, audio, ribbon })
 holder.game = game
 window.__game = game
 
-// The ribbon advances on its own frame clock so it keeps gliding after the
-// pointer stops moving.
+// The ribbon advances on its own frame clock and pauses when the tab is hidden.
+let ribbonRaf = 0
 const ribbonLoop = () => {
+  ribbonRaf = 0
+  if (document.hidden) return
   ribbon.tick()
-  requestAnimationFrame(ribbonLoop)
+  ribbonRaf = requestAnimationFrame(ribbonLoop)
 }
-requestAnimationFrame(ribbonLoop)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (ribbonRaf) { cancelAnimationFrame(ribbonRaf); ribbonRaf = 0 }
+  } else if (!ribbonRaf) {
+    ribbonRaf = requestAnimationFrame(ribbonLoop)
+  }
+})
+ribbonRaf = requestAnimationFrame(ribbonLoop)
 
 scene.applyTheme('warm_blue', true)
 ui.showLoading('正在把楼里的灯接上电')
