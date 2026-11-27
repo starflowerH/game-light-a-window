@@ -2602,6 +2602,7 @@ b.urgent { color: #ff9a7a; }
   letter-spacing: 0.06em;
   padding: 2px 8px;
   border-radius: 999px;
+  white-space: nowrap;
   color: #ffe3aa;
   background: rgba(255, 216, 140, 0.14);
   border: 1px solid rgba(255, 216, 140, 0.32);
@@ -2702,6 +2703,8 @@ b.urgent { color: #ff9a7a; }
   }
   .md-pointer { right: 124px; }
   .md-radial-bar { right: 104px; transform-origin: 104px 1.5px; }
+  .md-core-controls { padding: 14px 10px 14px 14px; gap: 7px; }
+  .md-status-tag { font-size: 9.5px; letter-spacing: 0.03em; padding: 2px 6px; }
   .md-slot { max-width: 184px; }
   .md-slot-title-wrap { max-width: 130px; }
   .md-slot.active { font-size: 12.5px; padding: 7px 12px 7px 10px; }
