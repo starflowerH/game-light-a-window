@@ -74,6 +74,8 @@ export class MusicDial {
     this._wheel = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-wheel]'))
     this._slotsHost = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-slots]'))
     this._pillTitleEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-pill-title]'))
+    this._pillSpanEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-pill-span]'))
+    this._lastPillTitle = ''
     this._modeTagEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-mode]'))
     this._playBtn = /** @type {HTMLButtonElement} */ (this.root.querySelector('[data-dial-act="play"]'))
     this._carouselBtn = /** @type {HTMLButtonElement} */ (this.root.querySelector('[data-dial-act="carousel"]'))
@@ -108,7 +110,7 @@ export class MusicDial {
       '<button type="button" class="md-pill" data-dial-pill aria-expanded="false" title="展开黑胶音乐转盘">' +
         '<span class="md-mini-vinyl" aria-hidden="true"><i class="md-mini-core"></i></span>' +
         '<span class="md-eq" aria-hidden="true">' + miniEq + '</span>' +
-        '<span class="md-pill-name" data-pill-title></span>' +
+        '<span class="md-pill-name" data-pill-title><span class="md-static" data-pill-span></span></span>' +
         '<span class="md-pill-arrow" aria-hidden="true">‹</span>' +
       '</button>' +
       '<div class="md-backdrop" data-dial-act="collapse"></div>' +
@@ -229,13 +231,13 @@ export class MusicDial {
     const def = bgmTrackDef(this._state.mode)
     const labelText = this._state.customTitle || def.name
 
-    // Active song label in collapsed pill (marquee automatically if long)
-    this._pillTitleEl.innerHTML = ''
-    const span = document.createElement('span')
-    span.className = labelText.length > 14 ? 'md-marquee' : 'md-static'
-    span.textContent = labelText
-    this._pillTitleEl.appendChild(span)
-    this._pillTitleEl.title = labelText
+    // Active song label in collapsed pill — keep persistent span node so pointer sequences never detach mid-click
+    if (this._pillSpanEl && this._lastPillTitle !== labelText) {
+      this._lastPillTitle = labelText
+      this._pillSpanEl.className = labelText.length > 14 ? 'md-marquee' : 'md-static'
+      this._pillSpanEl.textContent = labelText
+      this._pillTitleEl.title = labelText
+    }
 
     const isPlaying = Boolean(this._state.playing && !this._state.muted)
     this.root.classList.toggle('is-playing', isPlaying)
@@ -272,9 +274,9 @@ export class MusicDial {
     let activeIdx = BGM_TRACKS.findIndex(t => t.id === this._state.mode)
     if (activeIdx < 0) activeIdx = 0
 
-    const isCompact = typeof window !== 'undefined' && window.innerWidth <= 560
-    const rx = isCompact ? 122 : 162
-    const ry = isCompact ? 160 : 196
+    const isCompact = typeof window !== 'undefined' && window.innerWidth <= 600
+    const rx = isCompact ? 134 : 168
+    const ry = isCompact ? 160 : 204
 
     for (let i = 0; i < n; i++) {
       const { btn, track } = this._slots[i]
@@ -285,7 +287,7 @@ export class MusicDial {
 
       const absD = Math.abs(d)
       const angle = d * 0.48 // generous spacing so inner vinyl core stays unobstructed
-      const tx = -Math.cos(angle) * rx + (absD === 0 ? -14 : 0)
+      const tx = -Math.cos(angle) * rx + (absD === 0 ? (isCompact ? -8 : -14) : 0)
       const ty = Math.sin(angle) * ry
 
       const scale = absD === 0 ? 1.12 : absD === 1 ? 0.85 : absD === 2 ? 0.72 : 0.60

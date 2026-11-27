@@ -2223,15 +2223,17 @@ b.urgent { color: #ff9a7a; }
 
 .music-dial {
   position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  inset: 0;
   z-index: 24;
   pointer-events: none;
   font-family: var(--sans);
 }
 .md-pill {
-  position: relative;
+  position: fixed;
+  right: 0;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2248,14 +2250,17 @@ b.urgent { color: #ff9a7a; }
   box-shadow: -8px 10px 28px rgba(4, 7, 18, 0.52), inset 0 1px 0 rgba(255, 240, 200, 0.2);
   transition: transform 0.28s cubic-bezier(0.22, 1.15, 0.36, 1), opacity 0.22s ease, border-color 0.2s ease;
 }
+.md-pill * {
+  pointer-events: none;
+}
 .md-pill:hover {
-  transform: translateX(-4px);
+  transform: translate(-4px, -50%);
   border-color: rgba(255, 224, 168, 0.65);
 }
 .music-dial.open .md-pill {
   opacity: 0;
   pointer-events: none;
-  transform: translateX(30px);
+  transform: translate(30px, -50%);
 }
 .md-mini-vinyl {
   position: relative;
@@ -2332,6 +2337,7 @@ b.urgent { color: #ff9a7a; }
 .md-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 1;
   background: rgba(4, 8, 20, 0.34);
   opacity: 0;
   pointer-events: none;
@@ -2348,6 +2354,7 @@ b.urgent { color: #ff9a7a; }
   top: 50%;
   width: 0;
   height: 0;
+  z-index: 4;
   pointer-events: none;
   opacity: 0;
   transform: translateY(-50%) scale(0.84);
@@ -2370,6 +2377,10 @@ b.urgent { color: #ff9a7a; }
   top: 0;
   width: 0;
   height: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.md-slot * {
   pointer-events: none;
 }
 .md-slot {
@@ -2445,11 +2456,11 @@ b.urgent { color: #ff9a7a; }
 
 .md-pointer {
   position: absolute;
-  right: 160px;
+  right: 162px;
   top: 0;
   transform: translateY(-50%);
   pointer-events: none;
-  z-index: 12;
+  z-index: 8;
 }
 .md-pointer-gem {
   display: block;
@@ -2466,6 +2477,7 @@ b.urgent { color: #ff9a7a; }
   position: absolute;
   right: 0;
   top: 0;
+  z-index: 3;
   transform: translateY(-50%);
   width: 164px;
   height: 328px;
@@ -2688,10 +2700,10 @@ b.urgent { color: #ff9a7a; }
     height: 276px;
     border-radius: 276px 0 0 276px;
   }
-  .md-pointer { right: 122px; }
+  .md-pointer { right: 124px; }
   .md-radial-bar { right: 104px; transform-origin: 104px 1.5px; }
-  .md-slot { max-width: 190px; }
-  .md-slot-title-wrap { max-width: 136px; }
+  .md-slot { max-width: 184px; }
+  .md-slot-title-wrap { max-width: 130px; }
   .md-slot.active { font-size: 12.5px; padding: 7px 12px 7px 10px; }
   .md-ctrl { width: 30px; height: 30px; }
   .md-ctrl.primary { width: 36px; height: 36px; }
