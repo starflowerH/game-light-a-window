@@ -289,6 +289,14 @@ describe('AudioEngine default lazy theme BGM', () => {
       bufferingTrack: '',
       playing: true
     })
+    // Even if the detached warmup element fires a stale async error upon src='', active large track stays intact
+    if (typeof streamAudios[0].onerror === 'function') streamAudios[0].onerror()
+    expect(engine.getBgmState()).toMatchObject({
+      mode: 'canon_in_d',
+      playingTrack: 'canon_in_d',
+      bufferingTrack: '',
+      playing: true
+    })
     expect(streamAudios[1].muted).toBe(false)
     engine.dispose()
   })

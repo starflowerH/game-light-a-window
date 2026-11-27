@@ -317,11 +317,13 @@ export class AudioEngine {
 
   _bindTrackEvents(audio) {
     audio.onended = () => {
+      if (this._themeAudioEl !== audio) return
       if (this._carousel && !this._customUrl && !this._bgmPaused) {
         this.nextTrack(true)
       }
     }
     audio.onerror = () => {
+      if (this._themeAudioEl !== audio) return
       this._failedTracks.add(this._bgmMode)
       const fallbackId = this._bgmMode !== 'theme' && !this._failedTracks.has('theme') ? 'theme' : null
       if (fallbackId) {
@@ -372,6 +374,8 @@ export class AudioEngine {
         }
         const prev = this._themeAudioEl
         if (prev && prev !== pre) {
+          prev.onended = null
+          prev.onerror = null
           try { prev.pause() } catch {}
           try { prev.src = '' } catch {}
         }
@@ -491,6 +495,8 @@ export class AudioEngine {
   _clearThemeAudio() {
     this._cancelPreload()
     if (!this._themeAudioEl) return
+    this._themeAudioEl.onended = null
+    this._themeAudioEl.onerror = null
     try { this._themeAudioEl.pause() } catch {}
     try { this._themeAudioEl.src = '' } catch {}
     this._themeAudioEl = null
