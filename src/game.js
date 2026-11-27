@@ -296,11 +296,33 @@ export class Game {
       this.audio.setWeather(this.weather)
       const savedBgm = this.records.preferredBgm || 'theme'
       this.audio.setBgmTrack(savedBgm)
+      if (this.audio.setOnStateChange) {
+        this.audio.setOnStateChange(st => {
+          if (this.ui && this.ui.updateBgmBadge) this.ui.updateBgmBadge(st)
+          if (st && st.mode && st.activeTrack !== 'custom' && this.records.preferredBgm !== st.mode) {
+            this.records.preferredBgm = st.mode
+            saveRecords(this.records)
+          }
+        })
+      }
     }
+    if (this.ui && this.ui.bindMusicDial) {
+      this.ui.bindMusicDial({
+        onSelectTrack: id => this.setBgmTrack(id),
+        onPrevTrack: () => this.prevBgmTrack(),
+        onNextTrack: () => this.nextBgmTrack(),
+        onTogglePlay: () => this.toggleBgmPlayPause(),
+        onToggleCarousel: () => this.toggleBgmCarousel(),
+        onToggleMute: () => this.toggleMute(),
+        onUploadFile: f => this.loadCustomBgm(f),
+        getSpectrum: n => (this.audio && this.audio.getVisualizerBars ? this.audio.getVisualizerBars(n) : [])
+      })
+    }
+    this._refreshBgmHud()
   }
 
   getBgmState() {
-    if (!this.audio) return { mode: 'theme', activeTrack: 'theme', customTitle: '', muted: false }
+    if (!this.audio) return { mode: 'theme', activeTrack: 'theme', customTitle: '', muted: false, playing: false, carousel: true }
     return this.audio.getBgmState()
   }
 
@@ -309,12 +331,45 @@ export class Game {
     this.audio.unlock()
     if (trackId !== 'custom') {
       this.audio.setBgmTrack(trackId)
-      this.records.preferredBgm = trackId
+      this.records.preferredBgm = this.audio.getBgmState().mode
       saveRecords(this.records)
     }
-    const meta = BGM_TRACKS.find(t => t.id === trackId)
-    if (meta) this.ui.toast(`配乐已切为：${meta.name}`, meta.desc)
+    const meta = BGM_TRACKS.find(t => t.id === this.audio.getBgmState().mode)
+    if (meta) this.ui.toast(`♪ 正在播放：${meta.name}`, '')
     this._refreshBgmHud()
+  }
+
+  nextBgmTrack() {
+    if (!this.audio) return null
+    this.audio.unlock()
+    const next = this.audio.nextTrack()
+    if (next) this.ui.toast(`⏭ 下一曲：${next.name}`, '')
+    this._refreshBgmHud()
+    return this.getBgmState()
+  }
+
+  prevBgmTrack() {
+    if (!this.audio) return null
+    this.audio.unlock()
+    const prev = this.audio.prevTrack()
+    if (prev) this.ui.toast(`⏮ 上一曲：${prev.name}`, '')
+    this._refreshBgmHud()
+    return this.getBgmState()
+  }
+
+  toggleBgmPlayPause() {
+    if (!this.audio) return false
+    const playing = this.audio.togglePlayPause()
+    this._refreshBgmHud()
+    return playing
+  }
+
+  toggleBgmCarousel() {
+    if (!this.audio) return true
+    const carousel = this.audio.toggleCarousel()
+    this.ui.toast(carousel ? '🔁 已开启整单自动轮播' : '🔂 已切为单曲循环', '')
+    this._refreshBgmHud()
+    return carousel
   }
 
   cycleBgmTrack() {
@@ -338,13 +393,13 @@ export class Game {
 
   _refreshBgmHud() {
     if (this.ui && this.ui.updateBgmBadge) this.ui.updateBgmBadge(this.getBgmState())
-    if (this.state === 'hub') this.showHub()
   }
 
   showTitle() {
     this.stopScenicTour()
     this._clearMinigame()
     this.state = 'title'
+    if (typeof document !== 'undefined') document.body.classList.remove('is-gameplay')
     if (this.audio) this.audio.setSceneContext('title')
     this.scene.setOrbitLocked(false)
     this.scene.setFlyover(true)
@@ -442,6 +497,7 @@ export class Game {
   showHub() {
     this._clearMinigame()
     this.state = 'hub'
+    if (typeof document !== 'undefined') document.body.classList.remove('is-gameplay')
     if (this.audio) this.audio.setSceneContext('hub')
     this.scene.setFlyover(false)
     this.orbitLocked = false
@@ -744,18 +800,22 @@ export class Game {
     }
 
     if (this.gameMode === 'star_sweep') {
+      if (typeof document !== 'undefined') document.body.classList.add('is-gameplay')
       this.start()
       return
     }
     if (this.gameMode === 'memory_sequence' || this.gameMode === 'memory_snapshot') {
+      if (typeof document !== 'undefined') document.body.classList.add('is-gameplay')
       this._startMemoryGame(this.gameMode)
       return
     }
     if (this.gameMode === 'patrol_reflex') {
+      if (typeof document !== 'undefined') document.body.classList.add('is-gameplay')
       this._startPatrolReflex()
       return
     }
     if (this.gameMode === 'lights_out_puzzle') {
+      if (typeof document !== 'undefined') document.body.classList.add('is-gameplay')
       this._startLightsOutPuzzle()
       return
     }

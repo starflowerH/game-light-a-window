@@ -36,3 +36,6 @@ playwright-report/
 # local scratch
 /tmp/
 .agents/
+
+# raw uncompressed user audio masters
+music/

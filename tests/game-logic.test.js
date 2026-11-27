@@ -512,9 +512,18 @@ describe('dorm adaptation & BGM tracks', () => {
     }
   })
 
-  it('exposes all six BGM presets with lazy default theme first plus procedural fallbacks', () => {
+  it('exposes the 8 curated bundled music tracks with lazy theme first', () => {
     const ids = BGM_TRACKS.map(t => t.id)
-    expect(ids).toEqual(['theme', 'auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'])
+    expect(ids).toEqual([
+      'theme',
+      'ame_triangle_14',
+      'canon_in_d',
+      'sacred_game',
+      'memory_weave',
+      'counter_attack',
+      'autumn_sky',
+      'blue_dragon'
+    ])
   })
 })
 

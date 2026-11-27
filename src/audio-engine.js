@@ -1,18 +1,14 @@
-// Hybrid Campus Audio Engine: lazy-loaded default theme BGM + four-layer adaptive
-// WebAudio synth (L1 weather bed, L2 warm pad, L3 pentatonic lead, L4 foley).
-// Switches cleanly between the bundled theme track, procedural scores, and custom local audio.
+// Hybrid Campus Audio Engine: curated multi-track music carousel + ambient weather
+// bed + WebAudio procedural game SFX + real-time FFT spectrum analyzer.
 //
-// The context is created lazily on the first unlock() (which must run inside a
-// user gesture). Every public method is a safe no-op before that point.
+// The AudioContext is created lazily on the first unlock() (inside a user
+// gesture). Music tracks stream directly on demand and advance automatically.
+
+import { BGM_TRACKS, bgmTrackDef } from '../shared/constants.js'
 
 const MASTER_LEVEL = 0.62
 const MAX_VOICES = 64
-const LOOKAHEAD = 0.20
-const CHORD_BEATS = 16
-const DEFAULT_THEME_URL = './audio/bgm-default.mp3'
-const DEFAULT_THEME_VOL = 0.42
-
-const midiHz = m => 440 * Math.pow(2, (m - 69) / 12)
+const DEFAULT_THEME_VOL = 0.44
 
 // C5 D5 E5 G5 A5 C6 D6 E6, one octave of the C major pentatonic scale.
 const SCALE = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51]
@@ -37,76 +33,7 @@ const WEATHER = {
   clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0.008, brownFreq: 120, brownQ: 0.8, brownGain: 0.002, windDepth: 0, gust: 0.003 }
 }
 
-const SCENE_AUTO_TRACK = {
-  title: 'kataware',
-  hub: 'kataware',
-  story1: 'kataware',
-  story2: 'bluedragon',
-  story3: 'bluedragon',
-  patrol_reflex: 'bluedragon',
-  memory_sequence: 'mysoul',
-  memory_snapshot: 'mysoul',
-  lights_out_puzzle: 'mysoul'
-}
-
-// ---------------------------------------------------------------- Musical Scores (16-step bars, 8 bars = 128 steps)
-
-// ① 黄昏之时风格 (Kataware-doki inspired): A major / F# minor lyrical twilight piano + strings, 78 BPM
-const SCORE_KATAWARE = {
-  bpm: 78,
-  bars: [
-    // Bar 1: F#m7 | Bar 2: Dmaj7 | Bar 3: Aadd9 | Bar 4: E
-    { bass: 42, arp: [54, 61, 64, 66, 69, 66, 64, 61], pad: [54, 61, 64, 69], mel: { 0: 73, 4: 76, 6: 78, 10: 76, 14: 73 }, cel: { 0: 85, 6: 90 } },
-    { bass: 38, arp: [50, 57, 61, 62, 66, 62, 61, 57], pad: [50, 57, 61, 66], mel: { 0: 71, 4: 73, 6: 76, 12: 71 }, cel: { 6: 88 } },
-    { bass: 45, arp: [45, 52, 57, 59, 61, 59, 57, 52], pad: [57, 61, 64, 71], mel: { 0: 69, 4: 71, 6: 73, 10: 76, 14: 74 }, cel: { 0: 81 } },
-    { bass: 40, arp: [40, 47, 52, 56, 59, 64, 59, 56], pad: [52, 56, 59, 64], mel: { 0: 71, 6: 73, 10: 71, 12: 68 }, cel: { 12: 80 } },
-    // Bar 5: F#m7 | Bar 6: Dmaj7 | Bar 7: Bm7 -> E7sus4 | Bar 8: Aadd9 resolve
-    { bass: 42, arp: [54, 61, 64, 69, 73, 69, 64, 61], pad: [54, 61, 64, 69], mel: { 0: 81, 4: 80, 6: 78, 10: 76, 14: 78 }, cel: { 0: 93, 6: 90 } },
-    { bass: 38, arp: [50, 57, 61, 66, 69, 66, 62, 57], pad: [50, 57, 61, 66], mel: { 0: 76, 4: 78, 6: 81, 10: 80, 14: 76 }, cel: { 6: 93 } },
-    { bass: 47, arp: [47, 54, 57, 62, 52, 59, 64, 68], pad: [59, 62, 66, 68], mel: { 0: 74, 4: 73, 8: 71, 12: 76 }, cel: { 8: 83 } },
-    { bass: 45, arp: [45, 52, 57, 59, 61, 64, 69, 64], pad: [57, 61, 64, 73], mel: { 0: 73, 8: 69 }, cel: { 0: 85, 8: 93 } }
-  ]
-}
-
-// ② 医龙 Blue Dragon 风格 (Sawano epic drama): D minor driving strings, timpani/kick & soaring theme, 114 BPM
-const SCORE_BLUEDRAGON = {
-  bpm: 114,
-  ostinato: true,
-  bars: [
-    // Dm | Bb | C | Am | Gm | Dm/F | Bbmaj7 | A7
-    { bass: 38, arp: [50, 50, 57, 50, 53, 50, 57, 50], pad: [50, 57, 62, 65], mel: { 0: 69, 3: 74, 6: 76, 8: 77, 12: 76, 14: 74 }, kick: [0, 6, 8], snare: [4, 12], timp: [0] },
-    { bass: 34, arp: [46, 46, 53, 46, 50, 46, 53, 46], pad: [46, 53, 58, 62], mel: { 0: 74, 4: 72, 6: 70, 8: 69, 12: 72 }, kick: [0, 6, 8], snare: [4, 12], timp: [] },
-    { bass: 36, arp: [48, 48, 55, 48, 52, 48, 55, 48], pad: [48, 55, 60, 64], mel: { 0: 72, 3: 76, 6: 79, 8: 77, 12: 76, 14: 72 }, kick: [0, 6, 8, 10], snare: [4, 12], timp: [0] },
-    { bass: 45, arp: [45, 45, 52, 45, 48, 45, 52, 45], pad: [45, 52, 57, 64], mel: { 0: 76, 6: 74, 8: 72, 12: 69 }, kick: [0, 6, 8], snare: [4, 12, 14, 15], timp: [12] },
-    { bass: 43, arp: [43, 50, 55, 58, 55, 50, 43, 50], pad: [55, 58, 62, 65], mel: { 0: 79, 4: 77, 6: 79, 8: 81, 12: 82, 14: 81 }, kick: [0, 6, 8], snare: [4, 12], timp: [0] },
-    { bass: 41, arp: [41, 50, 53, 57, 53, 50, 41, 50], pad: [53, 57, 62, 69], mel: { 0: 81, 4: 77, 6: 74, 8: 76, 12: 77 }, kick: [0, 6, 8], snare: [4, 12], timp: [] },
-    { bass: 34, arp: [46, 53, 58, 62, 58, 53, 46, 53], pad: [46, 53, 58, 69], mel: { 0: 77, 3: 79, 6: 81, 8: 84, 12: 81, 14: 79 }, kick: [0, 6, 8, 10], snare: [4, 12], timp: [0, 8] },
-    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [45, 52, 57, 61], mel: { 0: 76, 4: 74, 8: 73, 12: 76 }, kick: [0, 6, 8], snare: [4, 12, 14, 15], timp: [0, 12] }
-  ]
-}
-
-// ③ My Soul 风格 (July New-Age Piano Hip-Hop): F# minor flowing broken piano + lo-fi rimshot groove, 88 BPM
-const SCORE_MYSOUL = {
-  bpm: 88,
-  bars: [
-    // F#m -> D -> A -> E (phrase 1)
-    { bass: 42, arp: [54, 61, 66, 69, 66, 61, 54, 61], pad: [54, 61, 64, 69], mel: { 0: 73, 2: 74, 4: 76, 6: 73, 8: 71, 10: 69, 12: 71 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 38, arp: [50, 57, 62, 66, 62, 57, 50, 57], pad: [50, 57, 62, 66], mel: { 0: 69, 2: 71, 4: 73, 6: 78, 8: 76, 10: 73, 12: 71 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [57, 61, 64, 69], mel: { 0: 73, 2: 76, 4: 81, 6: 80, 8: 78, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 40, arp: [52, 59, 64, 68, 64, 59, 52, 59], pad: [52, 56, 59, 64], mel: { 0: 71, 4: 73, 6: 71, 8: 68, 12: 64 }, kick: [0, 6, 8], snare: [4, 12, 15] },
-    // F#m -> D -> A -> E (high expressive cascade phrase 2)
-    { bass: 42, arp: [54, 61, 66, 69, 73, 69, 66, 61], pad: [54, 61, 64, 69], mel: { 0: 78, 2: 80, 4: 81, 6: 80, 8: 78, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 38, arp: [50, 57, 62, 66, 69, 66, 62, 57], pad: [50, 57, 62, 66], mel: { 0: 74, 2: 73, 4: 71, 6: 69, 8: 71, 10: 73, 12: 74 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 45, arp: [45, 52, 57, 61, 64, 61, 57, 52], pad: [57, 61, 64, 73], mel: { 0: 76, 2: 78, 4: 81, 8: 80, 10: 76, 12: 73 }, kick: [0, 6, 8], snare: [4, 12] },
-    { bass: 40, arp: [52, 59, 64, 68, 64, 59, 52, 47], pad: [52, 56, 59, 64], mel: { 0: 71, 4: 76, 8: 74, 10: 73, 12: 71 }, kick: [0, 6, 8], snare: [4, 12, 14] }
-  ]
-}
-
-const SCORES = {
-  kataware: SCORE_KATAWARE,
-  bluedragon: SCORE_BLUEDRAGON,
-  mysoul: SCORE_MYSOUL
-}
+const TRACK_URLS = Object.fromEntries(BGM_TRACKS.map(t => [t.id, t.url]))
 
 const ENDING_A = 'ENDING_A_WARMTH'
 const ENDING_B = 'ENDING_B_COMPANION'
@@ -128,38 +55,46 @@ export class AudioEngine {
     this.ctx = null
     this._failed = false
     this._muted = false
-    this._weather = 'light_rain'
+    this._weather = 'snow'
     this._tempo = 'normal'
     this._bpm = TEMPO.normal
-    this._chordDur = (60 / this._bpm) * CHORD_BEATS
     this._litCount = 0
     this._voices = 0
     this._chainStep = 0
-    this._nextChord = 0
-    this._chordIndex = 0
-    this._bgmMode = 'theme'
+    this._bgmMode = BGM_TRACKS[0].id
     this._sceneContext = 'title'
-    this._activeTrack = 'kataware'
-    this._stepIndex = 0
-    this._nextStepTime = 0
+    this._activeTrack = BGM_TRACKS[0].id
+    this._carousel = true
+    this._bgmPaused = false
+    this._failedTracks = new Set()
     this._themeAudioEl = null
+    this._themeLoadedId = ''
     this._themeFailed = false
     this._customAudioEl = null
     this._customUrl = ''
     this._customTitle = ''
+    this._analyser = null
+    this._analyserBins = null
+    this._mediaSrcConnected = new WeakSet()
+    /** @type {((state: any) => void) | null} */
+    this._onStateChange = null
     this._dropletNext = 0
     this._timer = 0
     this._timers = new Set()
     this._sources = []
-    this._padOscs = []
-    this._shimmerOscs = []
     this.master = null
     this.music = null
     this.sfx = null
-    this._padGain = null
-    this._padFilter = null
-    this._shimmerGain = null
     this._bed = null
+  }
+
+  /** @param {((state: any) => void) | null} fn */
+  setOnStateChange(fn) {
+    this._onStateChange = typeof fn === 'function' ? fn : null
+  }
+
+  _emitState() {
+    if (this._onStateChange) this._onStateChange(this.getBgmState())
   }
 
   get ready() {
@@ -201,9 +136,10 @@ export class AudioEngine {
         if (p && p.catch) p.catch(() => {})
       }
     } catch {}
-    if (this._bgmMode === 'theme' && !this._customUrl && !this._themeFailed) {
-      this._ensureThemeAudio(!this._muted)
+    if (!this._customUrl && !this._themeFailed) {
+      this._ensureTrackAudio(!this._muted && !this._bgmPaused)
     }
+    this._emitState()
     return this.ready
   }
 
@@ -214,7 +150,7 @@ export class AudioEngine {
     }
     if (this._themeAudioEl) {
       this._themeAudioEl.muted = this._muted
-      if (!this._muted && this._bgmMode === 'theme' && !this._customUrl && !this._themeFailed && this._themeAudioEl.paused) {
+      if (!this._muted && !this._bgmPaused && !this._customUrl && !this._themeFailed && this._themeAudioEl.paused) {
         try {
           const p = this._themeAudioEl.play()
           if (p && typeof p.catch === 'function') p.catch(() => {})
@@ -223,74 +159,197 @@ export class AudioEngine {
     }
     if (this._customAudioEl) {
       this._customAudioEl.muted = this._muted
-      if (!this._muted && this._customAudioEl.paused) {
+      if (!this._muted && !this._bgmPaused && this._customAudioEl.paused) {
         this._customAudioEl.play().catch(() => {})
       }
     }
+    this._emitState()
     return this._muted
   }
 
-  /** @param {'theme'|'auto'|'kataware'|'bluedragon'|'mysoul'|'ambient'} trackId */
+  /** @param {string} trackId */
   setBgmTrack(trackId) {
-    const id = ['theme', 'auto', 'kataware', 'bluedragon', 'mysoul', 'ambient'].includes(trackId) ? trackId : 'theme'
-    this._bgmMode = id
+    const def = bgmTrackDef(trackId)
+    this._bgmMode = def.id
+    this._activeTrack = def.id
+    this._bgmPaused = false
+    this._themeFailed = false
     this.clearCustomAudio()
-    if (id === 'theme') {
-      this._themeFailed = false
-      this._ensureThemeAudio(this.ready && !this._muted)
-      this._applyLit()
-      return
+    this._ensureTrackAudio(this.ready && !this._muted)
+    this._emitState()
+  }
+
+  nextTrack(fromCarousel = false) {
+    if (this._customUrl) {
+      this.clearCustomAudio()
     }
-    this._pauseThemeAudio()
-    this._syncActiveTrack(true)
+    const idx = BGM_TRACKS.findIndex(t => t.id === this._bgmMode)
+    for (let offset = 1; offset <= BGM_TRACKS.length; offset++) {
+      const candidate = BGM_TRACKS[(Math.max(0, idx) + offset) % BGM_TRACKS.length]
+      if (!this._failedTracks.has(candidate.id) || offset === BGM_TRACKS.length) {
+        if (fromCarousel) this._failedTracks.delete(candidate.id)
+        this.setBgmTrack(candidate.id)
+        return candidate
+      }
+    }
+    return BGM_TRACKS[0]
+  }
+
+  prevTrack() {
+    if (this._customUrl) {
+      this.clearCustomAudio()
+    }
+    const idx = BGM_TRACKS.findIndex(t => t.id === this._bgmMode)
+    const prevIdx = (Math.max(0, idx) - 1 + BGM_TRACKS.length) % BGM_TRACKS.length
+    const next = BGM_TRACKS[prevIdx]
+    this.setBgmTrack(next.id)
+    return next
+  }
+
+  togglePlayPause() {
+    this.unlock()
+    this._bgmPaused = !this._bgmPaused
+    const el = this._customAudioEl || this._themeAudioEl
+    if (el) {
+      if (this._bgmPaused) {
+        try { el.pause() } catch {}
+      } else if (!this._muted) {
+        try {
+          const p = el.play()
+          if (p && typeof p.catch === 'function') p.catch(() => {})
+        } catch {}
+      }
+    }
+    this._emitState()
+    return !this._bgmPaused
+  }
+
+  toggleCarousel() {
+    this._carousel = !this._carousel
+    if (this._themeAudioEl) this._themeAudioEl.loop = !this._carousel
+    if (this._customAudioEl) this._customAudioEl.loop = !this._carousel
+    this._emitState()
+    return this._carousel
   }
 
   /** @param {string} sceneKey */
   setSceneContext(sceneKey) {
     this._sceneContext = String(sceneKey || 'hub')
-    if (this._bgmMode === 'auto') this._syncActiveTrack(false)
   }
 
   getBgmState() {
+    const el = this._customAudioEl || this._themeAudioEl
+    const playing = Boolean(!this._muted && !this._bgmPaused && el && !el.paused)
     return {
       mode: this._bgmMode,
       activeTrack: this._customUrl
         ? 'custom'
-        : (this._bgmMode === 'theme' && !this._themeFailed ? 'theme' : this._activeTrack),
+        : (this._themeFailed ? 'offline' : this._bgmMode),
       customTitle: this._customTitle,
-      muted: this._muted
+      muted: this._muted,
+      paused: this._bgmPaused,
+      playing,
+      carousel: this._carousel
     }
   }
 
-  _hasExternalBgm() {
-    return Boolean(this._customUrl || (this._bgmMode === 'theme' && !this._themeFailed))
+  /**
+   * Populate live audio spectrum bars (0..1) from WebAudio AnalyserNode when available.
+   * @param {number} [count]
+   * @returns {number[]}
+   */
+  getVisualizerBars(count = 7) {
+    const out = new Array(count).fill(0.08)
+    const state = this.getBgmState()
+    if (!state.playing || this._muted) return out
+    if (this._analyser && this._analyserBins) {
+      try {
+        this._analyser.getByteFrequencyData(this._analyserBins)
+        const len = this._analyserBins.length
+        const span = Math.max(1, Math.floor((len * 0.55) / count))
+        for (let i = 0; i < count; i++) {
+          let sum = 0
+          for (let j = 0; j < span; j++) {
+            sum += this._analyserBins[i * span + j] || 0
+          }
+          const avg = sum / (span * 255)
+          if (avg > 0.01) out[i] = Math.min(1, 0.14 + avg * 1.15)
+        }
+        if (out.some(v => v > 0.16)) return out
+      } catch {}
+    }
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000
+    for (let i = 0; i < count; i++) {
+      out[i] = Math.min(1, Math.max(0.16, 0.44 + Math.sin(now * 4.4 + i * 1.15) * 0.28 + Math.cos(now * 7.2 + i * 0.7) * 0.16))
+    }
+    return out
   }
 
-  _ensureThemeAudio(shouldPlay = false) {
-    if (this._themeFailed || this._customUrl) return null
+  _hookAnalyser(audio) {
+    if (!this.ctx || !audio) return
+    if (typeof Element !== 'undefined' && !(audio instanceof Element)) return
+    if (typeof this.ctx.createMediaElementSource !== 'function' || typeof this.ctx.createAnalyser !== 'function') return
+    if (this._mediaSrcConnected.has(audio)) return
+    try {
+      const src = this.ctx.createMediaElementSource(audio)
+      if (!this._analyser) {
+        this._analyser = this.ctx.createAnalyser()
+        this._analyser.fftSize = 64
+        this._analyser.smoothingTimeConstant = 0.78
+        this._analyserBins = new Uint8Array(this._analyser.frequencyBinCount)
+      }
+      src.connect(this._analyser)
+      this._analyser.connect(this.ctx.destination)
+      this._mediaSrcConnected.add(audio)
+    } catch {}
+  }
+
+  _ensureTrackAudio(shouldPlay = false) {
+    if (this._customUrl) return null
+    const def = bgmTrackDef(this._bgmMode)
+    const targetUrl = TRACK_URLS[def.id] || BGM_TRACKS[0].url
     if (!this._themeAudioEl) {
       if (typeof window === 'undefined' || !window.Audio) return null
       try {
-        const audio = new window.Audio(DEFAULT_THEME_URL)
+        const audio = new window.Audio(targetUrl)
         audio.preload = shouldPlay ? 'auto' : 'none'
-        audio.loop = true
+        audio.loop = !this._carousel
         audio.volume = DEFAULT_THEME_VOL
         audio.muted = this._muted
+        audio.onended = () => {
+          if (this._carousel && !this._customUrl && !this._bgmPaused) {
+            this.nextTrack(true)
+          }
+        }
         audio.onerror = () => {
-          this._themeFailed = true
-          this._clearThemeAudio()
-          this._syncActiveTrack(true)
+          this._failedTracks.add(this._bgmMode)
+          const fallbackId = this._bgmMode !== 'theme' && !this._failedTracks.has('theme') ? 'theme' : null
+          if (fallbackId) {
+            this.setBgmTrack(fallbackId)
+          } else {
+            this._themeFailed = true
+            this._clearThemeAudio()
+            this._emitState()
+          }
         }
         this._themeAudioEl = audio
+        this._themeLoadedId = def.id
       } catch {
         this._themeFailed = true
         return null
       }
+    } else if (this._themeLoadedId !== def.id) {
+      this._themeAudioEl.src = targetUrl
+      this._themeLoadedId = def.id
+      this._themeAudioEl.preload = shouldPlay ? 'auto' : 'none'
     } else if (shouldPlay && this._themeAudioEl.preload === 'none') {
       this._themeAudioEl.preload = 'auto'
     }
+
+    this._themeAudioEl.loop = !this._carousel
     this._themeAudioEl.muted = this._muted
-    if (shouldPlay && !this._muted && this._themeAudioEl.paused) {
+    this._hookAnalyser(this._themeAudioEl)
+    if (shouldPlay && !this._muted && !this._bgmPaused) {
       try {
         const p = this._themeAudioEl.play()
         if (p && typeof p.catch === 'function') p.catch(() => {})
@@ -309,6 +368,7 @@ export class AudioEngine {
     try { this._themeAudioEl.pause() } catch {}
     try { this._themeAudioEl.src = '' } catch {}
     this._themeAudioEl = null
+    this._themeLoadedId = ''
   }
 
   /** Allow player to load a local .mp3/.wav/.ogg file on top of WebAudio SFX. */
@@ -319,13 +379,16 @@ export class AudioEngine {
     try {
       const url = URL.createObjectURL(file)
       const audio = new window.Audio(url)
-      audio.loop = true
+      audio.loop = !this._carousel
       audio.volume = 0.55
       audio.muted = this._muted
       this._customUrl = url
-      this._customTitle = String(file.name || '本地音乐').replace(/\.[^.]+$/, '').slice(0, 24)
+      this._customTitle = String(file.name || '本地音乐').replace(/\.[^.]+$/, '')
       this._customAudioEl = audio
+      this._bgmPaused = false
+      this._hookAnalyser(audio)
       audio.play().catch(() => {})
+      this._emitState()
       return true
     } catch {
       return false
@@ -344,19 +407,6 @@ export class AudioEngine {
     this._customTitle = ''
   }
 
-  _syncActiveTrack(resetPhrase = false) {
-    const next = (this._bgmMode === 'auto' || this._bgmMode === 'theme')
-      ? (SCENE_AUTO_TRACK[this._sceneContext] || 'kataware')
-      : this._bgmMode
-    if (next === this._activeTrack && !resetPhrase) return
-    this._activeTrack = next
-    this._stepIndex = 0
-    if (this.ready) {
-      this._nextStepTime = this.ctx.currentTime + 0.08
-      this._applyLit()
-    }
-  }
-
   setWeather(weather) {
     if (typeof weather !== 'string' || !WEATHER[weather]) return
     this._weather = weather
@@ -368,16 +418,10 @@ export class AudioEngine {
     if (typeof tempo !== 'string' || !TEMPO[tempo]) return
     this._tempo = tempo
     this._bpm = TEMPO[tempo]
-    this._chordDur = (60 / this._bpm) * CHORD_BEATS
-    if (this.ready) {
-      const now = this.ctx.currentTime
-      if (this._nextChord > now + this._chordDur) this._nextChord = now + this._chordDur * 0.5
-    }
   }
 
   setLitCount(n) {
     this._litCount = clamp(Math.floor(finite(n, 0)), 0, 30)
-    this._applyLit()
   }
 
   tap(combo) {
@@ -698,12 +742,9 @@ export class AudioEngine {
     const ctx = this.ctx
     const now = ctx.currentTime
     this._sources = []
-    this._padOscs = []
-    this._shimmerOscs = []
     this._voices = 0
 
-    // Master chain: everything flows through a gentle compressor so a long
-    // glissando over a full pad cannot clip.
+    // Master chain: soft limiter for weather foley & interactive mallets.
     const master = ctx.createGain()
     master.gain.value = 0
     const comp = ctx.createDynamicsCompressor()
@@ -745,18 +786,12 @@ export class AudioEngine {
     this._pinkBuf = this._noiseBuffer('pink', 4)
     this._brownBuf = this._noiseBuffer('brown', 4)
     this._buildBed(now, music)
-    this._buildPad(now, music)
 
-    this._nextChord = now + 1.2
-    this._chordIndex = 0
-    this._nextStepTime = now + 0.08
-    this._stepIndex = 0
     this._dropletNext = 0
     this._applyWeather()
-    this._applyLit()
     this._schedule()
     // @ts-expect-error Node types say setTimeout returns a Timeout, the field is a number
-    this._timer = setInterval(() => this._schedule(), 48)
+    this._timer = setInterval(() => this._schedule(), 120)
   }
 
   _buildBed(now, music) {
@@ -813,69 +848,6 @@ export class AudioEngine {
     this._bed = { pinkFilter, pinkGain, brownFilter, brownGain, windDepth, gustDepth }
   }
 
-  _buildPad(now, music) {
-    const ctx = this.ctx
-    const padFilter = ctx.createBiquadFilter()
-    padFilter.type = 'lowpass'
-    padFilter.frequency.value = 760
-    padFilter.Q.value = 0.6
-    const padGain = ctx.createGain()
-    padGain.gain.value = 0
-    padFilter.connect(padGain)
-    padGain.connect(music)
-
-    const chord = CHORDS[0]
-    for (let tone = 0; tone < 4; tone++) {
-      const level = 0.12 / (1 + tone * 0.3)
-      for (let d = 0; d < 3; d++) {
-        const o = ctx.createOscillator()
-        o.type = d === 1 ? 'sine' : 'triangle'
-        o.frequency.value = chord[tone]
-        o.detune.value = d === 0 ? -6 : d === 1 ? 0 : 6
-        const g = ctx.createGain()
-        g.gain.value = level
-        o.connect(g)
-        g.connect(padFilter)
-        o.start(now)
-        this._padOscs.push(o)
-        this._sources.push(o)
-      }
-    }
-
-    // High octave shimmer, only audible from 20 lit windows.
-    const shimmerGain = ctx.createGain()
-    shimmerGain.gain.value = 0
-    shimmerGain.connect(music)
-    const trem = ctx.createGain()
-    trem.gain.value = 0.7
-    const tremLfo = ctx.createOscillator()
-    tremLfo.type = 'sine'
-    tremLfo.frequency.value = 0.13
-    const tremDepth = ctx.createGain()
-    tremDepth.gain.value = 0.3
-    tremLfo.connect(tremDepth)
-    tremDepth.connect(trem.gain)
-    trem.connect(shimmerGain)
-    tremLfo.start(now)
-    this._sources.push(tremLfo)
-    for (let i = 0; i < 2; i++) {
-      const o = ctx.createOscillator()
-      o.type = 'sine'
-      o.frequency.value = chord[2 + i] * 4
-      o.detune.value = i === 0 ? -4 : 4
-      const g = ctx.createGain()
-      g.gain.value = 0.5
-      o.connect(g)
-      g.connect(trem)
-      o.start(now)
-      this._shimmerOscs.push(o)
-      this._sources.push(o)
-    }
-    this._padFilter = padFilter
-    this._padGain = padGain
-    this._shimmerGain = shimmerGain
-  }
-
   _applyWeather() {
     if (!this.ready || !this._bed) return
     const p = WEATHER[this._weather] || WEATHER.light_rain
@@ -891,290 +863,10 @@ export class AudioEngine {
     bed.gustDepth.gain.setTargetAtTime(p.gust, t, 0.7)
   }
 
-  _applyLit() {
-    if (!this.ready) return
-    const t = this.ctx.currentTime
-    const n = this._litCount
-    const isAmbient = this._activeTrack === 'ambient' && !this._hasExternalBgm()
-    let pad = 0
-    if (isAmbient) {
-      if (n > 2) pad = Math.sqrt(Math.min(1, n / 12)) * 0.55
-      if (n > 15) pad = 0.55 + Math.sqrt(Math.min(1, (n - 15) / 8)) * 0.3
-    }
-    const shim = isAmbient && n >= 20 ? 0.1 + Math.sqrt(Math.min(1, (n - 20) / 4)) * 0.2 : 0
-    this._padGain.gain.setTargetAtTime(pad, t, 0.9)
-    this._shimmerGain.gain.setTargetAtTime(shim, t, 1.2)
-  }
-
-  // Step-sequenced BGM + ambient pad + droplet clock.
   _schedule() {
     if (!this.ready) return
     const now = this.ctx.currentTime
-    if (this._nextChord < now - 0.5) this._nextChord = now + 0.2
-    let guard = 0
-    while (this._nextChord < now + LOOKAHEAD + 1.4 && guard++ < 4) {
-      this._playChord(this._nextChord, this._chordIndex)
-      this._nextChord += this._chordDur
-      this._chordIndex = (this._chordIndex + 1) % CHORDS.length
-    }
-
-    const score = (!this._hasExternalBgm() && this._activeTrack !== 'ambient') ? SCORES[this._activeTrack] : null
-    if (score && !this._muted) {
-      const stepDur = 60 / score.bpm / 4
-      if (this._nextStepTime < now - 0.25) this._nextStepTime = now + 0.04
-      let stepGuard = 0
-      while (this._nextStepTime < now + LOOKAHEAD && stepGuard++ < 12) {
-        this._playScoreStep(score, this._stepIndex, this._nextStepTime, stepDur)
-        this._nextStepTime += stepDur
-        this._stepIndex = (this._stepIndex + 1) % (score.bars.length * 16)
-      }
-    }
-
     if (this._weather === 'light_rain' && !this._muted) this._scheduleDroplets(now + 0.7)
-  }
-
-  _playScoreStep(score, globalStep, t, stepDur) {
-    const barIdx = Math.floor(globalStep / 16) % score.bars.length
-    const step = globalStep % 16
-    const bar = score.bars[barIdx]
-    const intense = this._activeTrack === 'bluedragon'
-
-    // Downbeat warm orchestral string pad & deep bass anchor
-    if (step === 0) {
-      this._piano(midiHz(bar.bass), t, intense ? 0.16 : 0.13, stepDur * 14, -0.15, true)
-      if (bar.pad) {
-        for (let i = 0; i < bar.pad.length; i++) {
-          this._strings(midiHz(bar.pad[i]), t, intense ? 0.042 : 0.032, stepDur * 16, (i - 1.5) * 0.22)
-        }
-      }
-    }
-
-    // Left-hand flowing piano / driving Sawano string ostinato every 8th note (or 16th ostinato pulse)
-    if (bar.arp) {
-      if (step % 2 === 0) {
-        const note = bar.arp[(step / 2) % bar.arp.length]
-        if (score.ostinato) {
-          this._strings(midiHz(note), t, 0.048, stepDur * 1.9, (step % 4 === 0 ? -0.25 : 0.25))
-          this._piano(midiHz(note), t, 0.072, stepDur * 2.4, -0.18)
-        } else {
-          this._piano(midiHz(note), t, 0.085, stepDur * 3.8, -0.22)
-        }
-      } else if (score.ostinato && step % 2 === 1) {
-        const note = bar.arp[Math.floor(step / 2) % bar.arp.length]
-        this._strings(midiHz(note), t, 0.026, stepDur * 1.1, 0.2)
-      }
-    }
-
-    // Right-hand expressive singing lead melody
-    if (bar.mel && bar.mel[step] !== undefined) {
-      const m = bar.mel[step]
-      const vel = intense ? 0.145 : 0.135
-      this._piano(midiHz(m), t, vel, stepDur * 5.2, 0.12)
-      if (intense) this._piano(midiHz(m + 12), t, vel * 0.42, stepDur * 4.0, -0.1)
-    }
-
-    // Twilight celesta chime sparkle (Kataware)
-    if (bar.cel && bar.cel[step] !== undefined) {
-      this._celesta(midiHz(bar.cel[step]), t, 0.055, stepDur * 6.0, 0.28)
-    }
-
-    // Rhythmic percussion (My Soul boom-bap / Blue Dragon dramatic pulse)
-    if (bar.kick && bar.kick.includes(step)) this._kick(t, intense ? 0.16 : 0.11)
-    if (bar.snare && bar.snare.includes(step)) this._snare(t, intense ? 0.095 : 0.055, !intense)
-    if (bar.timp && bar.timp.includes(step)) this._timpani(midiHz(bar.bass), t, 0.15)
-    if ((bar.kick || bar.snare) && step % 2 === 0) this._hat(t, step % 4 === 2 ? 0.026 : 0.014)
-  }
-
-  _piano(freq, t, vel, dur, pan = 0, warmBass = false) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.setValueAtTime(warmBass ? 1100 : 3800, t)
-    filter.frequency.exponentialRampToValueAtTime(warmBass ? 240 : 620, t + Math.min(0.6, dur * 0.7))
-    filter.Q.value = 0.8
-
-    const env = ctx.createGain()
-    env.gain.setValueAtTime(0.0001, t)
-    env.gain.exponentialRampToValueAtTime(clamp(vel, 0.01, 0.35), t + 0.008)
-    env.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.18, dur))
-
-    const p = ctx.createStereoPanner()
-    p.pan.value = clamp(pan, -0.8, 0.8)
-
-    const o1 = ctx.createOscillator()
-    o1.type = 'triangle'
-    o1.frequency.setValueAtTime(freq, t)
-    const o2 = ctx.createOscillator()
-    o2.type = 'sine'
-    o2.frequency.setValueAtTime(freq * 2, t)
-    const g2 = ctx.createGain()
-    g2.gain.value = warmBass ? 0.25 : 0.34
-
-    o1.connect(filter)
-    o2.connect(g2)
-    g2.connect(filter)
-    filter.connect(env)
-    env.connect(p)
-    p.connect(this.music)
-    o1.start(t)
-    o2.start(t)
-    const endT = t + Math.max(0.2, dur) + 0.05
-    o1.stop(endT)
-    o2.stop(endT)
-    o1.onended = () => this._releaseVoice()
-  }
-
-  _strings(freq, t, vel, dur, pan = 0) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const lp = ctx.createBiquadFilter()
-    lp.type = 'lowpass'
-    lp.frequency.setValueAtTime(700, t)
-    lp.frequency.linearRampToValueAtTime(1950, t + Math.min(0.6, dur * 0.45))
-    lp.frequency.linearRampToValueAtTime(820, t + dur)
-
-    const env = ctx.createGain()
-    env.gain.setValueAtTime(0.0001, t)
-    env.gain.linearRampToValueAtTime(clamp(vel, 0.005, 0.14), t + Math.min(0.35, dur * 0.35))
-    env.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.25, dur))
-
-    const p = ctx.createStereoPanner()
-    p.pan.value = clamp(pan, -0.8, 0.8)
-
-    const o1 = ctx.createOscillator()
-    o1.type = 'sawtooth'
-    o1.frequency.setValueAtTime(freq, t)
-    o1.detune.value = -7
-    const o2 = ctx.createOscillator()
-    o2.type = 'sawtooth'
-    o2.frequency.setValueAtTime(freq, t)
-    o2.detune.value = 7
-
-    o1.connect(lp)
-    o2.connect(lp)
-    lp.connect(env)
-    env.connect(p)
-    p.connect(this.music)
-    o1.start(t)
-    o2.start(t)
-    const endT = t + Math.max(0.26, dur) + 0.06
-    o1.stop(endT)
-    o2.stop(endT)
-    o1.onended = () => this._releaseVoice()
-  }
-
-  _celesta(freq, t, vel, dur, pan = 0) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const o = ctx.createOscillator()
-    o.type = 'sine'
-    o.frequency.setValueAtTime(freq, t)
-    const env = ctx.createGain()
-    env.gain.setValueAtTime(0.0001, t)
-    env.gain.exponentialRampToValueAtTime(clamp(vel, 0.01, 0.15), t + 0.006)
-    env.gain.exponentialRampToValueAtTime(0.0001, t + dur)
-    const p = ctx.createStereoPanner()
-    p.pan.value = clamp(pan, -0.8, 0.8)
-    o.connect(env)
-    env.connect(p)
-    p.connect(this.music)
-    o.start(t)
-    o.stop(t + dur + 0.04)
-    o.onended = () => this._releaseVoice()
-  }
-
-  _kick(t, peak = 0.12) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const o = ctx.createOscillator()
-    o.type = 'sine'
-    o.frequency.setValueAtTime(125, t)
-    o.frequency.exponentialRampToValueAtTime(42, t + 0.11)
-    const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.005)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24)
-    o.connect(g)
-    g.connect(this.music)
-    o.start(t)
-    o.stop(t + 0.26)
-    o.onended = () => this._releaseVoice()
-  }
-
-  _snare(t, peak = 0.06, rimOnly = false) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const src = this._noiseSource('pink', t, 0.16)
-    const bp = ctx.createBiquadFilter()
-    bp.type = 'bandpass'
-    bp.frequency.value = rimOnly ? 1650 : 2200
-    bp.Q.value = rimOnly ? 3.2 : 1.1
-    const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.004)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + (rimOnly ? 0.07 : 0.14))
-    src.connect(bp)
-    bp.connect(g)
-    g.connect(this.music)
-    this._hold(180)
-  }
-
-  _hat(t, peak = 0.02) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const src = this._noiseSource('pink', t, 0.05)
-    const hp = ctx.createBiquadFilter()
-    hp.type = 'highpass'
-    hp.frequency.value = 6800
-    const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.002)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045)
-    src.connect(hp)
-    hp.connect(g)
-    g.connect(this.music)
-    this._hold(70)
-  }
-
-  _timpani(freq, t, peak = 0.16) {
-    if (!this._takeVoice()) return
-    const ctx = this.ctx
-    const o = ctx.createOscillator()
-    o.type = 'triangle'
-    o.frequency.setValueAtTime(freq * 1.15, t)
-    o.frequency.exponentialRampToValueAtTime(freq, t + 0.08)
-    const lp = ctx.createBiquadFilter()
-    lp.type = 'lowpass'
-    lp.frequency.value = 340
-    const g = ctx.createGain()
-    g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.01)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55)
-    o.connect(lp)
-    lp.connect(g)
-    g.connect(this.music)
-    o.start(t)
-    o.stop(t + 0.58)
-    o.onended = () => this._releaseVoice()
-  }
-
-  _playChord(t, index) {
-    const chord = CHORDS[index % CHORDS.length]
-    for (let tone = 0; tone < 4; tone++) {
-      for (let d = 0; d < 3; d++) {
-        this._padOscs[tone * 3 + d].frequency.setTargetAtTime(chord[tone], t, 0.4)
-      }
-    }
-    const base = 520 + this._litCount * 12
-    this._padFilter.frequency.setTargetAtTime(base * 1.1, t, 0.2)
-    this._padFilter.frequency.setTargetAtTime(base * 0.65, t + 0.9, 0.9)
-    this._shimmerOscs[0].frequency.setTargetAtTime(chord[2] * 4, t, 0.5)
-    this._shimmerOscs[1].frequency.setTargetAtTime(chord[3] * 4, t, 0.5)
-    if (this._muted || this._hasExternalBgm() || this._activeTrack !== 'ambient') return
-    for (let i = 0; i < 3; i++) {
-      this._softTone(chord[(i + 1) % 4] * 2, t + i * 0.9, 0.024, 1.8, 'sine', 0.05)
-    }
   }
 
   _scheduleDroplets(horizon) {
@@ -1583,8 +1275,6 @@ export class AudioEngine {
       } catch {}
     }
     this._sources = []
-    this._padOscs = []
-    this._shimmerOscs = []
     try {
       if (this.master) this.master.disconnect()
     } catch {}
@@ -1593,9 +1283,8 @@ export class AudioEngine {
     this.master = null
     this.music = null
     this.sfx = null
-    this._padGain = null
-    this._padFilter = null
-    this._shimmerGain = null
+    this._analyser = null
+    this._analyserBins = null
     this._bed = null
     this._voices = 0
     if (ctx && ctx.state !== 'closed' && ctx.close) {

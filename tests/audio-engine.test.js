@@ -143,11 +143,12 @@ describe('AudioEngine default lazy theme BGM', () => {
 
   it('defaults to the lazy theme track without downloading pre-gesture', () => {
     const engine = new AudioEngine()
-    expect(engine.getBgmState()).toEqual({
+    expect(engine.getBgmState()).toMatchObject({
       mode: 'theme',
       activeTrack: 'theme',
       customTitle: '',
-      muted: false
+      muted: false,
+      carousel: true
     })
     expect(env.createdAudios.length).toBe(0)
 
@@ -159,24 +160,27 @@ describe('AudioEngine default lazy theme BGM', () => {
     engine.dispose()
   })
 
-  it('starts playing default theme on unlock and switches cleanly to procedural scores', () => {
+  it('starts playing theme on unlock and rotates through bundled tracks on click or end', () => {
     const engine = new AudioEngine()
     expect(engine.unlock()).toBe(true)
     expect(env.createdAudios.length).toBe(1)
-    const themeEl = env.createdAudios[0]
-    expect(themeEl.loop).toBe(true)
-    expect(themeEl.preload).toBe('auto')
-    expect(themeEl.playCalls).toBe(1)
-    expect(themeEl.paused).toBe(false)
+    const audioEl = env.createdAudios[0]
+    expect(audioEl.loop).toBe(false)
+    expect(audioEl.preload).toBe('auto')
+    expect(audioEl.playCalls).toBe(1)
+    expect(audioEl.paused).toBe(false)
 
-    engine.setBgmTrack('kataware')
-    expect(themeEl.paused).toBe(true)
-    expect(themeEl.pauseCalls).toBe(1)
-    expect(engine.getBgmState()).toMatchObject({ mode: 'kataware', activeTrack: 'kataware' })
+    engine.setBgmTrack('canon_in_d')
+    expect(audioEl.src).toBe('./audio/tracks/canon-in-d.mp3')
+    expect(engine.getBgmState()).toMatchObject({ mode: 'canon_in_d', activeTrack: 'canon_in_d' })
+
+    // Simulate track finished -> carousel advances to next track
+    audioEl.onended()
+    expect(engine.getBgmState()).toMatchObject({ mode: 'sacred_game', activeTrack: 'sacred_game' })
+    expect(audioEl.src).toBe('./audio/tracks/sacred-game.mp3')
 
     engine.setBgmTrack('theme')
-    expect(themeEl.paused).toBe(false)
-    expect(themeEl.playCalls).toBe(2)
+    expect(audioEl.src).toBe('./audio/bgm-default.mp3')
     expect(engine.getBgmState()).toMatchObject({ mode: 'theme', activeTrack: 'theme' })
     engine.dispose()
   })
@@ -196,16 +200,17 @@ describe('AudioEngine default lazy theme BGM', () => {
     engine.dispose()
   })
 
-  it('falls back seamlessly to procedural kataware if the theme audio errors', () => {
+  it('falls back gracefully to theme if another track errors', () => {
     const engine = new AudioEngine()
     engine.unlock()
-    const themeEl = env.createdAudios[0]
-    expect(typeof themeEl.onerror).toBe('function')
+    engine.setBgmTrack('blue_dragon')
+    const el = env.createdAudios[0]
+    expect(typeof el.onerror).toBe('function')
 
-    themeEl.onerror()
-    expect(engine.getBgmState()).toEqual({
+    el.onerror()
+    expect(engine.getBgmState()).toMatchObject({
       mode: 'theme',
-      activeTrack: 'kataware',
+      activeTrack: 'theme',
       customTitle: '',
       muted: false
     })

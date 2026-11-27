@@ -31,6 +31,7 @@ import { renderCatPortraitSvg } from './campus-critters.js'
 import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
 import { ReplayPlayer } from './replay.js'
 import { MODE_MAX_STAGE, evaluateRunTier, formatStageMilestone } from '../shared/ranks.js'
+import { MusicDial, mountIcpFooter } from './music-dial.js'
 
 const qs = (root, sel) => root.querySelector(sel)
 const qsa = (root, sel) => root.querySelectorAll(sel)
@@ -72,6 +73,13 @@ export class UI {
     this._lastTierCode = ''
     this._hubPanelOpen = false
     this._encounterTimer = null
+    this.musicDial = new MusicDial(root)
+    this.icpFooter = mountIcpFooter(root)
+  }
+
+  /** @param {any} handlers */
+  bindMusicDial(handlers) {
+    if (this.musicDial) this.musicDial.bindHandlers(handlers)
   }
 
   _layer() {
@@ -161,10 +169,6 @@ export class UI {
         '<div class="title-top-group">' +
           '<button type="button" class="chip-btn" data-act="bgm-toggle"><span data-bgmbadge>🎵 ' + esc(bgmState?.customTitle || curTrack.shortName) + '</span> ▾</button>' +
           '<button type="button" class="chip-btn" data-act="mute" title="静音切换">' + (bgmState && bgmState.muted ? '🔇' : '🔊') + '</button>' +
-          '<div class="bgm-popover" data-bgmpop>' +
-            BGM_TRACKS.map(t => '<button type="button" class="chip-sm ' + (t.id === curMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '" title="' + esc(t.desc) + '">' + esc(t.shortName) + '</button>').join('') +
-            '<label class="chip-sm bgm-upload" title="导入本地 MP3">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
-          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="title-hero">' +
@@ -193,29 +197,10 @@ export class UI {
     paintIcons(s)
 
     const bgmToggle = qs(s, '[data-act="bgm-toggle"]')
-    const bgmPop = qs(s, '[data-bgmpop]')
-    if (bgmToggle && bgmPop) {
+    if (bgmToggle) {
       bgmToggle.onclick = e => {
         e.stopPropagation()
-        bgmPop.classList.toggle('open')
-      }
-      bgmPop.addEventListener('click', e => e.stopPropagation())
-      s.addEventListener('click', () => bgmPop.classList.remove('open'))
-    }
-
-    for (const b of qsa(s, '[data-bgm]')) {
-      b.onclick = () => {
-        const id = b.getAttribute('data-bgm') || 'auto'
-        for (const x of qsa(s, '[data-bgm]')) x.classList.toggle('on', x === b)
-        if (onBgmSelect) onBgmSelect(id)
-        if (bgmPop) bgmPop.classList.remove('open')
-      }
-    }
-    const fileInp = qs(s, 'input[data-bgmfile]')
-    if (fileInp && onBgmUpload) {
-      fileInp.onchange = () => {
-        const f = fileInp.files && fileInp.files[0]
-        if (f) onBgmUpload(f)
+        if (this.musicDial) this.musicDial.toggle()
       }
     }
     const muteBtn = qs(s, '[data-act="mute"]')
@@ -249,7 +234,15 @@ export class UI {
     const txt = bgmState?.customTitle ? ('🎵 ' + bgmState.customTitle) : ('🎵 ' + tMeta.shortName)
     for (const el of document.querySelectorAll('[data-bgmbadge]')) {
       el.textContent = txt
+      el.setAttribute('title', bgmState?.customTitle || tMeta.name)
     }
+    for (const btn of document.querySelectorAll('[data-bgm]')) {
+      btn.classList.toggle('on', btn.getAttribute('data-bgm') === (bgmState?.mode || 'theme'))
+    }
+    for (const mBtn of document.querySelectorAll('[data-act="mute"]')) {
+      mBtn.textContent = bgmState && bgmState.muted ? '🔇' : '🔊'
+    }
+    if (this.musicDial) this.musicDial.sync(bgmState)
   }
 
   updateOrbitBadge(locked) {
@@ -453,7 +446,8 @@ export class UI {
 
       '<div class="hub-mid ' + (panelOpen ? '' : 'collapsed') + '" data-hubmid>' +
         '<div class="hub-panel">' +
-          '<div class="hub-tabs">' +
+          '<div class="hub-tabs" style="--tab-idx:' + (activeTab === 'env' ? 1 : activeTab === 'av' ? 2 : 0) + ';">' +
+            '<span class="hub-tab-glider" aria-hidden="true"></span>' +
             '<button type="button" class="hub-tab-btn ' + (activeTab === 'dorm' ? 'on' : '') + '" data-tab="dorm">楼栋</button>' +
             '<button type="button" class="hub-tab-btn ' + (activeTab === 'env' ? 'on' : '') + '" data-tab="env">天气季节</button>' +
             '<button type="button" class="hub-tab-btn ' + (activeTab === 'av' ? 'on' : '') + '" data-tab="av">视角配乐</button>' +
@@ -479,10 +473,10 @@ export class UI {
             '<div class="chip-row">' +
               CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') +
             '</div>' +
-            '<div class="hub-group-label" style="margin-top:8px;">配乐</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">配乐轮播</div>' +
             '<div class="chip-row">' +
-              BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') +
-              '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
+              '<button type="button" class="chip-sm on" data-act="open-dial">🎡 旋开音乐转盘</button>' +
+              '<label class="chip-sm bgm-upload">📁 导入本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
             '</div>' +
             '<div class="hub-group-label" style="margin-top:8px;">画质 · ' + esc(qMeta.desc) + '</div>' +
             '<div class="chip-row">' +
@@ -504,7 +498,7 @@ export class UI {
             '<div class="chip-row">' + WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') + '</div>' +
             '<div class="chip-row">' + CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') + '</div>' +
             '<div class="chip-row">' + QUALITY_MODES.map(qm => '<button class="chip-sm ' + (qm.id === qMode ? 'on' : '') + '" data-quality="' + esc(qm.id) + '">' + esc(qm.name) + '</button>').join('') + '</div>' +
-            '<div class="chip-row">' + BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') + '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
+            '<div class="chip-row"><button type="button" class="chip-sm on" data-act="open-dial">🎡 音乐转盘</button><label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
           '</div>' +
         '</div>' +
         '<div class="hub-modes">' +
@@ -542,10 +536,12 @@ export class UI {
       hub.addEventListener('click', () => moreMenu.classList.remove('open'))
     }
 
+    const tabsEl = qs(hub, '.hub-tabs')
     for (const tb of qsa(hub, '[data-tab]')) {
       tb.onclick = () => {
         const t = tb.getAttribute('data-tab') || 'dorm'
         this._hubTab = t
+        if (tabsEl) tabsEl.style.setProperty('--tab-idx', String(t === 'env' ? 1 : t === 'av' ? 2 : 0))
         for (const b of qsa(hub, '[data-tab]')) b.classList.toggle('on', b.getAttribute('data-tab') === t)
         for (const p of qsa(hub, '[data-pane]')) p.classList.toggle('on', p.getAttribute('data-pane') === t)
       }
@@ -569,12 +565,18 @@ export class UI {
     }
 
     const cycleBgmBtn = qs(hub, '[data-act="bgm-cycle"]')
-    if (cycleBgmBtn && opts.onBgmSelect) {
+    if (cycleBgmBtn) {
       cycleBgmBtn.onclick = () => {
-        const order = BGM_TRACKS.map(t => t.id)
-        const next = order[(order.indexOf(bgmMode) + 1) % order.length]
-        opts.onBgmSelect(next)
+        if (this.musicDial) this.musicDial.toggle()
+        else if (opts.onBgmSelect) {
+          const order = BGM_TRACKS.map(t => t.id)
+          const next = order[(order.indexOf(bgmMode) + 1) % order.length]
+          opts.onBgmSelect(next)
+        }
       }
+    }
+    for (const dialBtn of qsa(hub, '[data-act="open-dial"]')) {
+      dialBtn.onclick = () => { if (this.musicDial) this.musicDial.open() }
     }
     const muteBtn = qs(hub, '[data-act="mute"]')
     if (muteBtn && opts.onMute) {

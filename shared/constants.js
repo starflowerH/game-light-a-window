@@ -243,12 +243,14 @@ export const GAME_MODES = [
 ]
 
 export const BGM_TRACKS = [
-  { id: 'theme', name: '黄昏之时 · 默认原声', shortName: '黄昏原声', desc: '默认校园夜巡主题背景音乐' },
-  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '随剧情与关卡自动切曲' },
-  { id: 'kataware', name: '黄昏之时 · 暮色星辰', shortName: '黄昏之时风', desc: '暮色钢琴弦乐 · 温柔悬念' },
-  { id: 'bluedragon', name: '医龙 · 苍蓝脉搏', shortName: '医龙风', desc: '弦乐律动与鼓点 · 查寝张力' },
-  { id: 'mysoul', name: 'My Soul · 子夜琴诗', shortName: 'My Soul风', desc: '循环钢琴旋律 · 深夜沉浸' },
-  { id: 'ambient', name: '微雨校庭 · 助眠白噪音', shortName: '纯白噪音', desc: '仅保留细雨晚风与自然声' }
+  { id: 'theme', name: '黄昏之时', shortName: '黄昏之时', url: './audio/bgm-default.mp3', desc: '初始主题曲' },
+  { id: 'ame_triangle_14', name: 'Ame - triangle-14', shortName: 'Ame - triangle-14', url: './audio/tracks/ame-triangle-14.mp3', desc: '夜间轮播曲目' },
+  { id: 'canon_in_d', name: 'Johann Pachelbel - Canon in D major', shortName: 'Johann Pachelbel - Canon in D major', url: './audio/tracks/canon-in-d.mp3', desc: '夜间轮播曲目' },
+  { id: 'sacred_game', name: 'Rorik - Sacred Game （radio）', shortName: 'Rorik - Sacred Game （radio）', url: './audio/tracks/sacred-game.mp3', desc: '夜间轮播曲目' },
+  { id: 'memory_weave', name: 'Xeuphoria - Memory Weave', shortName: 'Xeuphoria - Memory Weave', url: './audio/tracks/memory-weave.mp3', desc: '夜间轮播曲目' },
+  { id: 'counter_attack', name: 'Yi Chou - Counter Attack（小提琴版）', shortName: 'Yi Chou - Counter Attack（小提琴版）', url: './audio/tracks/counter-attack.mp3', desc: '夜间轮播曲目' },
+  { id: 'autumn_sky', name: 'ばんばんしー - 秋姉妹のなく顷に in the autumn sky', shortName: 'ばんばんしー - 秋姉妹のなく顷に in the autumn sky', url: './audio/tracks/autumn-sky.mp3', desc: '夜间轮播曲目' },
+  { id: 'blue_dragon', name: '澤野弘之 - Blue Dragon(piano&guitarver)', shortName: '澤野弘之 - Blue Dragon(piano&guitarver)', url: './audio/tracks/blue-dragon.mp3', desc: '夜间轮播曲目' }
 ]
 export const BGM_TRACK_IDS = BGM_TRACKS.map(t => t.id)
 

@@ -8,6 +8,7 @@ import {
 } from '../src/campus-critters.js'
 import { RANDOM_EVENTS } from '../src/random-events.js'
 import { loadRecords } from '../src/records.js'
+import { renderNationalEmblemSvg } from '../src/music-dial.js'
 
 describe('campus-critters & tranquil snow night upgrades', () => {
   it('defines 3 distinct interactive cats and 3 winter pedestrians', () => {
@@ -57,5 +58,8 @@ describe('campus-critters & tranquil snow night upgrades', () => {
     const ids = RANDOM_EVENTS.map(e => e.id)
     expect(ids).toContain('evt_snow_birds')
     expect(ids).toContain('evt_bench_cat')
+    const emblem = renderNationalEmblemSvg()
+    expect(emblem).toContain('<svg')
+    expect(emblem).toContain('#b91c1c')
   })
 })
