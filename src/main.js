@@ -31,6 +31,7 @@ const holder = { game: null }
 
 const scene = new Scene(stage, {
   onWindowTap: (w, x, y) => { if (holder.game) holder.game.tap(w, x, y) },
+  onCritterTap: (hit) => { if (holder.game && holder.game.onCritterTap) holder.game.onCritterTap(hit) },
   onPointerDown: (x, y) => { if (holder.game) holder.game.onPointerDown(x, y) },
   onPointerMove: (x, y, dragging) => { if (holder.game) holder.game.onPointerMove(x, y, dragging) },
   onPointerUp: (x, y) => { if (holder.game) holder.game.onPointerUp(x, y) }
@@ -55,6 +56,11 @@ document.addEventListener('visibilitychange', () => {
   } else if (!ribbonRaf) {
     ribbonRaf = requestAnimationFrame(ribbonLoop)
   }
+})
+let resizeRibbonTimer = null
+window.addEventListener('resize', () => {
+  clearTimeout(resizeRibbonTimer)
+  resizeRibbonTimer = setTimeout(() => ribbon.resize(), 150)
 })
 ribbonRaf = requestAnimationFrame(ribbonLoop)
 

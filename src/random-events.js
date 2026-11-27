@@ -67,7 +67,26 @@ export const RANDOM_EVENTS = [
     speakerId: 'xiaohe',
     line: '「我把刚才那扇窗的光影画在纸角了，多给你延长 5 秒思考时间。」',
     effect: 'extra_recall_sec',
-    badge: '思考 +5s'
+    badge: '思考 +5s',
+    worldFx: 'birds'
+  },
+  {
+    id: 'evt_snow_birds',
+    title: '檐下夜鸟衔来雪意',
+    speakerId: 'xingye',
+    line: '「一队夜鸟贴着雪线低飞掠过钟楼顶，羽翼扫亮了一排楼檐灯。」',
+    effect: 'bonus_90',
+    badge: '🕊️ 夜鸟 +90分',
+    worldFx: 'birds'
+  },
+  {
+    id: 'evt_bench_cat',
+    title: '长椅三花踩雪凑热闹',
+    speakerId: 'aunt_lin',
+    line: '「楼前的小三花“糯米”溜达过来蹭你的裤脚，还帮你叼亮一盏小窗！」',
+    effect: 'auto_reveal_one',
+    badge: '🐾 亮1窗提示',
+    worldFx: 'cat'
   }
 ]
 

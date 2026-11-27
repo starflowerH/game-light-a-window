@@ -27,6 +27,7 @@ import {
   seasonDef
 } from '../shared/constants.js'
 import { NPC_CATALOG, OUTFIT_LABELS, renderNpcPortraitSvg } from './npc-portraits.js'
+import { renderCatPortraitSvg } from './campus-critters.js'
 import { bondLabel, endingGallery, endingScript } from './narrative-graph.js'
 import { ReplayPlayer } from './replay.js'
 import { MODE_MAX_STAGE, evaluateRunTier, formatStageMilestone } from '../shared/ranks.js'
@@ -70,6 +71,7 @@ export class UI {
     /** @type {ReplayPlayer|null} */ this._replayPlayer = null
     this._lastTierCode = ''
     this._hubPanelOpen = false
+    this._encounterTimer = null
   }
 
   _layer() {
@@ -93,6 +95,7 @@ export class UI {
     this.hideHintBubble()
     this.clearWindowTags()
     this.hideCrisisPrompt(true)
+    this.hideEncounterDock()
     this.stopReplay()
     this._cur = null
     this.el.innerHTML = ''
@@ -388,6 +391,7 @@ export class UI {
    *   onLaunchMode: (id: string) => void,
    *   onNicknameChange: (name: string) => void,
    *   onReplayDialogue: Function,
+   *   onOpenCats?: Function,
    *   onNpcGallery: Function,
    *   onLeaderboard: Function,
    *   onCollection: Function,
@@ -436,6 +440,7 @@ export class UI {
               '</div>' +
               '<div class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '" style="margin:2px 0;"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI' : '校园剧本')) + '</div>' +
               '<button class="chip-sm" data-act="dialogue">💬 开场剧情</button>' +
+              '<button class="chip-sm" data-act="cats">🐾 校园小猫</button>' +
               '<button class="chip-sm" data-act="npcs">👘 NPC 图鉴</button>' +
               '<button class="chip-sm" data-act="collection">⭐ 结局线索</button>' +
               '<button class="chip-sm" data-act="key">🔑 AI Key</button>' +
@@ -589,6 +594,7 @@ export class UI {
     }
 
     qs(hub, '[data-act="board"]').onclick = () => opts.onLeaderboard()
+    if (opts.onOpenCats) qs(hub, '[data-act="cats"]').onclick = () => opts.onOpenCats()
     qs(hub, '[data-act="npcs"]').onclick = () => opts.onNpcGallery()
     qs(hub, '[data-act="dialogue"]').onclick = () => opts.onReplayDialogue()
     qs(hub, '[data-act="collection"]').onclick = () => opts.onCollection()
@@ -1978,6 +1984,144 @@ export class UI {
       this.hideAll()
       if (onClose) onClose()
     }
+  }
+
+  /**
+   * Interactive 3D Campus Cat Status Panel (view name, location, status bars, pet & feed).
+   * @param {{
+   *   cat: any, allCats: any[],
+   *   onSelectCat?: (catId: string) => any,
+   *   onPet?: (catId: string) => any,
+   *   onFeed?: (catId: string) => any,
+   *   onFocusCat?: (catId: string) => void,
+   *   onClose?: () => void
+   * }} opts
+   */
+  showCatModal({ cat, allCats = [], onSelectCat, onPet, onFeed, onFocusCat, onClose }) {
+    this.hideEncounterDock()
+    const s = this._layer()
+    let current = cat
+
+    const renderBody = () => {
+      const chips = allCats.map(item =>
+        '<button type="button" class="chip-sm ' + (item.id === current.id ? 'on' : '') + '" data-cattab="' + esc(item.id) + '">' +
+          '🐾 ' + esc(item.name) + ' · ' + esc(item.breed.split('（')[0]) +
+        '</button>'
+      ).join('')
+
+      s.innerHTML =
+        '<div class="panel glass cat-modal-panel">' +
+          '<div class="cat-switcher">' + chips + '</div>' +
+          '<div class="cat-head">' +
+            '<div class="cat-avatar">' + renderCatPortraitSvg(current.id) + '</div>' +
+            '<div class="cat-meta">' +
+              '<div class="cat-meta-row"><h2 class="cat-name">' + esc(current.name) + '</h2><span class="cat-breed">' + esc(current.breed) + '</span></div>' +
+              '<div class="cat-spot">📍 ' + esc(current.spotName) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<p class="cat-bio">' + esc(current.bio) + '</p>' +
+          '<div class="cat-mood" data-catmood>' + esc(current.moodText) + '</div>' +
+          '<div class="cat-bars">' +
+            '<div class="cat-bar-row"><span>🔥 暖意</span><span class="cat-bar-track"><i class="cat-bar-fill warmth" style="width:' + current.warmth + '%"></i></span><b>' + current.warmth + '</b></div>' +
+            '<div class="cat-bar-row"><span>🐟 饱腹</span><span class="cat-bar-track"><i class="cat-bar-fill fullness" style="width:' + current.fullness + '%"></i></span><b>' + current.fullness + '</b></div>' +
+            '<div class="cat-bar-row"><span>💛 亲密</span><span class="cat-bar-track"><i class="cat-bar-fill bond" style="width:' + current.bond + '%"></i></span><b>' + current.bond + '</b></div>' +
+          '</div>' +
+          '<div class="cat-actions">' +
+            '<button type="button" class="btn primary" data-act="pet">🤍 摸摸头</button>' +
+            '<button type="button" class="btn secondary" data-act="feed">🐟 喂小鱼干</button>' +
+          '</div>' +
+          '<div class="cat-actions" style="margin-top:8px;">' +
+            '<button type="button" class="btn ghost" data-act="focus-cat">📍 镜头看它</button>' +
+            '<button type="button" class="btn ghost" data-act="close-cat">返回校园</button>' +
+          '</div>' +
+        '</div>'
+
+      for (const tab of qsa(s, '[data-cattab]')) {
+        tab.onclick = () => {
+          const nextId = tab.getAttribute('data-cattab') || ''
+          const nextSnap = onSelectCat ? onSelectCat(nextId) : allCats.find(item => item.id === nextId)
+          if (nextSnap) {
+            current = nextSnap
+            renderBody()
+          }
+        }
+      }
+      qs(s, '[data-act="pet"]').onclick = () => {
+        if (!onPet) return
+        const nextSnap = onPet(current.id)
+        if (nextSnap) {
+          current = nextSnap
+          renderBody()
+        }
+      }
+      qs(s, '[data-act="feed"]').onclick = () => {
+        if (!onFeed) return
+        const nextSnap = onFeed(current.id)
+        if (nextSnap) {
+          current = nextSnap
+          renderBody()
+        }
+      }
+      qs(s, '[data-act="focus-cat"]').onclick = () => {
+        const targetId = current.id
+        s.remove()
+        this._cur = null
+        if (onFocusCat) onFocusCat(targetId)
+        if (onClose) onClose()
+      }
+      qs(s, '[data-act="close-cat"]').onclick = () => {
+        s.remove()
+        this._cur = null
+        if (onClose) onClose()
+      }
+    }
+    renderBody()
+  }
+
+  /**
+   * Non-blocking floating random encounter card shown during gameplay.
+   * @param {{
+   *   title: string, badge?: string, speakerId?: string, line: string,
+   *   choices?: Array<{ id: string, label: string, onPick?: () => void }>,
+   *   durationMs?: number
+   * }} opts
+   */
+  showEncounterDock({ title, badge = '', speakerId = 'aunt_lin', line, choices = [], durationMs = 6400 }) {
+    this.hideEncounterDock()
+    const d = document.createElement('div')
+    d.id = 'encounter-dock'
+    const portrait = speakerId ? '<span class="npc-mini">' + renderNpcPortraitSvg(speakerId, 'autumn', 'clear') + '</span>' : ''
+    const btns = choices.length
+      ? '<div class="enc-btns">' + choices.map((c, idx) =>
+          '<button type="button" class="chip-sm ' + (idx === 0 ? 'on' : '') + '" data-encchoice="' + esc(c.id) + '">' + esc(c.label) + '</button>'
+        ).join('') + '</div>'
+      : ''
+    d.innerHTML =
+      '<div class="enc-head">' +
+        '<div style="display:flex;align-items:center;gap:7px;min-width:0;">' + portrait + '<span class="enc-title">' + esc(title) + '</span></div>' +
+        (badge ? '<span class="enc-badge">' + esc(badge) + '</span>' : '') +
+      '</div>' +
+      '<p class="enc-line">' + esc(line) + '</p>' +
+      btns
+    document.body.appendChild(d)
+    requestAnimationFrame(() => d.classList.add('on'))
+
+    for (const btn of qsa(d, '[data-encchoice]')) {
+      btn.onclick = () => {
+        const id = btn.getAttribute('data-encchoice')
+        const found = choices.find(c => c.id === id)
+        this.hideEncounterDock()
+        if (found && found.onPick) found.onPick()
+      }
+    }
+    this._encounterTimer = setTimeout(() => this.hideEncounterDock(), durationMs)
+  }
+
+  hideEncounterDock() {
+    clearTimeout(this._encounterTimer)
+    this._encounterTimer = null
+    const old = document.getElementById('encounter-dock')
+    if (old) old.remove()
   }
 
   // ---------------------------------------------------------------- chrome

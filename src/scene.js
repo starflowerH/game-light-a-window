@@ -7,6 +7,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { createPainterlyPass } from './painterly.js'
+import { CampusCritterSystem } from './campus-critters.js'
 import { createStardewTextureKit } from './textures-procedural.js'
 import { renderNpcPortraitSvg } from './npc-portraits.js'
 import { VfxPool } from './vfx-pool.js'
@@ -536,14 +537,16 @@ export class Scene {
    * @param {HTMLElement} host
    * @param {{
    *   onWindowTap?: (w: WindowRecord, x: number, y: number) => void,
+   *   onCritterTap?: (hit: { kind: string, id: string }, x: number, y: number) => void,
    *   onPointerDown?: (x: number, y: number) => void,
    *   onPointerMove?: (x: number, y: number, dragging: boolean) => void,
    *   onPointerUp?: (x: number, y: number) => void
    * }} [opts]
    */
-  constructor(host, { onWindowTap, onPointerDown, onPointerMove, onPointerUp } = {}) {
+  constructor(host, { onWindowTap, onCritterTap, onPointerDown, onPointerMove, onPointerUp } = {}) {
     this.host = host
     this.onWindowTap = onWindowTap
+    this.onCritterTap = onCritterTap
     this.onPointerDown = onPointerDown
     this.onPointerMove = onPointerMove
     this.onPointerUp = onPointerUp
@@ -555,7 +558,7 @@ export class Scene {
     this.theme = 'warm_blue'
     this.dormId = 'university'
     this.season = 'autumn'
-    this.weather = 'clear'
+    this.weather = 'snow'
     /** @type {'front'|'stardew'|'street'|'rooftop'} */
     this.cameraView = 'stardew'
     this.npcActorId = 'aunt_lin'
@@ -573,6 +576,7 @@ export class Scene {
     this._texKit = createStardewTextureKit()
 
     this._pointer = { x: 0, y: 0, dragging: false }
+    this._pointerDownPos = { x: 0, y: 0 }
     this._spring = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0 }
     this._fovImpulse = 0
     this._dawn = 0
@@ -599,7 +603,7 @@ export class Scene {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this._pixelRatioCap))
     this._maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy?.() || 4)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.18
+    this.renderer.toneMappingExposure = 0.94
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -628,7 +632,7 @@ export class Scene {
     this._envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     pmrem.dispose()
     this.scene.environment = this._envTex
-    this.scene.environmentIntensity = 0.28
+    this.scene.environmentIntensity = 0.15
     this._useComposer = true
 
     this._haloTex = brushHaloTexture()
@@ -698,6 +702,8 @@ export class Scene {
     this._buildComposer()
 
     this.vfx = new VfxPool(this.scene, { max: 1024 })
+    this.critters = new CampusCritterSystem(this.scene, { vfx: this.vfx })
+    this.roofCat = this.critters.getRooftopCatGroup()
 
     this.applyTheme('warm_blue', true)
     this.setSeason(this.season)
@@ -849,8 +855,10 @@ export class Scene {
           this._injectWindShader(mat, 1.0, false)
         }
 
-        if (matName === 'Mat_Lamp_Glow' || matName === 'Mat_Door_Glow') {
-          mat.emissiveIntensity = isGrounds ? 1.5 : 1.15
+        if (matName === 'Mat_Door_Glow') {
+          mat.emissiveIntensity = isGrounds ? 0.44 : 0.40
+        } else if (matName === 'Mat_Lamp_Glow') {
+          mat.emissiveIntensity = isGrounds ? 0.62 : 0.54
         }
         if (matName === 'Mat_Door_Glow') {
           mat.polygonOffset = true
@@ -949,31 +957,31 @@ export class Scene {
     this.aveLampHalos = []
     for (const lx of [-12.2, 12.2, -26.0, 26.0]) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: softDot('rgba(255,214,136,1)', 128),
-        color: 0xffca7a,
+        map: softDot('rgba(255,208,130,1)', 128),
+        color: 0xf4ba6a,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        opacity: 0.44
+        opacity: 0.16
       }))
       sp.position.set(lx * DORM_SCALE, BASE_Y + 4.86 * DORM_SCALE, 7.92 * DORM_SCALE)
-      sp.scale.setScalar(76)
+      sp.scale.setScalar(48)
       this.groundsGroup.add(sp)
       this.aveLampHalos.push(sp)
     }
     for (const [gx, gy, gz, sc] of [
-      [-19.5, 3.25, -0.5, 68],
-      [16.8, 1.55, 1.6, 52],
-      [22.2, 1.55, 1.6, 52],
-      [-19.5, 14.2, -17.5, 64]
+      [-19.5, 3.25, -0.5, 44],
+      [16.8, 1.55, 1.6, 34],
+      [22.2, 1.55, 1.6, 34],
+      [-19.5, 14.2, -17.5, 42]
     ]) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: softDot('rgba(255,210,128,1)', 128),
-        color: 0xffc66e,
+        map: softDot('rgba(255,205,124,1)', 128),
+        color: 0xf2b462,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        opacity: 0.36
+        opacity: 0.14
       }))
       sp.position.set(gx * DORM_SCALE, BASE_Y + gy * DORM_SCALE, gz * DORM_SCALE)
       sp.scale.setScalar(sc)
@@ -1539,16 +1547,18 @@ export class Scene {
       })
     )
     this.doorGlow.position.set(gx, gy, gz)
+    this.doorGlow.material.opacity = 0.05
+    this.doorGlow.material.color.set(0xf0aa58)
     this.dorm.add(this.doorGlow)
 
-    this.doorLight = new THREE.PointLight(0xffc46a, 45, 260, 1.8)
+    this.doorLight = new THREE.PointLight(0xf0aa58, 14, 195, 1.8)
     this.doorLight.position.set(gx, gy + 10, gz + 28)
     this.dorm.add(this.doorLight)
 
-    // Side street lamp volumetric beam kept for theme harmony
+    // Side street lamp volumetric beam kept for theme harmony (soft grazing rolloff prevents rim needles)
     const coneMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uColor: { value: new THREE.Color(0xffca86) }, uIntensity: { value: 0.28 }, uTime: { value: 0 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+      uniforms: { uColor: { value: new THREE.Color(0xffc67c) }, uIntensity: { value: 0.09 }, uTime: { value: 0 } },
       vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
         'void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0);\n' +
         '  vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);\n' +
@@ -1556,10 +1566,11 @@ export class Scene {
       fragmentShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
         'uniform vec3 uColor; uniform float uIntensity; uniform float uTime;\n' +
         'void main(){\n' +
-        '  float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);\n' +
-        '  float fall = pow(clamp(vUv.y, 0.0, 1.0), 1.5);\n' +
+        '  float ndv = abs(dot(normalize(vN), normalize(vV)));\n' +
+        '  float core = smoothstep(0.0, 0.48, ndv) * pow(ndv, 1.35);\n' +
+        '  float fall = pow(clamp(vUv.y, 0.0, 1.0), 1.65) * smoothstep(0.0, 0.14, vUv.y);\n' +
         '  float flick = 0.94 + 0.06 * sin(uTime * 3.1 + vUv.y * 9.0);\n' +
-        '  gl_FragColor = vec4(uColor, uIntensity * fres * fall * flick);\n' +
+        '  gl_FragColor = vec4(uColor, uIntensity * core * fall * flick);\n' +
         '}'
     })
     this.lampCone = new THREE.Mesh(new THREE.ConeGeometry(54, 116, 20, 1, true), coneMat)
@@ -1572,45 +1583,23 @@ export class Scene {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3))
     this.mothMat = new THREE.PointsMaterial({
-      size: 3.4, map: softDot('rgba(255,226,168,1)', 32),
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffe0a8, opacity: 0.85
+      size: 3.0, map: softDot('rgba(255,226,168,1)', 32),
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffdca2, opacity: 0.68
     })
     this.moths = new THREE.Points(geo, this.mothMat)
     this.moths.position.set(-292, BASE_Y + 95, 190)
     this.dorm.add(this.moths)
 
-    // Sculpted animated rooftop cat silhouette (tail slowly sways in breeze)
-    const cat = new THREE.Group()
-    const cMat = new THREE.MeshStandardMaterial({ color: 0xd98038, roughness: 0.82 })
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(5.0, 10, 8), cMat)
-    torso.scale.set(1.3, 0.86, 0.92)
-    cat.add(torso)
-    const head = new THREE.Mesh(new THREE.SphereGeometry(3.3, 10, 8), cMat)
-    head.position.set(5.2, 3.6, 0)
-    cat.add(head)
-    for (const ez of [-1.7, 1.7]) {
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.8, 4), cMat)
-      ear.position.set(5.2, 6.9, ez)
-      ear.rotation.y = Math.PI * 0.25
-      cat.add(ear)
+    // Keep articulated CampusCritterSystem rooftop cat synced above this dorm's roof
+    if (this.critters) {
+      this.critters.setRoofAnchor(74, BASE_Y + 370, 42)
+      this.roofCat = this.critters.getRooftopCatGroup()
     }
-    const tailPivot = new THREE.Group()
-    tailPivot.position.set(-5.6, 1.2, 0)
-    const tailMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 1.15, 7.6, 6), cMat)
-    tailMesh.position.set(-1.6, 3.2, 0)
-    tailMesh.rotation.z = 0.42
-    tailPivot.add(tailMesh)
-    cat.add(tailPivot)
-    this._roofCatTail = tailPivot
-    cat.position.set(0, BASE_Y + 370, -10)
-    cat.visible = true
-    this.dorm.add(cat)
-    this.roofCat = cat
 
-    // Night watch flashlight cone at ground level (Feature A5)
+    // Night watch flashlight beam at ground level (soft center falloff prevents silhouette seam lines)
     const flashMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uColor: { value: new THREE.Color(0xfff2c8) }, uIntensity: { value: 0.35 }, uTime: { value: 0 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+      uniforms: { uColor: { value: new THREE.Color(0xfbe8b8) }, uIntensity: { value: 0.09 }, uTime: { value: 0 } },
       vertexShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
         'void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0);\n' +
         '  vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);\n' +
@@ -1618,15 +1607,16 @@ export class Scene {
       fragmentShader: 'varying vec2 vUv; varying vec3 vN; varying vec3 vV;\n' +
         'uniform vec3 uColor; uniform float uIntensity; uniform float uTime;\n' +
         'void main(){\n' +
-        '  float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);\n' +
-        '  float fall = pow(clamp(vUv.y, 0.0, 1.0), 1.6);\n' +
+        '  float ndv = abs(dot(normalize(vN), normalize(vV)));\n' +
+        '  float core = smoothstep(0.0, 0.52, ndv) * pow(ndv, 1.4);\n' +
+        '  float fall = pow(clamp(vUv.y, 0.0, 1.0), 1.8) * smoothstep(0.0, 0.15, vUv.y);\n' +
         '  float flick = 0.95 + 0.05 * sin(uTime * 4.2 + vUv.y * 7.0);\n' +
-        '  gl_FragColor = vec4(uColor, uIntensity * fres * fall * flick);\n' +
+        '  gl_FragColor = vec4(uColor, uIntensity * core * fall * flick);\n' +
         '}'
     })
-    this.flashlight = new THREE.Mesh(new THREE.ConeGeometry(38, 92, 16, 1, true), flashMat)
-    this.flashlight.position.set(-180, BASE_Y + 14, 160)
-    this.flashlight.rotation.x = Math.PI / 2 - 0.15
+    this.flashlight = new THREE.Mesh(new THREE.ConeGeometry(34, 88, 16, 1, true), flashMat)
+    this.flashlight.position.set(-180, BASE_Y + 12, 162)
+    this.flashlight.rotation.x = Math.PI / 2 - 0.18
     this.flashlightMat = flashMat
     this.dorm.add(this.flashlight)
   }
@@ -1830,7 +1820,6 @@ export class Scene {
       this._acFans = []
       this.flashlight = null
       this.flashlightMat = null
-      this.roofCat = null
     }
     while (group.children.length) {
       const ch = group.children[0]
@@ -2191,7 +2180,7 @@ export class Scene {
         size, map: softDot(color, 32), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0
       }))
     }
-    this.snow = mk(900, 6.2, 'rgba(235,244,255,1)')
+    this.snow = mk(1100, 4.8, 'rgba(232,242,255,1)')
     this.snow.visible = false
     this.weatherGroup.add(this.snow)
     this.rain = mk(1400, 3.4, 'rgba(198,220,255,1)')
@@ -2225,15 +2214,15 @@ export class Scene {
   }
 
   _buildLights() {
-    this.amb = new THREE.AmbientLight(0x66739c, 0.90)
+    this.amb = new THREE.AmbientLight(0x3b486d, 0.50)
     this.scene.add(this.amb)
-    this.hemi = new THREE.HemisphereLight(0xb8cef8, 0x332c38, 1.25)
+    this.hemi = new THREE.HemisphereLight(0x7b96c8, 0x161420, 0.68)
     this.scene.add(this.hemi)
-    this.fillLight = new THREE.DirectionalLight(0xffdfb4, 0.58)
+    this.fillLight = new THREE.DirectionalLight(0xe2bc92, 0.28)
     this.fillLight.position.set(-240, 220, 540)
     this.scene.add(this.fillLight)
 
-    this.moonLight = new THREE.DirectionalLight(0xcbe0ff, 1.38)
+    this.moonLight = new THREE.DirectionalLight(0xc2d6fa, 0.98)
     this.moonLight.position.set(340, 460, 280)
     this.moonLight.castShadow = true
     this.moonLight.shadow.mapSize.set(2048, 2048)
@@ -2302,7 +2291,7 @@ export class Scene {
   _buildComposer() {
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.45, 0.42, 0.90)
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.20, 0.30, 0.94)
     this.composer.addPass(this.bloom)
     this.painterly = createPainterlyPass()
     this.composer.addPass(this.painterly)
@@ -2579,7 +2568,7 @@ export class Scene {
     else if (w.state === WINDOW_STATES.TARGET_HINT) glowHex = 0xffee88
     w.glow.material.color.set(glowHex)
 
-    w.target.glow = lit ? (w.state === WINDOW_STATES.LIT || w.state === WINDOW_STATES.TARGET_HINT ? 0.62 : 0.48) : 0
+    w.target.glow = lit ? (w.state === WINDOW_STATES.LIT || w.state === WINDOW_STATES.TARGET_HINT ? 0.34 : 0.26) : 0
     w.target.halo = (w.state === WINDOW_STATES.GLIMMER || w.state === WINDOW_STATES.RESONANCE_PAIR || w.state === WINDOW_STATES.TARGET_HINT || w.state === WINDOW_STATES.DECOY_BLUE) ? 1 : 0
     w.target.beacon = w.state === WINDOW_STATES.STORY_BEACON ? 1 : 0
 
@@ -2658,8 +2647,8 @@ export class Scene {
     this.lit = 0
     if (this.groundMat) this.groundMat.uniforms.glow.value = 0
     this.warmLight.intensity = 0
-    if (this.doorGlow) this.doorGlow.material.opacity = 0.12
-    if (this.doorLight) this.doorLight.intensity = 45
+    if (this.doorGlow) this.doorGlow.material.opacity = 0.05
+    if (this.doorLight) this.doorLight.intensity = 14
     this.clearResonancePair()
   }
 
@@ -2683,10 +2672,10 @@ export class Scene {
     const p = this.lit / total
     if (this.groundMat) this.groundMat.uniforms.glow.value = p
     if (this.puddleUniforms) this.puddleUniforms.uWarmGlow.value = p
-    this.warmLight.intensity = p * 920
+    this.warmLight.intensity = p * 420
     this.warmLight.color.set(this._target ? this._target.warm : 0xffb060)
-    if (this.doorGlow) this.doorGlow.material.opacity = 0.12 + p * 0.78
-    if (this.doorLight) this.doorLight.intensity = 45 + p * 120
+    if (this.doorGlow) this.doorGlow.material.opacity = 0.05 + p * 0.22
+    if (this.doorLight) this.doorLight.intensity = 14 + p * 34
     this.bloom.strength = 0.45 + p * 0.17
     this.renderer.toneMappingExposure = 1.18 + p * 0.10
     if (this.painterly) this.painterly.material.uniforms.uExposure.value = this.renderer.toneMappingExposure
@@ -2818,12 +2807,36 @@ export class Scene {
     return out
   }
 
+  /** Raycast interactive campus cats & pedestrians at screen coordinates. */
+  critterAt(x, y) {
+    if (!this.critters || !this.camera) return null
+    const rect = this._canvasRect || this.renderer.domElement.getBoundingClientRect()
+    const w = Math.max(1, rect.width || innerWidth)
+    const h = Math.max(1, rect.height || innerHeight)
+    this._ndcVec.set(((x - rect.left) / w) * 2 - 1, -((y - rect.top) / h) * 2 + 1)
+    this._raycaster.setFromCamera(this._ndcVec, this.camera)
+    return this.critters.raycast(this._raycaster)
+  }
+
+  /** Smoothly swing camera view toward a campus cat. */
+  focusCritter(catId) {
+    if (catId === 'marmalade') {
+      this.setCameraView('rooftop', false)
+    } else if (catId === 'sooty') {
+      this.setCameraView('stardew', false)
+    } else {
+      this.setCameraView('street', false)
+    }
+  }
+
   _onDown(e) {
     // Only treat primary button / touch as window interaction; let right-click / middle-click go straight to OrbitControls
     if (e.pointerType === 'mouse' && e.button !== 0) return
     this._pointer.dragging = true
     this._pointer.x = e.clientX
     this._pointer.y = e.clientY
+    this._pointerDownPos.x = e.clientX
+    this._pointerDownPos.y = e.clientY
     const w = this.windowAt(e.clientX, e.clientY, 16)
     // In free-preview mode, suppress OrbitControls only when directly pressing on a window; in locked mode, OrbitControls LEFT/ONE is already disabled
     this._pointerOverWindow = Boolean(w)
@@ -2842,10 +2855,20 @@ export class Scene {
 
   _onUp(e) {
     const was = this._pointer.dragging
+    const hadWindow = this._pointerOverWindow
+    const upX = e.clientX ?? this._pointer.x
+    const upY = e.clientY ?? this._pointer.y
     this._pointer.dragging = false
     this._pointerOverWindow = false
     this._applyOrbitMode()
-    if (was && this.onPointerUp) this.onPointerUp(e.clientX ?? this._pointer.x, e.clientY ?? this._pointer.y)
+    if (was && !hadWindow && this.onCritterTap) {
+      const dragDist = Math.hypot(upX - this._pointerDownPos.x, upY - this._pointerDownPos.y)
+      if (dragDist < 10) {
+        const hit = this.critterAt(upX, upY)
+        if (hit) this.onCritterTap(hit, upX, upY)
+      }
+    }
+    if (was && this.onPointerUp) this.onPointerUp(upX, upY)
   }
 
   // ----------------------------------------------------------------- theme & weather
@@ -3082,24 +3105,28 @@ export class Scene {
   }
 
   rooftopCat() {
-    if (!this.roofCat) return
-    this.roofCat.visible = true
-    const start = performance.now()
-    const step = () => {
-      const t = (performance.now() - start) / 1000
-      this.roofCat.rotation.y = Math.sin(t * 0.9) * 0.55
-      this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 0.7) * 2
-      if (t < 6) requestAnimationFrame(step)
+    if (this.critters) {
+      this.critters.triggerBirdFlyby()
+      const marm = this.critters.cats.find(c => c.def.rooftop)
+      const st = this.critters._catStates.get('marmalade')
+      if (st) st.happyUntil = performance.now() + 3600
+      if (marm && this.vfx && this.vfx.emitBurst) {
+        const wp = new THREE.Vector3()
+        marm.root.getWorldPosition(wp)
+        this.vfx.emitBurst(wp, 0xffe09c, 10, 1)
+      }
     }
-    step()
   }
 
   // ------------------------------------------------------------------ loop
 
   _resize() {
-    const w = this.host.clientWidth || innerWidth
-    const h = this.host.clientHeight || innerHeight
+    const w = Math.max(1, Math.round(this.host.clientWidth || innerWidth))
+    const h = Math.max(1, Math.round(this.host.clientHeight || innerHeight))
     this.renderer.setSize(w, h)
+    if (this.composer.setPixelRatio) {
+      this.composer.setPixelRatio(this.renderer.getPixelRatio())
+    }
     this.composer.setSize(w, h)
     if (this.bloom) {
       const bloomMul = this._qualityMode === 'ultra' ? 0.70 : 0.42
@@ -3168,8 +3195,8 @@ export class Scene {
       if (this.windows[i].state !== WINDOW_STATES.DARK) litWins += 1
     }
     const pLit = litWins / totalWins
-    const targetBloom = 0.45 + 0.17 * pLit
-    const targetExposure = 1.18 + 0.10 * pLit
+    const targetBloom = 0.20 + 0.14 * pLit
+    const targetExposure = 0.94 + 0.12 * pLit
     if (this.bloom && this.bloom.enabled) {
       this.bloom.strength += (targetBloom - this.bloom.strength) * Math.min(1, dt * 2.5)
     }
@@ -3181,6 +3208,9 @@ export class Scene {
     }
     if (this.puddleUniforms) {
       this.puddleUniforms.uWarmGlow.value += (pLit - this.puddleUniforms.uWarmGlow.value) * Math.min(1, dt * 2.5)
+    }
+    if (this.critters) {
+      this.critters.update(t, this.paused)
     }
 
     // Campus animated ecology details (Feature A5)
@@ -3199,14 +3229,7 @@ export class Scene {
       this.flashlight.rotation.z = sweepAngle
     }
 
-    if (this.roofCat) {
-      const breathe = 1.0 + 0.04 * Math.sin(t * 2.2)
-      this.roofCat.scale.set(1.0 + 0.02 * breathe, 0.96 * breathe, 1.0)
-      this.roofCat.position.y = BASE_Y + 370 + Math.sin(t * 1.1) * 1.2
-      if (this._roofCatTail) {
-        this._roofCatTail.rotation.z = Math.sin(t * 2.6) * 0.28
-      }
-    }
+    // Articulated rooftop/plaza cats animate via this.critters.update(t)
 
     // Update Interior Mapping uniforms only when camera moved or window is lit
     if (this._quality >= 0) {
@@ -3372,13 +3395,13 @@ export class Scene {
       if (this.snow.visible) {
         const arr = this.snow.geometry.attributes.position.array
         for (let i = 0; i < arr.length; i += 3) {
-          arr[i + 1] -= (0.75 + (i % 7) * 0.06) * step60
-          arr[i] += (Math.sin(t + i) * 0.35 + this._windStrength * 0.14) * step60
+          arr[i + 1] -= (0.58 + (i % 7) * 0.045) * step60
+          arr[i] += (Math.sin(t * 0.9 + i) * 0.28 + this._windStrength * 0.12) * step60
           if (arr[i + 1] < -210) arr[i + 1] = 400
           if (arr[i] > 600) arr[i] = -600
         }
         this.snow.geometry.attributes.position.needsUpdate = true
-        this.snow.material.opacity = 0.78
+        this.snow.material.opacity = 0.62
       }
       if (this.rain.visible) {
         const arr = this.rain.geometry.attributes.position.array
@@ -3476,6 +3499,7 @@ export class Scene {
     if (this._onResize) removeEventListener('resize', this._onResize)
     document.removeEventListener('visibilitychange', this._onVis)
     if (this.controls) this.controls.dispose()
+    if (this.critters) this.critters.dispose()
     if (this.vfx) this.vfx.dispose()
     this.renderer.dispose()
     if (this.renderer.domElement.parentNode) this.renderer.domElement.parentNode.removeChild(this.renderer.domElement)

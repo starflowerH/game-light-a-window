@@ -81,7 +81,7 @@ export class Game {
     // v4 campus preferences
     this.dormId = this.records.preferredDorm || 'university'
     this.season = this.records.preferredSeason || 'autumn'
-    this.weather = this.records.preferredWeather || 'clear'
+    this.weather = this.records.preferredWeather || 'snow'
     this.viewId = 'stardew'
     this.gameMode = this.records.preferredMode || 'memory_sequence'
     this.qualityMode = this.records.preferredQuality || 'auto'
@@ -474,6 +474,7 @@ export class Game {
       onSelectMode: id => { this.gameMode = id; this.records.preferredMode = id; saveRecords(this.records); this.showHub() },
       onLaunchMode: id => this.launchGame(id),
       onReplayDialogue: () => this.replayDialogue(),
+      onOpenCats: () => this.openCatModal(),
       onNpcGallery: () => this.openNpcGallery(() => this.showHub()),
       onLeaderboard: () => this.openLeaderboard(() => this.showHub()),
       onCollection: () => this.ui.showCollection({ records: this.records, onClose: () => this.showHub() }),
@@ -628,6 +629,88 @@ export class Game {
       onSeason: s => this.changeSeason(s),
       onWeather: w => this.changeWeather(w),
       onClose
+    })
+  }
+
+  /** Handle direct 3D clicks on campus cats and strolling winter pedestrians. */
+  onCritterTap(hit) {
+    if (!hit) return
+    if (this.audio) this.audio.unlock()
+    if (hit.kind === 'cat') {
+      this.openCatModal(hit.id)
+      return
+    }
+    if (hit.kind === 'pedestrian' && this.scene.critters) {
+      const info = this.scene.critters.getPedestrianInfo(hit.id)
+      if (info) {
+        if (this.audio && this.audio.cue) this.audio.cue(4)
+        this.ui.toast(`🚶 ${info.name}`, info.quote)
+      }
+    }
+  }
+
+  /** Open the interactive 3D campus cat status modal. */
+  openCatModal(catId = 'mochi') {
+    const critters = this.scene && this.scene.critters
+    if (!critters) return
+    const cat = critters.getCatSnapshot(catId) || critters.getAllCatsSnapshot()[0]
+    if (!cat) return
+
+    const pausedFromNight = this.state === 'night' && this.night
+    const catPausedAt = pausedFromNight ? performance.now() : 0
+    if (pausedFromNight) {
+      this.state = 'paused'
+      cancelAnimationFrame(this._raf)
+      this.scene.setPaused(true)
+    }
+
+    const awardNightBond = (id) => {
+      if (this.night && (!this._catWarmthGiven || !this._catWarmthGiven.has(id))) {
+        if (!this._catWarmthGiven) this._catWarmthGiven = new Set()
+        this._catWarmthGiven.add(id)
+        this.night.warmth += 4
+        this.ui.setStats(this)
+        return true
+      }
+      return false
+    }
+
+    const resumeIfNeeded = () => {
+      if (pausedFromNight && this.state === 'paused' && this.night) {
+        const delta = performance.now() - catPausedAt
+        this.night.endsAt += delta
+        this.night.startedAt += delta
+        for (const win of this.scene.windows) {
+          if (win.expiresAt) win.expiresAt += delta
+        }
+        this.state = 'night'
+        this.scene.setPaused(false)
+        this._startTicker()
+      }
+    }
+
+    this.ui.showCatModal({
+      cat,
+      allCats: critters.getAllCatsSnapshot(),
+      onSelectCat: id => critters.getCatSnapshot(id),
+      onPet: id => {
+        const next = critters.interactCat(id, 'pet')
+        if (this.audio) { this.audio.unlock(); if (this.audio.cue) this.audio.cue(3) }
+        const bonus = awardNightBond(id) ? ' · 温暖 +4' : ''
+        if (next) this.ui.toast(`🤍 轻抚 ${next.name}${bonus}`, next.moodText)
+        return next
+      },
+      onFeed: id => {
+        const next = critters.interactCat(id, 'feed')
+        if (this.audio) { this.audio.unlock(); if (this.audio.cue) this.audio.cue(5) }
+        const bonus = awardNightBond(id) ? ' · 温暖 +4' : ''
+        if (next) this.ui.toast(`🐟 投喂 ${next.name} 小鱼干${bonus}`, next.moodText)
+        return next
+      },
+      onFocusCat: id => {
+        if (this.scene.focusCritter) this.scene.focusCritter(id)
+      },
+      onClose: resumeIfNeeded
     })
   }
 
@@ -1334,12 +1417,49 @@ export class Game {
     if (ev.effect === 'heal_shield') mg.shield += 1
     else if (ev.effect === 'score_mult_1_5') mg.scoreMult = 1.5
     else if (ev.effect === 'bonus_120') mg.score += 120
+    else if (ev.effect === 'bonus_90') mg.score += 90
     else if (ev.effect === 'bonus_80') mg.score += 80
     else if (ev.effect === 'combo_plus_2') mg.combo += 2
     else if (ev.effect === 'extra_observe_ms') mg.extraObserveMs = (mg.extraObserveMs || 0) + 700
     else if (ev.effect === 'extra_recall_sec' && mg.endsAt) mg.endsAt += 5000
-    else if (ev.effect === 'auto_reveal_one') mg.shield += 1
-    this.ui.toast(`随机事件 · ${ev.title} (${ev.badge})`, ev.line)
+    else if (ev.effect === 'auto_reveal_one') {
+      let revealed = false
+      if (mg.memState && Array.isArray(mg.memState.targets)) {
+        const nextIdx = mg.kind === 'memory_sequence'
+          ? mg.memState.targets[mg.memState.cursor]
+          : mg.memState.targets.find(idx => !mg.memState.matched.includes(idx))
+        const targetWin = Number.isInteger(nextIdx) ? this.scene.windows[nextIdx] : null
+        if (targetWin && this.mg && this.mg.phase === 'recall') {
+          this.scene.setWindowState(targetWin, WINDOW_STATES.TARGET_HINT)
+          this.scene.burstAt(targetWin, 0xffe09c)
+          revealed = true
+        }
+      }
+      if (!revealed) mg.shield += 1
+    }
+
+    const fx = ev.worldFx || ''
+    if (fx === 'birds' || ev.id === 'evt_snow_birds') {
+      if (this.scene.critters) this.scene.critters.triggerBirdFlyby()
+    } else if (fx === 'cat' || ev.id === 'evt_cat_window' || ev.id === 'evt_bench_cat') {
+      this.scene.rooftopCat()
+    } else if (ev.id === 'evt_meteor_wish') {
+      this.scene.shootingStar()
+    } else if (ev.id === 'evt_radio_bgm') {
+      this.scene.releaseLanterns(3)
+    }
+
+    if (this.ui.showEncounterDock) {
+      this.ui.showEncounterDock({
+        title: ev.title,
+        badge: ev.badge,
+        speakerId: ev.speakerId,
+        line: ev.line,
+        durationMs: 5600
+      })
+    } else {
+      this.ui.toast(`随机事件 · ${ev.title} (${ev.badge})`, ev.line)
+    }
     if (this.audio) this.audio.resonance()
   }
 
@@ -1535,6 +1655,7 @@ export class Game {
       clearedFloors: new Set()
     }
     this._surprise = { lastAt: -9000, sinceRare: 0 }
+    this._catWarmthGiven = new Set()
     this._chain = this.night.chain
     this._comboFreezeUntil = 0
     this._pendingRes = null
@@ -2275,12 +2396,78 @@ export class Game {
     this._events[kind] = (this._events[kind] || 0) + 1
     const gain = { golden: 12, star: 9, lanterns: 10, cat: 8, chain: 8 }[kind] || 6
     n.warmth += gain
-    if (kind === 'star') this.scene.shootingStar()
-    else if (kind === 'lanterns') this.scene.releaseLanterns(4)
-    else if (kind === 'cat') this.scene.rooftopCat()
-    else if (kind === 'golden' || kind === 'chain') this._lightNeighbourRandom(w)
-    const text = { golden: '金窗 · 一间屋子忽然全亮了', star: '流星划过 · 许个愿吧', lanterns: '有人放了灯 · 一整排飘起来', cat: '屋顶上蹲着一只猫 · 它看着你', chain: '连光 · 隔壁的窗也亮了' }[kind]
-    this.ui.toast(text, '+' + gain)
+    if (kind === 'star') {
+      this.scene.shootingStar()
+      if (this.scene.critters) this.scene.critters.triggerBirdFlyby()
+    } else if (kind === 'lanterns') {
+      this.scene.releaseLanterns(4)
+      if (this.scene.critters) this.scene.critters.triggerBirdFlyby()
+    } else if (kind === 'cat') {
+      this.scene.rooftopCat()
+    } else if (kind === 'golden' || kind === 'chain') {
+      this._lightNeighbourRandom(w)
+    }
+
+    const META = {
+      golden: {
+        title: '金窗奇迹 · 整间暖亮',
+        speakerId: 'xiaohe',
+        line: '刚才那扇窗的光顺着雪光折射进楼道，旁边也悄悄亮了一盏灯。',
+        cta: '🌟 收下光芒 (+5)',
+        perk: () => { if (this.night) { this.night.warmth += 5; this._afterScore(); this.ui.toast('✨ 暖意扩散', '+5 温暖') } }
+      },
+      star: {
+        title: '流星与夜鸟掠过钟楼',
+        speakerId: 'xingye',
+        line: '一颗银白流星斜斜擦过塔尖，檐下的夜鸟拍着雪翅绕了一圈。',
+        cta: '🌠 许下心愿 (+5)',
+        perk: () => {
+          this.scene.shootingStar()
+          if (this.night) { this.night.warmth += 5; this._afterScore(); this.ui.toast('🌠 心愿寄托星空', '+5 温暖') }
+        }
+      },
+      lanterns: {
+        title: '湖畔飘来几盏暖心灯',
+        speakerId: 'ache',
+        line: '莲池桥边有人放飞了一排热纸灯，暖光贴着雪粒缓缓往云里飘。',
+        cta: '🏮 添一盏灯 (+5)',
+        perk: () => {
+          this.scene.releaseLanterns(2)
+          if (this.night) { this.night.warmth += 5; this._afterScore(); this.ui.toast('🏮 多送了一盏灯', '+5 温暖') }
+        }
+      },
+      cat: {
+        title: '屋顶橘座在晃尾巴喝彩',
+        speakerId: 'aunt_lin',
+        line: '雪夜里蹲在屋脊上的胖橘冲你轻叫了一声，旁边的“糯米”也竖起耳朵。',
+        cta: '🐟 抛条小鱼干 (+5)',
+        perk: () => {
+          if (this.scene.critters) this.scene.critters.interactCat('marmalade', 'feed')
+          if (this.night) { this.night.warmth += 5; this._afterScore(); this.ui.toast('🐟 橘座叼走小鱼干啦', '+5 温暖') }
+        }
+      },
+      chain: {
+        title: '邻窗共振接上了暖意',
+        speakerId: 'aman',
+        line: '「隔壁那屋看见你们亮灯啦，顺手也把桌面台灯拧亮了！」',
+        cta: '🤍 传递问候 (+4)',
+        perk: () => { if (this.night) { this.night.warmth += 4; this._afterScore(); this.ui.toast('🤍 暖意相连', '+4 温暖') } }
+      }
+    }[kind]
+
+    if (this.ui.showEncounterDock && META) {
+      this.ui.showEncounterDock({
+        title: META.title,
+        badge: '+' + gain + ' 温暖',
+        speakerId: META.speakerId,
+        line: META.line,
+        choices: [{ id: 'bonus', label: META.cta, onPick: META.perk }],
+        durationMs: 6500
+      })
+    } else {
+      const text = { golden: '金窗 · 一间屋子忽然全亮了', star: '流星划过 · 许个愿吧', lanterns: '有人放了灯 · 一整排飘起来', cat: '屋顶上蹲着一只猫 · 它看着你', chain: '连光 · 隔壁的窗也亮了' }[kind]
+      this.ui.toast(text, '+' + gain)
+    }
     this.ui.flash(kind === 'golden' ? 'golden' : 'combo')
     this._afterScore()
   }

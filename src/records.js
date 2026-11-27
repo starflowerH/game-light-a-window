@@ -28,10 +28,11 @@ function emptyRecords() {
     lastEnding: '',
     preferredDorm: 'university',
     preferredSeason: 'autumn',
-    preferredWeather: 'clear',
+    preferredWeather: 'snow',
     preferredMode: 'memory_sequence',
     preferredQuality: 'auto',
-    seenOpening: false
+    seenOpening: false,
+    snowDefaultV52: true
   }
 }
 
@@ -44,7 +45,7 @@ export function loadRecords() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY))
     if (!raw || typeof raw !== 'object') return base
-    return {
+    const merged = {
       ...base,
       ...raw,
       items: Array.isArray(raw.items) ? raw.items : [],
@@ -53,6 +54,11 @@ export function loadRecords() {
       titles: Array.isArray(raw.titles) && raw.titles.length ? raw.titles : base.titles,
       residentBonds: raw.residentBonds && typeof raw.residentBonds === 'object' ? raw.residentBonds : {}
     }
+    if (!raw.snowDefaultV52) {
+      merged.preferredWeather = 'snow'
+      merged.snowDefaultV52 = true
+    }
+    return merged
   } catch {
     return base
   }
