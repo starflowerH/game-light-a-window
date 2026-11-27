@@ -340,7 +340,7 @@ export class MusicDial {
       if (!this.expanded) return
       if (e.pointerType === 'mouse' && e.button !== 0) return
       const tgt = e.target
-      if (tgt instanceof Element && tgt.closest('input[type="file"], .md-upload')) return
+      if (tgt instanceof Element && tgt.closest('input[type="file"]')) return
       const dr = this._wheel.getBoundingClientRect()
       const cy = dr.top || (window.innerHeight || 800) / 2
       const cx = window.innerWidth || 1200
