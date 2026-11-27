@@ -91,7 +91,7 @@ export const DORM_TYPES = [
     id: 'staff',
     name: '教职工宿舍 · 桂花院',
     shortName: '员工宿舍',
-    subtitle: '3层12宽窗 · 木梁爬山虎 · 烟火庭院',
+    subtitle: '3层12窗 · 桂花庭院',
     rows: 3,
     cols: 4,
     windowCount: 12,
@@ -105,7 +105,7 @@ export const DORM_TYPES = [
     id: 'highschool',
     name: '高中宿舍 · 晨光楼',
     shortName: '高中宿舍',
-    subtitle: '3层18窗 · 红砖瓦顶 · 黑板报单车棚',
+    subtitle: '3层18窗 · 红砖车棚',
     rows: 3,
     cols: 6,
     windowCount: 18,
@@ -119,7 +119,7 @@ export const DORM_TYPES = [
     id: 'university',
     name: '大学宿舍 · 17号楼',
     shortName: '大学宿舍',
-    subtitle: '4层24窗 · 开放外廊 · 阳台猫窝水塔',
+    subtitle: '4层24窗 · 开放外廊',
     rows: 4,
     cols: 6,
     windowCount: 24,
@@ -133,7 +133,7 @@ export const DORM_TYPES = [
     id: 'grad',
     name: '研究生宿舍 · 研思楼',
     shortName: '研究生宿舍',
-    subtitle: '5层30窗 · 玻璃阳台 · 楼顶温室花房',
+    subtitle: '5层30窗 · 楼顶花房',
     rows: 5,
     cols: 6,
     windowCount: 30,
@@ -209,46 +209,46 @@ export const GAME_MODES = [
     id: 'memory_sequence',
     name: '记忆熄灯 · 依次顺序',
     shortName: '依次记忆',
-    tag: '益智闯关',
-    desc: '窗户按顺序依次亮起并熄灭，记住顺序依次点亮，考核顺序与准确率。'
+    tag: '顺序',
+    desc: '按顺序还原亮灯'
   },
   {
     id: 'memory_snapshot',
     name: '记忆熄灯 · 一起亮起',
     shortName: '全景快照',
-    tag: '瞬时记忆',
-    desc: '多扇窗户同时亮起数秒后全灭，找出所有亮过的房间，考核空间准确率。'
+    tag: '快照',
+    desc: '凭记忆复现全窗'
   },
   {
     id: 'patrol_reflex',
     name: '查寝夜猫子',
     shortName: '查寝反应',
-    tag: '反应辨别',
-    desc: '熄灭熬夜闪屏窗、守护合规暖台灯、点亮晚归门灯，协助宿管快速巡楼。'
+    tag: '反应',
+    desc: '熄灭熬夜闪屏窗'
   },
   {
     id: 'lights_out_puzzle',
     name: '全楼归眠 · 熄灯棋盘',
     shortName: '熄灯解谜',
-    tag: '逻辑策略',
-    desc: '点一扇窗会同步翻转上下左右四邻灯态，用最少步数让整栋楼安睡！'
+    tag: '解谜',
+    desc: '联动翻转全楼熄灯'
   },
   {
     id: 'star_sweep',
     name: '剧情夜巡 · 17号楼的秘密回路',
     shortName: '剧情夜巡',
-    tag: '悬疑物语 · 闯关',
-    desc: '三夜小说式宿管剧情：点亮微光窗连光、接住信标触发线人抉择、连起跨窗星轨，完成当夜手账目标即可揭晓下一夜反转。'
+    tag: '剧情',
+    desc: '三夜宿管悬疑物语'
   }
 ]
 
 export const BGM_TRACKS = [
-  { id: 'theme', name: '黄昏之时 · 默认原声', shortName: '黄昏原声', desc: '默认校园夜巡主题背景音乐（循环播放 · 保留细雨与点灯交互音效）' },
-  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '按开场/剧情/闯关自动切换三套合成配乐' },
-  { id: 'kataware', name: '黄昏之时 · 暮色星辰', shortName: '黄昏之时风', desc: '日系暮色钢琴弦乐 · 温柔悬念与怀旧感' },
-  { id: 'bluedragon', name: '医龙 · 苍蓝脉搏', shortName: '医龙风', desc: '燃系弦乐律动与鼓点 · 高潮对峙与查寝张力' },
-  { id: 'mysoul', name: 'My Soul · 子夜琴诗', shortName: 'My Soul风', desc: '标志性循环钢琴旋律与碎拍 · 深夜独行沉浸感' },
-  { id: 'ambient', name: '微雨校庭 · 助眠白噪音', shortName: '纯白噪音', desc: '仅保留细雨晚风与轻柔底噪' }
+  { id: 'theme', name: '黄昏之时 · 默认原声', shortName: '黄昏原声', desc: '默认校园夜巡主题背景音乐' },
+  { id: 'auto', name: '剧情智能配乐', shortName: '智能配乐', desc: '随剧情与关卡自动切曲' },
+  { id: 'kataware', name: '黄昏之时 · 暮色星辰', shortName: '黄昏之时风', desc: '暮色钢琴弦乐 · 温柔悬念' },
+  { id: 'bluedragon', name: '医龙 · 苍蓝脉搏', shortName: '医龙风', desc: '弦乐律动与鼓点 · 查寝张力' },
+  { id: 'mysoul', name: 'My Soul · 子夜琴诗', shortName: 'My Soul风', desc: '循环钢琴旋律 · 深夜沉浸' },
+  { id: 'ambient', name: '微雨校庭 · 助眠白噪音', shortName: '纯白噪音', desc: '仅保留细雨晚风与自然声' }
 ]
 export const BGM_TRACK_IDS = BGM_TRACKS.map(t => t.id)
 
@@ -263,9 +263,9 @@ export function gameModeDef(id) {
 }
 
 export const QUALITY_MODES = [
-  { id: 'auto', name: '智能 60帧', desc: '高画质起步 · 帧率不足自动切换轻渲染稳 60 帧' },
-  { id: 'ultra', name: '极致原画', desc: '锁定 2.0x 超清 · 全采样油画滤镜 · 不降级' },
-  { id: 'eco', name: '极速畅玩', desc: '直出高速渲染 · 核显/轻薄本稳定 60+ 帧' }
+  { id: 'auto', name: '智能 60帧', desc: '智能稳帧 · 保留油画' },
+  { id: 'ultra', name: '极致原画', desc: '2.0x 超清原画 · 不降级' },
+  { id: 'eco', name: '极速畅玩', desc: '轻渲染高帧率' }
 ]
 export const QUALITY_MODE_IDS = QUALITY_MODES.map(q => q.id)
 

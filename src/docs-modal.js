@@ -7,9 +7,9 @@ import specMd from '../docs/COMPETITION_PROJECT_SPEC.md?raw'
 
 /** @type {ReadonlyArray<{ id: 'overview' | 'spec' | 'manual', label: string, hint: string }>} */
 export const DOCS_TABS = [
-  { id: 'overview', label: '🏆 评委速览', hint: '30 秒核心指标 · 技术架构图 · 奖项举证 · 3 分钟实机路线' },
-  { id: 'spec', label: '📘 F1–F12 项目白皮书', hint: '心晴校园 AI 创意挑战赛 · 全栈架构与 F1–F12 功能模块代码级规范' },
-  { id: 'manual', label: '📖 玩家游戏手册', hint: '五大核心玩法、多结局攻略、8 项随机事件与 7 级段位全表' }
+  { id: 'overview', label: '评委速览', hint: '核心指标 · 系统架构 · 演示路线' },
+  { id: 'spec', label: '项目白皮书', hint: 'F1–F12 功能模块与技术设计' },
+  { id: 'manual', label: '游戏手册', hint: '五大玩法、六大结局与段位全表' }
 ]
 
 /**

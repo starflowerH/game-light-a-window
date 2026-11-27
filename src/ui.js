@@ -69,6 +69,7 @@ export class UI {
     /** @type {((e: Event) => void) | null} */ this._hintBubbleDismiss = null
     /** @type {ReplayPlayer|null} */ this._replayPlayer = null
     this._lastTierCode = ''
+    this._hubPanelOpen = false
   }
 
   _layer() {
@@ -110,7 +111,7 @@ export class UI {
   showLoading(text) {
     this.hideAll()
     const s = this._layer()
-    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '校园灯影正在接电') + '</h2><p class="lede center">正在载入 3D 宿舍楼、四季天气与 AI 导演管线</p></div>'
+    s.innerHTML = '<div class="panel glass small"><div class="spin"></div><h2 class="h2">' + esc(text || '正在点亮校园星夜') + '</h2><p class="lede center">载入建筑与光影…</p></div>'
     paintIcons(s)
   }
 
@@ -130,57 +131,73 @@ export class UI {
     const firstWhisper = whispers && whispers.length ? whispers[0] : null
     const aiDirect = Boolean(keyStatus && keyStatus.enabled)
     const curMode = bgmState ? bgmState.mode : 'theme'
+    const curTrack = bgmTrackDef(curMode)
 
     const s = this._layer()
     s.classList.add('title-screen')
-    s.innerHTML = '<div class="title-veil"></div>' +
-      '<div class="title-wrap">' +
-        '<div class="kicker">STARDEW 3D CAMPUS NIGHT PATROL · V5.1</div>' +
-        '<h1 class="title-h1">今晚，<span class="accent">亮一盏灯</span></h1>' +
-        '<p class="lede">星露谷写意 3D 校园物语：四栋实时建模宿舍楼、四季晴雨雾雪、<br/>悬疑三夜小说剧情、记忆熄灯闯关、查寝反应与全校排行榜。</p>' +
-        '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+    s.innerHTML =
+      '<div class="title-veil"></div>' +
+      '<div class="title-topbar">' +
+        '<div class="title-top-group">' +
           '<div class="nick-inline">' +
-            '<span>夜巡代号</span>' +
             '<input data-nick maxlength="8" value="' + esc(nickname || '三楼夜猫') + '" aria-label="玩家昵称" />' +
-            '<button class="nick-dice" type="button" data-act="randnick" title="随机起一个有趣的校园昵称">🎲 随机</button>' +
+            '<button class="nick-dice" type="button" data-act="randnick" title="随机昵称">🎲</button>' +
           '</div>' +
           '<span class="ai-radio-pill ' + (aiDirect ? '' : 'offline') + '">' +
             '<i class="ai-radio-dot"></i>' +
-            (aiDirect ? 'DeepSeek AI 直连 · ' + esc(keyStatus.masked) : 'AI 导演电台就绪') +
+            (aiDirect ? 'AI 直连 · ' + esc(keyStatus.masked) : 'AI 就绪') +
           '</span>' +
         '</div>' +
-        '<div class="bgm-strip" data-bgmstrip>' +
-          '<span class="bgm-lab">🎵 背景配乐</span>' +
-          BGM_TRACKS.map(t => '<button type="button" class="chip-sm ' + (t.id === curMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '" title="' + esc(t.desc) + '">' + esc(t.shortName) + '</button>').join('') +
-          '<label class="chip-sm bgm-upload" title="导入电脑/手机里的本地MP3">📁 本地歌曲<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
-          '<button type="button" class="chip-sm" data-act="mute">' + (bgmState && bgmState.muted ? '🔇' : '🔊') + '</button>' +
+        '<div class="title-top-group">' +
+          '<button type="button" class="chip-btn" data-act="bgm-toggle"><span data-bgmbadge>🎵 ' + esc(bgmState?.customTitle || curTrack.shortName) + '</span> ▾</button>' +
+          '<button type="button" class="chip-btn" data-act="mute" title="静音切换">' + (bgmState && bgmState.muted ? '🔇' : '🔊') + '</button>' +
+          '<div class="bgm-popover" data-bgmpop>' +
+            BGM_TRACKS.map(t => '<button type="button" class="chip-sm ' + (t.id === curMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '" title="' + esc(t.desc) + '">' + esc(t.shortName) + '</button>').join('') +
+            '<label class="chip-sm bgm-upload" title="导入本地 MP3">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
+          '</div>' +
         '</div>' +
-        '<div class="pills">' +
-          '<span class="pill">黄昏之时 · 医龙 · My Soul 风格配乐</span>' +
-          '<span class="pill">悬疑剧情 · 记忆顺序 · 查寝反应 · 解谜</span>' +
-          '<span class="pill">4栋宿舍 × 四季五天气</span>' +
-        '</div>' +
+      '</div>' +
+      '<div class="title-hero">' +
+        '<h1 class="title-h1">今晚，亮一盏灯</h1>' +
+        '<p class="title-sub">点亮星夜里的每一扇晚安窗</p>' +
         '<div class="title-actions">' +
-          '<button class="btn primary" data-act="enter">进入校园夜巡 ▸</button>' +
-          '<button class="btn ghost" data-act="start">直接读三夜剧情</button>' +
-          '<button class="btn ghost" data-act="board">全校排行榜</button>' +
-          '<button class="btn ghost" data-act="npcs">NPC 换装图鉴</button>' +
-          '<button class="btn ghost" data-act="collection">结局星图 <b>' + unlocked + '/6</b></button>' +
-          '<button class="btn ghost docs-btn" data-act="docs"><span data-icon="ledger"></span>作品说明 · 评审手册</button>' +
-          '<button class="btn ghost icon" data-act="key" data-icon="key" title="DeepSeek AI 直连 Key"></button>' +
+          '<button class="btn primary" data-act="enter">进入校园夜巡</button>' +
+          '<button class="btn ghost" data-act="start">三夜剧情</button>' +
+          '<button class="btn ghost docs-btn" data-act="docs"><span data-icon="ledger"></span>作品说明</button>' +
         '</div>' +
-        '<div class="title-foot">' +
-          '<span class="global">全校守夜人已点亮 <b>' + esc(total) + '</b> 扇窗</span>' +
-          '<button class="linkish" data-act="whispers">' + (firstWhisper ? '流光留声机 · 「' + esc(firstWhisper.content) + '」' : '流光留声机') + '</button>' +
+        '<div class="title-secondary">' +
+          '<button class="linkish" data-act="board">排行榜</button>' +
+          '<span class="title-sep">·</span>' +
+          '<button class="linkish" data-act="npcs">NPC图鉴</button>' +
+          '<span class="title-sep">·</span>' +
+          '<button class="linkish" data-act="collection">结局 <b>' + unlocked + '/6</b></button>' +
+          '<span class="title-sep">·</span>' +
+          '<button class="linkish" data-act="whispers" title="' + esc(firstWhisper ? firstWhisper.content : '校园流光留声机') + '">留声机</button>' +
+          '<span class="title-sep">·</span>' +
+          '<button class="linkish" data-act="key" title="DeepSeek AI 直连 Key">🔑</button>' +
+          '<span class="title-sep">·</span>' +
+          '<span class="title-count">全校已亮 <b>' + esc(total) + '</b> 窗</span>' +
         '</div>' +
       '</div>'
     paintIcons(s)
+
+    const bgmToggle = qs(s, '[data-act="bgm-toggle"]')
+    const bgmPop = qs(s, '[data-bgmpop]')
+    if (bgmToggle && bgmPop) {
+      bgmToggle.onclick = e => {
+        e.stopPropagation()
+        bgmPop.classList.toggle('open')
+      }
+      bgmPop.addEventListener('click', e => e.stopPropagation())
+      s.addEventListener('click', () => bgmPop.classList.remove('open'))
+    }
 
     for (const b of qsa(s, '[data-bgm]')) {
       b.onclick = () => {
         const id = b.getAttribute('data-bgm') || 'auto'
         for (const x of qsa(s, '[data-bgm]')) x.classList.toggle('on', x === b)
         if (onBgmSelect) onBgmSelect(id)
+        if (bgmPop) bgmPop.classList.remove('open')
       }
     }
     const fileInp = qs(s, 'input[data-bgmfile]')
@@ -243,14 +260,13 @@ export class UI {
    *   onDone: Function
    * }} opts
    */
-  showDialogue({ lines, dormType, season, weather, aiSource, onSpeakerChange, onStepSound, onDone }) {
+  showDialogue({ lines, dormType: _dormType, season, weather, aiSource, onSpeakerChange, onStepSound, onDone }) {
     this.hideAll()
     const list = Array.isArray(lines) && lines.length ? lines : [
       { npcId: 'aunt_lin', speaker: '林阿姨', line: '熄灯铃响过喽，今晚的宿舍巡查就拜托你啦。' }
     ]
     const outfitKey = outfitForEnv(weather, season)
     const outfitLabel = OUTFIT_LABELS[outfitKey] || '值班常服'
-    const dorm = dormDef(dormType)
     const isAi = aiSource === 'ai' || aiSource === 'direct' || aiSource === 'cache'
 
     const box = document.createElement('div')
@@ -263,13 +279,13 @@ export class UI {
       '<div class="dlg-body">' +
         '<div class="dlg-head">' +
           '<div><span class="dlg-speaker" data-spk></span><span class="dlg-role" data-role></span></div>' +
-          '<span class="ai-radio-pill ' + (isAi ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + esc(dorm.shortName + ' · ' + (isAi ? 'AI 剧本导演' : '校园手写剧本')) + '</span>' +
+          '<span class="ai-radio-pill ' + (isAi ? '' : 'offline') + '"><i class="ai-radio-dot"></i>' + esc(isAi ? 'AI 导演' : '校园剧本') + '</span>' +
         '</div>' +
         '<p class="dlg-text" data-text></p>' +
         '<div class="dlg-actions">' +
           '<span class="dlg-step" data-step></span>' +
-          '<button class="chip-sm" type="button" data-act="skip">跳过开场</button>' +
-          '<button class="btn primary" type="button" data-act="next" style="padding:8px 16px;font-size:12.5px;">下一句 ▸</button>' +
+          '<button class="chip-sm" type="button" data-act="skip">跳过</button>' +
+          '<button class="btn primary" type="button" data-act="next" style="padding:7px 16px;font-size:12.5px;">继续</button>' +
         '</div>' +
       '</div>'
     this.el.appendChild(box)
@@ -303,7 +319,7 @@ export class UI {
       spkEl.textContent = item.speaker || npc.name
       roleEl.textContent = npc.role
       stepEl.textContent = `${idx + 1} / ${list.length}`
-      nextBtn.textContent = idx === list.length - 1 ? '开始选关巡楼 ▸' : '下一句 ▸'
+      nextBtn.textContent = idx === list.length - 1 ? '进入大厅' : '继续'
       if (onSpeakerChange) onSpeakerChange(npc.id)
       if (onStepSound) onStepSound(idx)
 
@@ -384,6 +400,7 @@ export class UI {
     const bgmMode = opts.bgmState ? opts.bgmState.mode : 'theme'
     const bgmMeta = bgmTrackDef(bgmMode)
     const activeTab = this._hubTab || 'dorm'
+    const panelOpen = Boolean(this._hubPanelOpen)
     const qMode = opts.qualityMode || 'auto'
     const qMeta = qualityModeDef(qMode)
 
@@ -393,69 +410,68 @@ export class UI {
       '<div class="hub-topbar">' +
         '<div class="hub-brand">' +
           '<b>' + esc(dorm.name) + '</b>' +
-          '<span>' + esc(dorm.subtitle) + ' · ' + esc(season.name) + ' · ' + esc(weatherMeta.name) + '</span>' +
+          '<span>' + esc(season.name.split(' · ').pop() || season.name) + ' · ' + esc(weatherMeta.name) + '</span>' +
         '</div>' +
         '<div class="hub-top-actions">' +
-          '<div class="nick-inline">' +
-            '<span>代号</span>' +
-            '<input data-nick maxlength="8" value="' + esc(opts.nickname) + '" />' +
-            '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
-          '</div>' +
-          '<button class="chip-btn" data-act="panel-toggle">🎛 控制台</button>' +
-          '<button class="chip-btn ' + (opts.tourActive ? 'on' : '') + '" data-act="scenic-tour">' + (opts.tourActive ? '⏸ 停止巡礼' : '✨ 四季巡礼') + '</button>' +
-          '<button class="chip-btn" data-act="postcard">📸 明信片</button>' +
+          '<button class="chip-btn ' + (panelOpen ? 'on' : '') + '" data-act="panel-toggle">' + (panelOpen ? '🎛 收起' : '🎛 场景') + '</button>' +
+          '<button class="chip-btn ' + (opts.tourActive ? 'on' : '') + '" data-act="scenic-tour">' + (opts.tourActive ? '⏸ 停止' : '✨ 巡礼') + '</button>' +
+          '<button class="chip-btn" data-act="postcard">📸 留影</button>' +
           '<button class="chip-btn" data-act="bgm-cycle" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' +
           '<button class="chip-btn" data-act="mute">' + (opts.bgmState && opts.bgmState.muted ? '🔇' : '🔊') + '</button>' +
-          '<button class="chip-btn" data-act="board">🏆 排行榜</button>' +
+          '<button class="chip-btn" data-act="board">🏆 榜单</button>' +
           '<div class="hub-more-wrap">' +
-            '<button class="chip-btn" data-act="more-toggle">⋯ 更多 ▾</button>' +
+            '<button class="chip-btn" data-act="more-toggle">⋯</button>' +
             '<div class="hub-more-menu" data-moremenu>' +
-              '<div class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '" style="margin-bottom:4px;"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI 导演' : '本地喜剧剧本')) + '</div>' +
-              '<button class="chip-sm" data-act="dialogue">💬 重看开场剧情</button>' +
-              '<button class="chip-sm" data-act="npcs">👘 NPC 换装图鉴</button>' +
-              '<button class="chip-sm" data-act="collection">⭐ 结局与线索图鉴</button>' +
-              '<button class="chip-sm" data-act="key">🔑 AI Key 设置</button>' +
-              '<button class="chip-sm" data-act="docs">📖 作品说明与手册</button>' +
-              '<button class="chip-sm" data-act="title">🏠 返回标题页</button>' +
+              '<div class="nick-inline" data-nickwrap>' +
+                '<input data-nick maxlength="8" value="' + esc(opts.nickname) + '" aria-label="夜巡代号" />' +
+                '<button class="nick-dice" type="button" data-act="randnick">🎲</button>' +
+              '</div>' +
+              '<div class="ai-radio-pill ' + (aiActive ? '' : 'offline') + '" style="margin:2px 0;"><i class="ai-radio-dot"></i>' + (opts.keyEnabled ? 'DeepSeek 直连' : (aiActive ? '云端 AI' : '校园剧本')) + '</div>' +
+              '<button class="chip-sm" data-act="dialogue">💬 开场剧情</button>' +
+              '<button class="chip-sm" data-act="npcs">👘 NPC 图鉴</button>' +
+              '<button class="chip-sm" data-act="collection">⭐ 结局线索</button>' +
+              '<button class="chip-sm" data-act="key">🔑 AI Key</button>' +
+              '<button class="chip-sm" data-act="docs">📖 作品说明</button>' +
+              '<button class="chip-sm" data-act="title">🏠 标题页</button>' +
             '</div>' +
           '</div>' +
         '</div>' +
       '</div>' +
 
-      '<div class="hub-mid" data-hubmid>' +
+      '<div class="hub-mid ' + (panelOpen ? '' : 'collapsed') + '" data-hubmid>' +
         '<div class="hub-panel">' +
           '<div class="hub-tabs">' +
-            '<button type="button" class="hub-tab-btn ' + (activeTab === 'dorm' ? 'on' : '') + '" data-tab="dorm">🏢 换楼栋</button>' +
-            '<button type="button" class="hub-tab-btn ' + (activeTab === 'env' ? 'on' : '') + '" data-tab="env">🌦 天气季节</button>' +
-            '<button type="button" class="hub-tab-btn ' + (activeTab === 'av' ? 'on' : '') + '" data-tab="av">🎥 视角配乐</button>' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'dorm' ? 'on' : '') + '" data-tab="dorm">楼栋</button>' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'env' ? 'on' : '') + '" data-tab="env">天气季节</button>' +
+            '<button type="button" class="hub-tab-btn ' + (activeTab === 'av' ? 'on' : '') + '" data-tab="av">视角配乐</button>' +
           '</div>' +
           '<div class="hub-tab-pane ' + (activeTab === 'dorm' ? 'on' : '') + '" data-pane="dorm">' +
-            '<div class="hub-group-label">切换附近宿舍楼（3D 航拍漫游）</div>' +
+            '<div class="hub-group-label">楼栋</div>' +
             '<div class="chip-row">' +
               DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === opts.dormId ? 'on' : '') + '" data-dorm="' + esc(d.id) + '">' + esc(d.shortName) + '·' + d.windowCount + '窗</button>').join('') +
             '</div>' +
           '</div>' +
           '<div class="hub-tab-pane ' + (activeTab === 'env' ? 'on' : '') + '" data-pane="env">' +
-            '<div class="hub-group-label">校园季节 · 植被覆雪联动</div>' +
+            '<div class="hub-group-label">季节</div>' +
             '<div class="chip-row">' +
               SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') +
             '</div>' +
-            '<div class="hub-group-label" style="margin-top:8px;">夜间天气 · NPC 实时换装</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">天气</div>' +
             '<div class="chip-row">' +
               WEATHER_CATALOG.map(w => '<button class="chip-sm ' + (w.id === opts.weather ? 'on' : '') + '" data-weather="' + esc(w.id) + '">' + esc(w.name) + '</button>').join('') +
             '</div>' +
           '</div>' +
           '<div class="hub-tab-pane ' + (activeTab === 'av' ? 'on' : '') + '" data-pane="av">' +
-            '<div class="hub-group-label">看楼视角（自由拖拽旋转）</div>' +
+            '<div class="hub-group-label">视角</div>' +
             '<div class="chip-row">' +
               CAMERA_VIEWS.map(v => '<button class="chip-sm ' + (v.id === opts.viewId ? 'on' : '') + '" data-view="' + esc(v.id) + '">' + esc(v.name) + '</button>').join('') +
             '</div>' +
-            '<div class="hub-group-label" style="margin-top:8px;">配乐风格（黄昏之时/医龙/My Soul）</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">配乐</div>' +
             '<div class="chip-row">' +
               BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') +
-              '<label class="chip-sm bgm-upload">📁 本地曲目<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
+              '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label>' +
             '</div>' +
-            '<div class="hub-group-label" style="margin-top:8px;">渲染画质 · ' + esc(qMeta.desc) + '</div>' +
+            '<div class="hub-group-label" style="margin-top:8px;">画质 · ' + esc(qMeta.desc) + '</div>' +
             '<div class="chip-row">' +
               QUALITY_MODES.map(qm => '<button class="chip-sm ' + (qm.id === qMode ? 'on' : '') + '" data-quality="' + esc(qm.id) + '">' + esc(qm.name) + '</button>').join('') +
             '</div>' +
@@ -466,9 +482,9 @@ export class UI {
       '<div class="hub-bottom">' +
         '<div class="hub-mobile-dormbar" data-mobiledock>' +
           '<div class="mob-dorm-row">' +
-            '<span class="mob-lab">🏢 换楼</span>' +
+            '<span class="mob-lab">🏢 楼栋</span>' +
             DORM_TYPES.map(d => '<button class="chip-sm ' + (d.id === opts.dormId ? 'on' : '') + '" data-dorm="' + esc(d.id) + '">' + esc(d.shortName) + '·' + d.windowCount + '窗</button>').join('') +
-            '<button class="chip-sm on" data-act="mob-env-toggle">🌦 天气/视角/🎵 ▾</button>' +
+            '<button class="chip-sm on" data-act="mob-env-toggle">🌦 景音 ▾</button>' +
           '</div>' +
           '<div class="mob-env-drawer" data-mobenv>' +
             '<div class="chip-row">' + SEASONS.map(s => '<button class="chip-sm ' + (s.id === opts.season ? 'on' : '') + '" data-season="' + esc(s.id) + '">' + esc(s.name) + '</button>').join('') + '</div>' +
@@ -478,13 +494,11 @@ export class UI {
             '<div class="chip-row">' + BGM_TRACKS.map(t => '<button class="chip-sm ' + (t.id === bgmMode ? 'on' : '') + '" data-bgm="' + esc(t.id) + '">' + esc(t.shortName) + '</button>').join('') + '<label class="chip-sm bgm-upload">📁 本地<input type="file" accept="audio/*" data-bgmfile style="display:none"/></label></div>' +
           '</div>' +
         '</div>' +
-        '<div class="hub-orbit-hint">大厅可自由拖转看楼 · 进入玩法后默认锁定防误转（可随时切换）</div>' +
         '<div class="hub-modes">' +
           GAME_MODES.map(m =>
             '<div class="mode-card ' + (m.id === opts.gameMode ? 'on' : '') + (m.id === 'star_sweep' ? ' hero-mode' : '') + '" data-mode="' + esc(m.id) + '">' +
-              '<div class="mode-card-head"><b>' + esc(m.shortName) + '</b><span class="mode-tag">' + esc(m.tag) + '</span></div>' +
+              '<div class="mode-card-head"><b>' + esc(m.shortName) + '</b><button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始</button></div>' +
               '<span class="mc-desc">' + esc(m.desc) + '</span>' +
-              '<button class="mode-play-btn" type="button" data-launch="' + esc(m.id) + '">开始巡查 ▸</button>' +
             '</div>'
           ).join('') +
         '</div>' +
@@ -496,8 +510,10 @@ export class UI {
     const panelBtn = qs(hub, '[data-act="panel-toggle"]')
     if (panelBtn && hubMid) {
       panelBtn.onclick = () => {
-        const hidden = hubMid.classList.toggle('collapsed')
-        panelBtn.textContent = hidden ? '🎛 展开控制台' : '🎛 隐藏控制台'
+        this._hubPanelOpen = !this._hubPanelOpen
+        hubMid.classList.toggle('collapsed', !this._hubPanelOpen)
+        panelBtn.classList.toggle('on', this._hubPanelOpen)
+        panelBtn.textContent = this._hubPanelOpen ? '🎛 收起' : '🎛 场景'
       }
     }
 
@@ -508,6 +524,8 @@ export class UI {
         e.stopPropagation()
         moreMenu.classList.toggle('open')
       }
+      const nickWrap = qs(moreMenu, '[data-nickwrap]')
+      if (nickWrap) nickWrap.addEventListener('click', e => e.stopPropagation())
       hub.addEventListener('click', () => moreMenu.classList.remove('open'))
     }
 
@@ -626,12 +644,12 @@ export class UI {
         '<span class="tier-pill ' + initTier.cssClass + '" data-tier>' + initTier.icon + ' ' + initTier.code + ' · ' + esc(initTier.title) + '</span>' +
       '</div>' +
       '<div class="hv4-stats">' +
-        '<span>进度<b data-stage>1/' + maxStage + '</b></span>' +
-        '<span>正确数<b data-correct>0</b></span>' +
-        '<span>准确率<b data-acc>100%</b></span>' +
-        '<span>积分<b data-score>0</b></span>' +
-        '<span data-timewrap style="display:none;">倒计时<b data-time>45</b>s</span>' +
-        '<span>护盾<b data-shield>1</b></span>' +
+        '<span>关<b data-stage>1/' + maxStage + '</b></span>' +
+        '<span>对<b data-correct>0</b></span>' +
+        '<span>准度<b data-acc>100%</b></span>' +
+        '<span>分<b data-score>0</b></span>' +
+        '<span data-timewrap style="display:none;">余时<b data-time>45</b>s</span>' +
+        '<span>盾<b data-shield>1</b></span>' +
       '</div>' +
       '<div class="hv4-actions">' +
         (opts.showHintBtn ? '<button class="chip-sm on" data-act="hint">💡 提示</button>' : '') +
@@ -849,9 +867,9 @@ export class UI {
       '<span class="mood-hint">' + esc(m.hint) + '</span>' +
     '</button>').join('')
     s.innerHTML = '<div class="panel glass">' +
-      '<div class="kicker">序章 · 今夜的心境</div>' +
-      '<h2 class="h2">先挑一件东西，带你走进今晚</h2>' +
-      '<p class="lede">它只决定今晚的节奏和天色，不会锁住任何结局。</p>' +
+      '<div class="kicker">今夜心境</div>' +
+      '<h2 class="h2">选一件夜巡小物</h2>' +
+      '<p class="lede">只影响今夜的天色与节奏</p>' +
       '<div class="mood-grid">' + cards + '</div>' +
     '</div>'
     paintIcons(s)
@@ -932,18 +950,17 @@ export class UI {
       '<p class="chap-cue">' + esc(chapter.sceneCue) + '</p>' +
       '<div class="chap-beats">' + beatsHtml + '</div>' +
       '<div class="chap-rules">' +
-        '<div class="cr-head">🎯 怎么玩 & 今夜过关标准</div>' +
-        '<p class="cr-std"><b>过关要求：</b>在 75s 内达成以下任意 <b>1</b> 项目标即算过关（全达成得火漆金章并可随时提前进下一夜）：</p>' +
+        '<div class="cr-head">75s 内达成任意 1 项即过关</div>' +
         '<ul class="cr-goals">' + goalsHtml + '</ul>' +
         '<div class="cr-legend">' +
-          '<span>✨ <b>微光窗</b>：点一下或按住连划（默认已固定视角不误转）</span>' +
-          '<span>🏮 <b>红金信标</b>：点击触发狗血吃瓜抉择（计时自动暂停）</span>' +
-          '<span>🌟 <b>青金星轨</b>：按住拖连，或先后点击两扇星轨窗都能连桥！</span>' +
+          '<span>✨ <b>微光</b> · 点/划亮</span>' +
+          '<span>🏮 <b>信标</b> · 抉择</span>' +
+          '<span>🌟 <b>星轨</b> · 连两窗</span>' +
         '</div>' +
       '</div>' +
       '<div class="dialog-actions" style="margin-top:14px;">' +
-        '<button class="btn primary" type="button" data-act="go">进入第 ' + chapter.night + ' 夜巡查 ▸</button>' +
-        (onBack ? '<button class="btn ghost" type="button" data-act="back">返回换楼</button>' : '') +
+        '<button class="btn primary" type="button" data-act="go">开始第 ' + chapter.night + ' 夜</button>' +
+        (onBack ? '<button class="btn ghost" type="button" data-act="back">返回</button>' : '') +
       '</div>' +
     '</div>'
     paintIcons(s)
@@ -967,28 +984,28 @@ export class UI {
     '</div>').join('')
 
     hud.innerHTML = '<div class="hud-top">' +
-        '<div class="brand"><b>' + esc(dormMeta ? dormMeta.shortName : '17号宿舍楼') + '</b><span>第 ' + (index + 1) + ' 晚 / ' + count + ' · ' + esc(weatherLabel(night && night.weather)) + ' · ' + esc(tempoLabel(night && night.tempo)) + '</span></div>' +
+        '<div class="brand"><b>' + esc(dormMeta ? dormMeta.shortName : '17号楼') + '</b><span>第 ' + (index + 1) + '/' + count + ' 夜 · ' + esc(weatherLabel(night && night.weather)) + '</span></div>' +
         '<div class="stats">' +
           '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
           '<div class="warmbar"><i data-warmbar></i></div>' +
           '<div class="stat"><span class="lab">连击</span><b data-combo>0</b></div>' +
           '<div class="stat"><span class="lab">窗</span><b data-lit>0</b><span class="lab">/' + totalWindows + '</span></div>' +
-          '<div class="stat time"><span class="lab">剩余</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
+          '<div class="stat time"><span class="lab">余时</span><b data-time>' + Math.ceil(75) + '</b><span class="lab">s</span></div>' +
           '<span class="tier-pill tier-d" data-tier>🕯️ D · 见习点灯生</span>' +
           '<div class="flow-pill flow-state-flow" id="flow-pill" title="夜巡心流状态"><i class="flow-dot"></i><span data-flow-text>心流</span></div>' +
         '</div>' +
         '<div class="hud-actions">' +
-          (onToggleOrbit ? '<button class="chip-sm ' + (orbitLocked ? 'on' : '') + '" type="button" data-act="orbit" data-orbitbadge title="固定连窗 / 自由转看楼栋">' + (orbitLocked ? '🔒 固定连窗' : '🔄 自由转看') + '</button>' : '') +
+          (onToggleOrbit ? '<button class="chip-sm ' + (orbitLocked ? 'on' : '') + '" type="button" data-act="orbit" data-orbitbadge title="固定连窗 / 自由转看">' + (orbitLocked ? '🔒 固定连窗' : '🔄 自由转看') + '</button>' : '') +
           (onResetView ? '<button class="chip-sm" type="button" data-act="reset-view" title="回正视角">↺</button>' : '') +
-          (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge title="切换背景音乐">🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
-          '<button class="chip-sm" type="button" data-act="rules" title="查看玩法说明">?</button>' +
+          (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge title="切换配乐">🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
+          '<button class="chip-sm" type="button" data-act="rules" title="操作提示">?</button>' +
           '<button class="iconbtn" data-act="mute" data-icon="' + (muted ? 'mute' : 'sound') + '" title="声音"></button>' +
           '<button class="iconbtn" data-act="pause" data-icon="pause" title="暂停"></button>' +
         '</div>' +
       '</div>' +
       '<div class="ledger-dock glass" id="ledger">' +
         '<div class="ledger-head">' +
-          '<span class="kicker" data-pass-status>🎯 过关标准：完成 ≥1 项目标 (0/' + (commissions || []).length + ')</span>' +
+          '<span class="kicker" data-pass-status>目标 0/' + (commissions || []).length + ' · 达 1 项过关</span>' +
           '<div class="ledger-head-btns">' +
             '<button class="chip-sm" type="button" data-act="next-night" style="display:none;">进下一夜 ▸</button>' +
             '<button class="chip-sm" type="button" data-act="collapse">收起 ▾</button>' +
@@ -996,7 +1013,6 @@ export class UI {
         '</div>' +
         '<div class="ledger-body" data-lbody>' +
           '<div class="ledger-grid">' + ledger + '</div>' +
-          '<div class="ledger-legend">✨ 微光窗：点/划亮 · 🏮 信标：触发剧情 · 🌟 星轨：拖连或先后点两窗</div>' +
         '</div>' +
       '</div>'
 
@@ -1120,11 +1136,11 @@ export class UI {
     if (this._passStatus) {
       if (doneCount > 0) {
         this._passStatus.textContent = status?.allDone
-          ? `🏆 全 3 项手账已满贯！可随时进下一夜`
-          : `✓ 已过关 (${doneCount}/${list.length}) · 可继续冲满章`
+          ? `🏆 全 3 项已满贯`
+          : `✓ 已过关 (${doneCount}/${list.length})`
         this._passStatus.classList.add('passed')
       } else {
-        this._passStatus.textContent = `🎯 过关标准：完成 ≥1 项目标 (0/${list.length})`
+        this._passStatus.textContent = `目标 0/${list.length} · 达 1 项过关`
         this._passStatus.classList.remove('passed')
       }
     }
@@ -1799,15 +1815,14 @@ export class UI {
     const stampDate = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
     s.innerHTML =
       '<div class="panel glass wide">' +
-        '<div class="kicker">EVENING KEEPSAKE POSTCARD</div>' +
-        '<h2 class="h2">📸 晚安校园明信片</h2>' +
-        '<p class="lede small">' + esc(dormName) + ' · ' + esc(seasonName) + ' · ' + esc(weatherName) + ' · 已点亮 ' + esc(litCount) + '/' + esc(totalWindows) + ' 扇窗</p>' +
+        '<h2 class="h2">📸 晚安明信片</h2>' +
+        '<p class="lede small">' + esc(dormName) + ' · ' + esc(seasonName) + ' · ' + esc(weatherName) + ' · ' + esc(litCount) + '/' + esc(totalWindows) + ' 窗</p>' +
         '<div class="postcard-stage">' +
           '<canvas class="postcard-canvas" width="1040" height="700"></canvas>' +
         '</div>' +
         '<div class="dialog-actions" style="justify-content:center;">' +
-          '<button class="btn primary" data-act="save-postcard">💾 保存纪念明信片 PNG</button>' +
-          '<button class="btn ghost" data-act="close-postcard">返回校园</button>' +
+          '<button class="btn primary" data-act="save-postcard">💾 保存 PNG</button>' +
+          '<button class="btn ghost" data-act="close-postcard">返回</button>' +
         '</div>' +
       '</div>'
     paintIcons(s)
@@ -2318,10 +2333,8 @@ const RESIDENT_ORDER = {
 }
 
 const WEATHER_LABEL = { light_rain: '细雨', fog: '浓雾', wind: '晚风', clear: '晴夜', snow: '落雪' }
-const TEMPO_LABEL = { slow: '慢一点', normal: '刚刚好', brisk: '快一些' }
 
 function weatherLabel(weather) { return WEATHER_LABEL[weather] || '晴夜' }
-function tempoLabel(tempo) { return TEMPO_LABEL[tempo] || '刚刚好' }
 
 function sourceLabel(source) {
   if (source === 'ai') return 'DeepSeek AI 云端智能体'
