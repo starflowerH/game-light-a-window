@@ -1,14 +1,17 @@
 // Hybrid Campus Audio Engine: curated multi-track music carousel + ambient weather
-// bed + WebAudio procedural game SFX + real-time FFT spectrum analyzer.
+// bed + WebAudio procedural game SFX + non-blocking smart warmup buffering.
 //
 // The AudioContext is created lazily on the first unlock() (inside a user
-// gesture). Music tracks stream directly on demand and advance automatically.
+// gesture). Music tracks play directly via native browser media pipelines to prevent
+// WebGL frame spikes from causing static crackles, with crisp fast-track warmup buffering.
 
 import { BGM_TRACKS, bgmTrackDef } from '../shared/constants.js'
 
 const MASTER_LEVEL = 0.62
 const MAX_VOICES = 64
-const DEFAULT_THEME_VOL = 0.44
+const DEFAULT_THEME_VOL = 0.48
+const FAST_TRACK_IDS = new Set(['theme', 'counter_attack'])
+const LARGE_BUFFER_TIMEOUT_MS = 18000
 
 // C5 D5 E5 G5 A5 C6 D6 E6, one octave of the C major pentatonic scale.
 const SCALE = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51]
@@ -24,13 +27,13 @@ const CHORDS = [
 // Beats per minute for each tempo label.
 const TEMPO = { slow: 66, normal: 80, brisk: 102 }
 
-// L1 presets tuned softly so rain & wind support rather than bury the piano/strings.
+// Keep snow/clear completely free of synthetic pink noise hiss so curated music stays crystal clear.
 const WEATHER = {
-  light_rain: { pinkFreq: 850, pinkQ: 0.9, pinkGain: 0.085, brownFreq: 220, brownQ: 0.7, brownGain: 0.055, windDepth: 0, gust: 0.008 },
-  wind: { pinkFreq: 450, pinkQ: 1.5, pinkGain: 0.08, brownFreq: 170, brownQ: 0.8, brownGain: 0.06, windDepth: 200, gust: 0.022 },
-  fog: { pinkFreq: 620, pinkQ: 2.6, pinkGain: 0.018, brownFreq: 88, brownQ: 1.0, brownGain: 0.036, windDepth: 35, gust: 0.008 },
-  snow: { pinkFreq: 960, pinkQ: 3.2, pinkGain: 0.012, brownFreq: 95, brownQ: 1.2, brownGain: 0.016, windDepth: 55, gust: 0.006 },
-  clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0.008, brownFreq: 120, brownQ: 0.8, brownGain: 0.002, windDepth: 0, gust: 0.003 }
+  light_rain: { pinkFreq: 780, pinkQ: 1.1, pinkGain: 0.014, brownFreq: 200, brownQ: 0.8, brownGain: 0.010, windDepth: 0, gust: 0.002 },
+  wind: { pinkFreq: 420, pinkQ: 1.6, pinkGain: 0.016, brownFreq: 165, brownQ: 0.8, brownGain: 0.014, windDepth: 85, gust: 0.006 },
+  fog: { pinkFreq: 620, pinkQ: 2.6, pinkGain: 0, brownFreq: 88, brownQ: 1.0, brownGain: 0.002, windDepth: 0, gust: 0 },
+  snow: { pinkFreq: 960, pinkQ: 3.2, pinkGain: 0, brownFreq: 95, brownQ: 1.2, brownGain: 0, windDepth: 0, gust: 0 },
+  clear: { pinkFreq: 5200, pinkQ: 0.7, pinkGain: 0, brownFreq: 120, brownQ: 0.8, brownGain: 0, windDepth: 0, gust: 0 }
 }
 
 const TRACK_URLS = Object.fromEntries(BGM_TRACKS.map(t => [t.id, t.url]))
@@ -70,6 +73,10 @@ export class AudioEngine {
     this._themeAudioEl = null
     this._themeLoadedId = ''
     this._themeFailed = false
+    this._preloadEl = null
+    this._preloadTimer = 0
+    this._bufferingTrackId = ''
+    this._bufferedTracks = new Set(FAST_TRACK_IDS)
     this._customAudioEl = null
     this._customUrl = ''
     this._customTitle = ''
@@ -245,6 +252,9 @@ export class AudioEngine {
       activeTrack: this._customUrl
         ? 'custom'
         : (this._themeFailed ? 'offline' : this._bgmMode),
+      playingTrack: this._customUrl ? 'custom' : (this._themeLoadedId || this._bgmMode),
+      bufferingTrack: this._bufferingTrackId || '',
+      bufferingTrackName: this._bufferingTrackId ? bgmTrackDef(this._bufferingTrackId).shortName : '',
       customTitle: this._customTitle,
       muted: this._muted,
       paused: this._bgmPaused,
@@ -285,70 +295,185 @@ export class AudioEngine {
     return out
   }
 
-  _hookAnalyser(audio) {
-    if (!this.ctx || !audio) return
-    if (typeof Element !== 'undefined' && !(audio instanceof Element)) return
-    if (typeof this.ctx.createMediaElementSource !== 'function' || typeof this.ctx.createAnalyser !== 'function') return
-    if (this._mediaSrcConnected.has(audio)) return
-    try {
-      const src = this.ctx.createMediaElementSource(audio)
-      if (!this._analyser) {
-        this._analyser = this.ctx.createAnalyser()
-        this._analyser.fftSize = 64
-        this._analyser.smoothingTimeConstant = 0.78
-        this._analyserBins = new Uint8Array(this._analyser.frequencyBinCount)
+  /**
+   * BGM streams directly via the native OS/browser media decoder rather than
+   * createMediaElementSource so Three.js frames never starve or crackle music.
+   * @param {any} [_audio]
+   */
+  _hookAnalyser(_audio) {}
+
+  _cancelPreload() {
+    if (this._preloadTimer) {
+      clearTimeout(this._preloadTimer)
+      this._preloadTimer = 0
+    }
+    if (this._preloadEl) {
+      try { this._preloadEl.pause() } catch {}
+      try { this._preloadEl.src = '' } catch {}
+      this._preloadEl = null
+    }
+    this._bufferingTrackId = ''
+  }
+
+  _bindTrackEvents(audio) {
+    audio.onended = () => {
+      if (this._carousel && !this._customUrl && !this._bgmPaused) {
+        this.nextTrack(true)
       }
-      src.connect(this._analyser)
-      this._analyser.connect(this.ctx.destination)
-      this._mediaSrcConnected.add(audio)
-    } catch {}
+    }
+    audio.onerror = () => {
+      this._failedTracks.add(this._bgmMode)
+      const fallbackId = this._bgmMode !== 'theme' && !this._failedTracks.has('theme') ? 'theme' : null
+      if (fallbackId) {
+        this.setBgmTrack(fallbackId)
+      } else {
+        this._themeFailed = true
+        this._clearThemeAudio()
+        this._emitState()
+      }
+    }
+  }
+
+  _startLargePreload(trackId, targetUrl) {
+    if (typeof window === 'undefined' || !window.Audio) return
+    this._cancelPreload()
+    this._bufferingTrackId = trackId
+    try {
+      const pre = new window.Audio(targetUrl)
+      if (typeof pre.addEventListener !== 'function') return
+      pre.preload = 'auto'
+      pre.muted = true
+      pre.loop = !this._carousel
+      this._preloadEl = pre
+
+      let settled = false
+      const cleanup = () => {
+        if (this._preloadTimer) {
+          clearTimeout(this._preloadTimer)
+          this._preloadTimer = 0
+        }
+        try {
+          pre.removeEventListener('canplaythrough', onReady)
+          pre.removeEventListener('canplay', onCanPlay)
+          pre.removeEventListener('error', onErr)
+        } catch {}
+      }
+      const promote = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        this._bufferedTracks.add(trackId)
+        if (this._preloadEl !== pre || this._bgmMode !== trackId || this._customUrl) {
+          try { pre.src = '' } catch {}
+          if (this._preloadEl === pre) this._preloadEl = null
+          this._bufferingTrackId = ''
+          this._emitState()
+          return
+        }
+        const prev = this._themeAudioEl
+        if (prev && prev !== pre) {
+          try { prev.pause() } catch {}
+          try { prev.src = '' } catch {}
+        }
+        pre.volume = DEFAULT_THEME_VOL
+        pre.muted = this._muted
+        pre.loop = !this._carousel
+        try { pre.currentTime = 0 } catch {}
+        this._bindTrackEvents(pre)
+        this._themeAudioEl = pre
+        this._themeLoadedId = trackId
+        this._preloadEl = null
+        this._bufferingTrackId = ''
+        if (!this._muted && !this._bgmPaused && this.ready) {
+          try {
+            const p = pre.play()
+            if (p && typeof p.catch === 'function') p.catch(() => {})
+          } catch {}
+        }
+        this._emitState()
+      }
+      const onReady = () => promote()
+      const onCanPlay = () => {
+        if (pre.readyState >= 3) promote()
+      }
+      const onErr = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        if (this._preloadEl === pre) this._preloadEl = null
+        this._bufferingTrackId = ''
+        this._failedTracks.add(trackId)
+        this._emitState()
+      }
+      pre.addEventListener('canplaythrough', onReady)
+      pre.addEventListener('canplay', onCanPlay)
+      pre.addEventListener('error', onErr)
+      // @ts-expect-error Node types return Timeout, browser returns numeric timer id
+      this._preloadTimer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        cleanup()
+        try { pre.src = '' } catch {}
+        if (this._preloadEl === pre) this._preloadEl = null
+        this._bufferingTrackId = ''
+        this._emitState()
+      }, LARGE_BUFFER_TIMEOUT_MS)
+      if (typeof pre.load === 'function') pre.load()
+    } catch {
+      this._bufferingTrackId = ''
+    }
   }
 
   _ensureTrackAudio(shouldPlay = false) {
     if (this._customUrl) return null
     const def = bgmTrackDef(this._bgmMode)
     const targetUrl = TRACK_URLS[def.id] || BGM_TRACKS[0].url
+    const needsWarmup = shouldPlay && !FAST_TRACK_IDS.has(def.id) && !this._bufferedTracks.has(def.id)
+
     if (!this._themeAudioEl) {
       if (typeof window === 'undefined' || !window.Audio) return null
       try {
         const audio = new window.Audio(targetUrl)
+        const realBrowser = typeof audio.addEventListener === 'function'
+        if (realBrowser && needsWarmup) {
+          audio.src = TRACK_URLS.theme || BGM_TRACKS[0].url
+          this._themeLoadedId = 'theme'
+          this._startLargePreload(def.id, targetUrl)
+        } else {
+          this._themeLoadedId = def.id
+        }
         audio.preload = shouldPlay ? 'auto' : 'none'
         audio.loop = !this._carousel
         audio.volume = DEFAULT_THEME_VOL
         audio.muted = this._muted
-        audio.onended = () => {
-          if (this._carousel && !this._customUrl && !this._bgmPaused) {
-            this.nextTrack(true)
-          }
-        }
-        audio.onerror = () => {
-          this._failedTracks.add(this._bgmMode)
-          const fallbackId = this._bgmMode !== 'theme' && !this._failedTracks.has('theme') ? 'theme' : null
-          if (fallbackId) {
-            this.setBgmTrack(fallbackId)
-          } else {
-            this._themeFailed = true
-            this._clearThemeAudio()
-            this._emitState()
-          }
-        }
+        this._bindTrackEvents(audio)
         this._themeAudioEl = audio
-        this._themeLoadedId = def.id
       } catch {
         this._themeFailed = true
         return null
       }
     } else if (this._themeLoadedId !== def.id) {
-      this._themeAudioEl.src = targetUrl
-      this._themeLoadedId = def.id
-      this._themeAudioEl.preload = shouldPlay ? 'auto' : 'none'
+      const realBrowser = typeof this._themeAudioEl.addEventListener === 'function'
+      if (realBrowser && needsWarmup) {
+        // Keep playing crisp warmup music while the large track pre-buffers in background
+        if (!this._themeLoadedId || this._themeAudioEl.paused) {
+          this._themeAudioEl.src = TRACK_URLS.theme || BGM_TRACKS[0].url
+          this._themeLoadedId = 'theme'
+          this._themeAudioEl.preload = 'auto'
+        }
+        this._startLargePreload(def.id, targetUrl)
+      } else {
+        this._cancelPreload()
+        this._themeAudioEl.src = targetUrl
+        this._themeLoadedId = def.id
+        this._themeAudioEl.preload = shouldPlay ? 'auto' : 'none'
+      }
     } else if (shouldPlay && this._themeAudioEl.preload === 'none') {
       this._themeAudioEl.preload = 'auto'
     }
 
     this._themeAudioEl.loop = !this._carousel
     this._themeAudioEl.muted = this._muted
-    this._hookAnalyser(this._themeAudioEl)
     if (shouldPlay && !this._muted && !this._bgmPaused) {
       try {
         const p = this._themeAudioEl.play()
@@ -364,6 +489,7 @@ export class AudioEngine {
   }
 
   _clearThemeAudio() {
+    this._cancelPreload()
     if (!this._themeAudioEl) return
     try { this._themeAudioEl.pause() } catch {}
     try { this._themeAudioEl.src = '' } catch {}
@@ -374,6 +500,7 @@ export class AudioEngine {
   /** Allow player to load a local .mp3/.wav/.ogg file on top of WebAudio SFX. */
   loadCustomAudioFile(file) {
     if (!file || typeof URL === 'undefined' || typeof window === 'undefined' || !window.Audio) return false
+    this._cancelPreload()
     this._pauseThemeAudio()
     this.clearCustomAudio()
     try {

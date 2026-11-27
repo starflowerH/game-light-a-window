@@ -570,10 +570,20 @@ export class Game {
     this.viewId = step.view
     this.scene.setSeason(step.season)
     this.scene.setWeatherFx(step.weather)
-    this.scene.setCameraView(step.view, false)
+    this.scene.setCameraView(step.view, false, 2.8)
     if (this.audio) this.audio.setWeather(step.weather)
     this.ui.toast(step.title, step.desc)
-    if (this.state === 'hub') this.showHub()
+    if (this.state === 'hub') {
+      if (this.ui && this.ui.syncHubTourState) {
+        this.ui.syncHubTourState({
+          dormMeta: dormDef(this.dormId),
+          season: this.season,
+          weather: this.weather,
+          viewId: this.viewId,
+          tourActive: Boolean(this._tourTimer)
+        })
+      }
+    }
   }
 
   toggleScenicTour() {
@@ -581,7 +591,11 @@ export class Game {
     if (this._tourTimer) {
       this.stopScenicTour()
       this.ui.toast('✨ 已结束四季巡礼', '可继续自由拖拽赏景或选择模式开始巡查')
-      if (this.state === 'hub') this.showHub()
+      if (this.ui && this.ui.syncHubTourState && this.state === 'hub') {
+        this.ui.syncHubTourState({ dormMeta: dormDef(this.dormId), season: this.season, weather: this.weather, viewId: this.viewId, tourActive: false })
+      } else if (this.state === 'hub') {
+        this.showHub()
+      }
       return
     }
     this._tourIndex = 0
@@ -592,7 +606,10 @@ export class Game {
       }
       this._tourIndex = (this._tourIndex + 1) % 4
       this._applyScenicTourStep(this._tourIndex)
-    }, 3200)
+    }, 3900)
+    if (this.ui && this.ui.syncHubTourState && this.state === 'hub') {
+      this.ui.syncHubTourState({ dormMeta: dormDef(this.dormId), season: this.season, weather: this.weather, viewId: this.viewId, tourActive: true })
+    }
     this._applyScenicTourStep(0)
   }
 
@@ -1736,7 +1753,7 @@ export class Game {
       onToggleOrbit: () => this.toggleOrbitLock(),
       onResetView: () => this.resetFrontView(),
       onAdvanceNight: () => this.advanceNightEarly(),
-      onPause: () => this.togglePause(), onMute: () => this.toggleMute(),
+      onPause: () => this.togglePause(), onBack: () => this._abandon(), onMute: () => this.toggleMute(),
       muted: this.audio ? this.audio.muted : false,
       onPingCommission: c => this.pingCommission(c),
       onReplayTutorial: () => this.replayTutorial()

@@ -235,4 +235,61 @@ describe('AudioEngine default lazy theme BGM', () => {
     engine.dispose()
     expect(themeEl.src).toBe('')
   })
+
+  it('pre-buffers large tracks in background while keeping fast warmup music audible in browsers', () => {
+    /** @type {Array<any>} */
+    const streamAudios = []
+    class StreamAudio {
+      constructor(src = '') {
+        this.src = src
+        this.preload = ''
+        this.loop = false
+        this.volume = 1
+        this.muted = false
+        this.paused = true
+        this.readyState = 0
+        this.currentTime = 0
+        this._listeners = new Map()
+        streamAudios.push(this)
+      }
+      addEventListener(ev, fn) { this._listeners.set(ev, fn) }
+      removeEventListener(ev, fn) { this._listeners.delete(ev) }
+      load() {}
+      play() { this.paused = false; return Promise.resolve() }
+      pause() { this.paused = true }
+      triggerReady() {
+        this.readyState = 4
+        const fn = this._listeners.get('canplaythrough')
+        if (fn) fn()
+      }
+    }
+    /** @type {any} */ (globalThis).window.Audio = StreamAudio
+
+    const engine = new AudioEngine()
+    engine.unlock()
+    expect(streamAudios.length).toBe(1)
+    expect(streamAudios[0].src).toBe('./audio/bgm-default.mp3')
+
+    engine.setBgmTrack('canon_in_d')
+    expect(streamAudios.length).toBe(2)
+    expect(streamAudios[1].src).toBe('./audio/tracks/canon-in-d.mp3')
+    expect(streamAudios[1].muted).toBe(true)
+    expect(engine.getBgmState()).toMatchObject({
+      mode: 'canon_in_d',
+      playingTrack: 'theme',
+      bufferingTrack: 'canon_in_d',
+      playing: true
+    })
+
+    // Once buffered, it seamlessly promotes the large track without stalling
+    streamAudios[1].triggerReady()
+    expect(engine.getBgmState()).toMatchObject({
+      mode: 'canon_in_d',
+      playingTrack: 'canon_in_d',
+      bufferingTrack: '',
+      playing: true
+    })
+    expect(streamAudios[1].muted).toBe(false)
+    engine.dispose()
+  })
 })

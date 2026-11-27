@@ -620,13 +620,13 @@ export class Scene {
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.08
     this.controls.enablePan = false
-    this.controls.minDistance = 400
-    this.controls.maxDistance = 1280
+    this.controls.minDistance = 240
+    this.controls.maxDistance = 2200
     this.controls.minPolarAngle = Math.PI * 0.20
     this.controls.maxPolarAngle = Math.PI * 0.49
     this.controls.minAzimuthAngle = -Math.PI * 0.40
     this.controls.maxAzimuthAngle = Math.PI * 0.40
-    this.controls.target.set(0, -32, 0)
+    this.controls.target.set(0, -24, 0)
 
     const pmrem = new THREE.PMREMGenerator(this.renderer)
     this._envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
@@ -2273,6 +2273,9 @@ export class Scene {
 
   _refreshNpcSprite() {
     if (!this.npcSpriteMat) return
+    const key = `${this.npcActorId}|${this.weather}|${this.season}`
+    if (key === this._lastNpcSpriteKey) return
+    this._lastNpcSpriteKey = key
     const svg = renderNpcPortraitSvg(this.npcActorId, this.weather, this.season)
     const img = new Image()
     img.onload = () => {
@@ -2342,6 +2345,8 @@ export class Scene {
 
   _syncSnowVisibility() {
     const showSnow = this.season === 'winter' || this.weather === 'snow'
+    if (this._lastShowSnow === showSnow) return
+    this._lastShowSnow = showSnow
     for (const mesh of this._snowNodes) mesh.visible = showSnow
     this._bakeShadows()
   }
@@ -2393,14 +2398,15 @@ export class Scene {
     await new Promise(resolve => setTimeout(resolve, 1380))
   }
 
-  /** @param {'front'|'stardew'|'street'|'rooftop'} viewId @param {boolean} [instant] */
-  setCameraView(viewId, instant = false) {
+  /** @param {'front'|'stardew'|'street'|'rooftop'} viewId @param {boolean} [instant] @param {number} [durationSec] */
+  setCameraView(viewId, instant = false, durationSec = 0.9) {
     /** @type {'front'|'stardew'|'street'|'rooftop'} */
     const preset = VIEW_PRESETS[viewId] ? viewId : 'stardew'
     this.cameraView = preset
+    this._syncZoomLimits()
     const v = VIEW_PRESETS[preset]
     const to = this._adjustedViewPos(v.pos)
-    const lookTo = new THREE.Vector3(...v.look)
+    const lookTo = this._adjustedLookTarget(v.look)
     this.camera.fov = v.fov
     this.camera.updateProjectionMatrix()
 
@@ -2417,8 +2423,28 @@ export class Scene {
       lookFrom: this.controls.target.clone(),
       lookTo,
       t: 0,
-      dur: 0.9
+      dur: Math.max(0.4, Number(durationSec) || 0.9)
     }
+  }
+
+  _syncZoomLimits() {
+    if (!this.controls || !this.camera) return
+    const aspect = this.camera.aspect || 1
+    this.controls.minDistance = 240
+    // Allow portrait players to pinch much further out to see full campus surroundings
+    this.controls.maxDistance = aspect < 1
+      ? Math.round(Math.max(2500, 1520 / Math.max(0.36, aspect)))
+      : 2200
+  }
+
+  _adjustedLookTarget(look) {
+    const aspect = this.camera.aspect || 1
+    const v = new THREE.Vector3(...look)
+    if (aspect < 0.85 && (this.cameraView === 'front' || this.cameraView === 'stardew')) {
+      // Shift look target up slightly on tall mobile portrait viewports so building sits nicely below top HUD without excessive road whitespace
+      v.y = this.dormId === 'grad' ? 14 : 6
+    }
+    return v
   }
 
   _adjustedViewPos(pos) {
@@ -2426,7 +2452,7 @@ export class Scene {
     const v = new THREE.Vector3(...pos)
     // Scale distance proportionally on narrow portrait viewports so all 6 columns remain visible
     if (aspect < 1.0) {
-      const portraitZoom = Math.min(2.15, Math.max(1.10, 0.90 / Math.max(0.40, aspect)))
+      const portraitZoom = Math.min(2.02, Math.max(1.08, 0.85 / Math.max(0.42, aspect)))
       v.multiplyScalar(portraitZoom)
     }
     if (this.dormId === 'grad') v.multiplyScalar(1.07)
@@ -3147,6 +3173,7 @@ export class Scene {
     const prevAspect = this.camera.aspect || 1
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    this._syncZoomLimits()
     const portrait = this.camera.aspect < 1
     this.moonGroup.position.set(portrait ? 230 : 430, portrait ? 420 : 340, -900)
     if (Math.abs(prevAspect - this.camera.aspect) > 0.12 && !this._cutscene) {

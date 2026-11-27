@@ -38,6 +38,12 @@ const qsa = (root, sel) => root.querySelectorAll(sel)
 
 const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]))
 
+const backBtnHtml = (act = 'back', label = '返回', aria = '返回上一级页面') =>
+  `<button type="button" class="ui-back-btn" data-act="${act}" aria-label="${aria}">` +
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>' +
+    `<span>${esc(label)}</span>` +
+  '</button>'
+
 const MOOD_ICONS = ['umbrella', 'headphones', 'quilt', 'bulb']
 
 export class UI {
@@ -413,9 +419,15 @@ export class UI {
     hub.id = 'hub'
     hub.innerHTML =
       '<div class="hub-topbar">' +
-        '<div class="hub-brand">' +
-          '<b>' + esc(dorm.name) + '</b>' +
-          '<span>' + esc(season.name.split(' · ').pop() || season.name) + ' · ' + esc(weatherMeta.name) + '</span>' +
+        '<div class="hub-top-left">' +
+          '<button type="button" class="ui-back-btn" data-act="title" aria-label="返回标题首页">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>' +
+            '<span>返回</span>' +
+          '</button>' +
+          '<div class="hub-brand">' +
+            '<b>' + esc(dorm.name) + '</b>' +
+            '<span>' + esc(season.name.split(' · ').pop() || season.name) + ' · ' + esc(weatherMeta.name) + '</span>' +
+          '</div>' +
         '</div>' +
         '<div class="hub-top-actions">' +
           '<button class="chip-btn ' + (panelOpen ? 'on' : '') + '" data-act="panel-toggle">' + (panelOpen ? '🎛 收起' : '🎛 场景') + '</button>' +
@@ -526,10 +538,28 @@ export class UI {
 
     const moreBtn = qs(hub, '[data-act="more-toggle"]')
     const moreMenu = qs(hub, '[data-moremenu]')
+    const positionMoreMenu = () => {
+      if (!moreBtn || !moreMenu) return
+      const r = moreBtn.getBoundingClientRect()
+      const vw = window.innerWidth || 390
+      const vh = window.innerHeight || 844
+      const mw = Math.min(244, vw - 20)
+      const left = Math.max(10, Math.min(vw - mw - 10, Math.round(r.right - mw)))
+      const safeLeft = r.left < vw * 0.45 ? Math.max(10, Math.min(vw - mw - 10, Math.round(r.left))) : left
+      const top = Math.max(10, Math.min(vh - 280, Math.round(r.bottom + 8)))
+      moreMenu.style.position = 'fixed'
+      moreMenu.style.left = safeLeft + 'px'
+      moreMenu.style.right = 'auto'
+      moreMenu.style.top = top + 'px'
+      moreMenu.style.width = mw + 'px'
+      moreMenu.style.maxHeight = Math.max(200, vh - top - 16) + 'px'
+    }
     if (moreBtn && moreMenu) {
       moreBtn.onclick = e => {
         e.stopPropagation()
-        moreMenu.classList.toggle('open')
+        const opening = !moreMenu.classList.contains('open')
+        moreMenu.classList.toggle('open', opening)
+        if (opening) positionMoreMenu()
       }
       const nickWrap = qs(moreMenu, '[data-nickwrap]')
       if (nickWrap) nickWrap.addEventListener('click', e => e.stopPropagation())
@@ -604,7 +634,7 @@ export class UI {
     if (opts.onToggleTour) qs(hub, '[data-act="scenic-tour"]').onclick = () => opts.onToggleTour()
     if (opts.onPostcard) qs(hub, '[data-act="postcard"]').onclick = () => opts.onPostcard()
     if (opts.onDocs) qs(hub, '[data-act="docs"]').onclick = () => opts.onDocs('overview')
-    qs(hub, '[data-act="title"]').onclick = () => opts.onTitle()
+    for (const tb of qsa(hub, '[data-act="title"]')) tb.onclick = () => opts.onTitle()
 
     for (const b of qsa(hub, '[data-dorm]')) {
       b.onclick = () => opts.onDorm(b.getAttribute('data-dorm') || 'grad')
@@ -632,6 +662,33 @@ export class UI {
     }
   }
 
+  /**
+   * Update Hub chips & brand in-place during scenic tour without DOM teardown flicker.
+   * @param {{ dormMeta?: any, season?: string, weather?: string, viewId?: string, tourActive?: boolean }} [opts]
+   */
+  syncHubTourState({ dormMeta, season, weather, viewId, tourActive } = {}) {
+    const hub = document.getElementById('hub')
+    if (!hub) return
+    const sDef = seasonDef(season)
+    const wMeta = WEATHER_CATALOG.find(w => w.id === weather) || WEATHER_CATALOG[0]
+    const brandSpan = hub.querySelector('.hub-brand span')
+    if (brandSpan) {
+      brandSpan.textContent = (sDef.name.split(' · ').pop() || sDef.name) + ' · ' + wMeta.name
+    }
+    if (dormMeta) {
+      const brandTitle = hub.querySelector('.hub-brand b')
+      if (brandTitle) brandTitle.textContent = dormMeta.name
+    }
+    for (const b of qsa(hub, '[data-season]')) b.classList.toggle('on', b.getAttribute('data-season') === season)
+    for (const b of qsa(hub, '[data-weather]')) b.classList.toggle('on', b.getAttribute('data-weather') === weather)
+    for (const b of qsa(hub, '[data-view]')) b.classList.toggle('on', b.getAttribute('data-view') === viewId)
+    const tourBtn = hub.querySelector('[data-act="scenic-tour"]')
+    if (tourBtn && tourActive !== undefined) {
+      tourBtn.classList.toggle('on', Boolean(tourActive))
+      tourBtn.textContent = tourActive ? '⏸ 停止' : '✨ 巡礼'
+    }
+  }
+
   // ------------------------------------------------------------- Minigame HUD (v4)
 
   /**
@@ -653,7 +710,8 @@ export class UI {
     const bar = document.createElement('div')
     bar.id = 'hud-v4'
     bar.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        backBtnHtml('exit', '返回', '返回校园大厅') +
         '<span class="hv4-phase" data-phase>准备中…</span>' +
         '<span style="font-size:12px;color:#dbe4f8;">' + esc(opts.dormMeta.shortName) + ' · <b>' + esc(opts.modeMeta.shortName) + '</b></span>' +
         '<span class="mode-tag" data-pattern>' + esc(opts.aiPattern || '夜巡模式') + '</span>' +
@@ -673,7 +731,6 @@ export class UI {
         (opts.onResetView ? '<button class="chip-sm" data-act="reset-view" title="回正正面视角">↺ 回正</button>' : '') +
         (opts.onCycleBgm ? '<button class="chip-sm" data-act="bgm" data-bgmbadge>🎵 ' + esc(opts.bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
         '<button class="chip-sm" data-act="mute">' + (opts.muted ? '🔇' : '🔊') + '</button>' +
-        '<button class="chip-sm" data-act="exit">返回</button>' +
       '</div>'
     this.el.appendChild(bar)
 
@@ -843,7 +900,10 @@ export class UI {
       ).join('')
 
       s.innerHTML = '<div class="panel glass wide">' +
-        '<div class="kicker">CAMPUS NPC WEATHER OUTFITS</div>' +
+        '<div class="panel-top-nav">' +
+          backBtnHtml('back', '返回', '返回校园大厅') +
+          '<div class="kicker" style="margin:0;">CAMPUS NPC WEATHER OUTFITS</div>' +
+        '</div>' +
         '<h2 class="h2">全校人物换装图鉴 · ' + esc(label) + '</h2>' +
         '<div class="filter-bar">' +
           SEASONS.map(ss => '<button class="chip-sm ' + (ss.id === curSeason ? 'on' : '') + '" data-ns="' + esc(ss.id) + '">' + esc(ss.name) + '</button>').join('') +
@@ -855,7 +915,7 @@ export class UI {
         '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回校园</button>' +
       '</div>'
       paintIcons(s)
-      qs(s, '[data-act="back"]').onclick = () => opts.onClose()
+      for (const b of qsa(s, '[data-act="back"]')) b.onclick = () => opts.onClose()
       for (const b of qsa(s, '[data-ns]')) {
         b.onclick = () => {
           curSeason = b.getAttribute('data-ns') || 'autumn'
@@ -960,7 +1020,8 @@ export class UI {
     const goalsHtml = (commissions || []).map(c => '<li>' + esc(c.label) + '</li>').join('')
 
     s.innerHTML = '<div class="panel glass chapter-panel">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<div class="panel-top-nav">' +
+        (onBack ? backBtnHtml('back', '返回', '返回上一级页面') : '<span></span>') +
         '<div class="kicker" style="margin-bottom:0;">' + esc(chapter.kicker + ' · ' + dormMeta.shortName) + '</div>' +
         (onCycleBgm ? '<button class="chip-sm" type="button" data-act="bgm" data-bgmbadge>🎵 ' + esc(bgmState?.customTitle || bgmMeta.shortName) + '</button>' : '') +
       '</div>' +
@@ -978,16 +1039,15 @@ export class UI {
       '</div>' +
       '<div class="dialog-actions" style="margin-top:14px;">' +
         '<button class="btn primary" type="button" data-act="go">开始第 ' + chapter.night + ' 夜</button>' +
-        (onBack ? '<button class="btn ghost" type="button" data-act="back">返回</button>' : '') +
       '</div>' +
     '</div>'
     paintIcons(s)
     if (onCycleBgm) qs(s, '[data-act="bgm"]').onclick = () => onCycleBgm()
     qs(s, '[data-act="go"]').onclick = () => onStart()
-    if (onBack) qs(s, '[data-act="back"]').onclick = () => onBack()
+    if (onBack) for (const b of qsa(s, '[data-act="back"]')) b.onclick = () => onBack()
   }
 
-  startNight({ night, index, count, commissions, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, orbitLocked = true, onToggleOrbit, onResetView, onAdvanceNight, onPause, onMute, onPingCommission, onReplayTutorial }) {
+  startNight({ night, index, count, commissions, muted, totalWindows = 24, dormMeta, bgmState, onCycleBgm, orbitLocked = true, onToggleOrbit, onResetView, onAdvanceNight, onPause, onBack, onMute, onPingCommission, onReplayTutorial }) {
     this.hideAll()
     const bgmMeta = bgmTrackDef(bgmState?.mode || 'auto')
     const hud = document.createElement('div')
@@ -1002,7 +1062,10 @@ export class UI {
     '</div>').join('')
 
     hud.innerHTML = '<div class="hud-top">' +
-        '<div class="brand"><b>' + esc(dormMeta ? dormMeta.shortName : '17号楼') + '</b><span>第 ' + (index + 1) + '/' + count + ' 夜 · ' + esc(weatherLabel(night && night.weather)) + '</span></div>' +
+        '<div class="hud-left-cluster">' +
+          backBtnHtml('back-hub', '返回', '返回校园大厅') +
+          '<div class="brand"><b>' + esc(dormMeta ? dormMeta.shortName : '17号楼') + '</b><span>第 ' + (index + 1) + '/' + count + ' 夜 · ' + esc(weatherLabel(night && night.weather)) + '</span></div>' +
+        '</div>' +
         '<div class="stats">' +
           '<div class="stat"><span class="lab">温暖</span><b data-warm>0</b></div>' +
           '<div class="warmbar"><i data-warmbar></i></div>' +
@@ -1036,6 +1099,7 @@ export class UI {
 
     this.el.appendChild(hud)
     paintIcons(hud)
+    qs(hud, '[data-act="back-hub"]').onclick = onBack || onPause
     requestAnimationFrame(() => hud.classList.add('on'))
     qs(hud, '[data-act="pause"]').onclick = onPause
     if (onToggleOrbit) qs(hud, '[data-act="orbit"]').onclick = () => onToggleOrbit()
@@ -1647,7 +1711,10 @@ export class UI {
 
     const s = this._layer()
     s.innerHTML = '<div class="panel glass wide">' +
-      '<div class="kicker">守夜人档案 · 结局星图</div>' +
+      '<div class="panel-top-nav">' +
+        backBtnHtml('back', '返回', '返回上一级页面') +
+        '<div class="kicker" style="margin:0;">守夜人档案 · 结局星图</div>' +
+      '</div>' +
       '<h2 class="h2">已解锁 ' + unlocked.size + ' / 6 个结局</h2>' +
       '<div class="ending-grid">' + tiles + '</div>' +
       '<div class="kicker section">住户羁绊</div>' +
@@ -1657,7 +1724,7 @@ export class UI {
       '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
     '</div>'
     paintIcons(s)
-    qs(s, '[data-act="back"]').onclick = onClose
+    for (const b of qsa(s, '[data-act="back"]')) b.onclick = onClose
   }
 
   /**
@@ -1673,7 +1740,10 @@ export class UI {
 
     const s = this._layer()
     s.innerHTML = '<div class="panel glass wide">' +
-      '<div class="kicker">CAMPUS NIGHT PATROL LEADERBOARD</div>' +
+      '<div class="panel-top-nav">' +
+        backBtnHtml('back', '返回', '返回上一级页面') +
+        '<div class="kicker" style="margin:0;">CAMPUS NIGHT PATROL LEADERBOARD</div>' +
+      '</div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
         '<h2 class="h2" style="margin:6px 0;">全校夜巡排行榜</h2>' +
         '<div class="nick-inline">' +
@@ -1699,7 +1769,7 @@ export class UI {
       '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
     '</div>'
     paintIcons(s)
-    qs(s, '[data-act="back"]').onclick = onClose
+    for (const b of qsa(s, '[data-act="back"]')) b.onclick = onClose
 
     const nickInput = /** @type {HTMLInputElement} */ (qs(s, 'input[data-nick]'))
     nickInput.onchange = () => {
@@ -1826,13 +1896,16 @@ export class UI {
       : '<div class="empty">还没有人留下声音</div>'
     const s = this._layer()
     s.innerHTML = '<div class="panel glass wide">' +
-      '<div class="kicker">流光留声机</div>' +
+      '<div class="panel-top-nav">' +
+        backBtnHtml('back', '返回', '返回上一级页面') +
+        '<div class="kicker" style="margin:0;">流光留声机</div>' +
+      '</div>' +
       '<h2 class="h2">别人留在窗户上的话</h2>' +
       '<div class="wall-list">' + rows + '</div>' +
       '<button class="btn ghost" data-act="back"><span data-icon="close"></span>返回</button>' +
     '</div>'
     paintIcons(s)
-    qs(s, '[data-act="back"]').onclick = onClose
+    for (const b of qsa(s, '[data-act="back"]')) b.onclick = onClose
     for (const b of qsa(s, '[data-like]')) {
       b.onclick = async () => {
         const n = await onLike(Number(b.getAttribute('data-like')))
@@ -1844,7 +1917,10 @@ export class UI {
   showKeyDialog({ status, onVerify, onClose }) {
     const s = this._layer()
     s.innerHTML = '<div class="panel glass small">' +
-      '<div class="kicker">AI 模式</div>' +
+      '<div class="panel-top-nav">' +
+        backBtnHtml('back', '返回', '返回上一级页面') +
+        '<div class="kicker" style="margin:0;">AI 模式</div>' +
+      '</div>' +
       '<h2 class="h2">评审 / 自带 DeepSeek Key</h2>' +
       '<p class="lede small">填一个 DeepSeek Key，浏览器会直接连 api.deepseek.com。Key 只存在这一页的内存里，不写本地存储，也不发到本服。</p>' +
       '<div class="key-state ' + (status && status.enabled ? 'on' : '') + '" data-state>' + (status && status.enabled ? '✓ 已启用浏览器直连模式（Key 仅驻留内存）' : '当前为云端智能体模式') + '</div>' +
@@ -1854,7 +1930,7 @@ export class UI {
       '<div class="note">也可以直接开始游戏：云端模式会用本服的智能体管线，离线时自动使用手写剧本。</div>' +
     '</div>'
     paintIcons(s)
-    qs(s, '[data-act="back"]').onclick = onClose
+    for (const b of qsa(s, '[data-act="back"]')) b.onclick = onClose
     const input = qs(s, 'input[data-key]')
     const msg = qs(s, '[data-msg]')
     qs(s, '[data-act="verify"]').onclick = async () => {
@@ -1902,6 +1978,10 @@ export class UI {
     const stampDate = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
     s.innerHTML =
       '<div class="panel glass wide">' +
+        '<div class="panel-top-nav">' +
+          backBtnHtml('close-postcard', '返回', '返回上一级页面') +
+          '<span class="kicker" style="margin:0;">CAMPUS KEEPSAKE POSTCARD</span>' +
+        '</div>' +
         '<h2 class="h2">📸 晚安明信片</h2>' +
         '<p class="lede small">' + esc(dormName) + ' · ' + esc(seasonName) + ' · ' + esc(weatherName) + ' · ' + esc(litCount) + '/' + esc(totalWindows) + ' 窗</p>' +
         '<div class="postcard-stage">' +
@@ -1982,9 +2062,11 @@ export class UI {
       link.href = canvas.toDataURL('image/png')
       link.click()
     }
-    qs(s, '[data-act="close-postcard"]').onclick = () => {
-      this.hideAll()
-      if (onClose) onClose()
+    for (const b of qsa(s, '[data-act="close-postcard"]')) {
+      b.onclick = () => {
+        this.hideAll()
+        if (onClose) onClose()
+      }
     }
   }
 

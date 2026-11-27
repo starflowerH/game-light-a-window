@@ -1,6 +1,7 @@
 import { BGM_TRACKS, bgmTrackDef } from '../shared/constants.js'
 
-const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&amp;': '&amp;', '"': '&quot;' }[m] || m))
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m] || m))
+const DIAL_POS_KEY = 'law_dial_top_pct'
 
 /**
  * Refined crimson-and-gold National Emblem icon for ICP compliance footer.
@@ -39,10 +40,10 @@ export function mountIcpFooter(parent) {
 }
 
 /**
- * Side-edge collapsible semi-circular vinyl turntable audio switcher.
- * - Collapsed: compact glass capsule along the right edge with spinning mini-disc, EQ bars & marquee track title.
- * - Expanded: dynamic curved radial wheel where the centered active track scales up smoothly,
- *   adjacent tracks scale down cleanly along the arc, and long titles scroll without breaking layout.
+ * Side-edge collapsible true-semicircle vinyl turntable audio switcher.
+ * - Collapsed: compact vertically draggable right-edge handle (compact mini-ear on mobile/gameplay).
+ * - Expanded: smooth geometric half-disc turntable with touch/pointer rotary spin, mouse-wheel scroll,
+ *   magnified active center track, tapered side track slots, and clean non-clipping marquee labels.
  */
 export class MusicDial {
   /** @param {HTMLElement} parent */
@@ -52,6 +53,9 @@ export class MusicDial {
     this._state = {
       mode: BGM_TRACKS[0].id,
       activeTrack: BGM_TRACKS[0].id,
+      playingTrack: BGM_TRACKS[0].id,
+      bufferingTrack: '',
+      bufferingTrackName: '',
       customTitle: '',
       muted: false,
       paused: false,
@@ -62,6 +66,11 @@ export class MusicDial {
     this._handlers = {}
     this._raf = 0
     this._wheelLockUntil = 0
+    this._suppressPillClickUntil = 0
+    this._wheelSuppressClickUntil = 0
+    this._dragSlotDelta = 0
+    this._lastPillTitle = ''
+    this._pillTopPct = this._loadSavedTopPct()
 
     this.root = document.createElement('aside')
     this.root.id = 'music-dial'
@@ -73,22 +82,53 @@ export class MusicDial {
     this._pill = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-pill]'))
     this._wheel = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-wheel]'))
     this._slotsHost = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-slots]'))
+    this._vinylEl = /** @type {HTMLElement} */ (this.root.querySelector('.md-vinyl'))
     this._pillTitleEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-pill-title]'))
     this._pillSpanEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-pill-span]'))
-    this._lastPillTitle = ''
     this._modeTagEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-mode]'))
     this._playBtn = /** @type {HTMLButtonElement} */ (this.root.querySelector('[data-dial-act="play"]'))
     this._carouselBtn = /** @type {HTMLButtonElement} */ (this.root.querySelector('[data-dial-act="carousel"]'))
     this._muteBtn = /** @type {HTMLButtonElement} */ (this.root.querySelector('[data-dial-act="mute"]'))
     this._customBarEl = /** @type {HTMLElement} */ (this.root.querySelector('[data-dial-custom]'))
     this._eqBars = Array.from(this.root.querySelectorAll('[data-eqbar]'))
-    this._radialBars = Array.from(this.root.querySelectorAll('[data-radialbar]'))
 
+    this._applyDockPosition()
     this._buildSlots()
     this._bindEvents()
-    this._onResize = () => { if (this.expanded) this._layoutWheel() }
+    this._onResize = () => {
+      this._applyDockPosition()
+      if (this.expanded) this._layoutWheel(this._dragSlotDelta)
+    }
     if (typeof addEventListener === 'function') addEventListener('resize', this._onResize)
     this.sync(this._state)
+  }
+
+  _defaultTopPct() {
+    const narrow = typeof window !== 'undefined' && window.innerWidth <= 680
+    return narrow ? 74 : 64
+  }
+
+  _loadSavedTopPct() {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(DIAL_POS_KEY) : null
+      const num = raw !== null ? Number(raw) : NaN
+      if (Number.isFinite(num) && num >= 14 && num <= 86) return num
+    } catch {}
+    return this._defaultTopPct()
+  }
+
+  _saveTopPct(pct) {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(DIAL_POS_KEY, pct.toFixed(1))
+    } catch {}
+  }
+
+  _applyDockPosition() {
+    const h = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 800
+    const minPct = Math.min(40, (74 / h) * 100)
+    const maxPct = Math.max(60, ((h - 86) / h) * 100)
+    const clamped = Math.max(minPct, Math.min(maxPct, this._pillTopPct))
+    this.root.style.setProperty('--dial-top', `${clamped.toFixed(2)}%`)
   }
 
   /** @param {any} handlers */
@@ -101,13 +141,8 @@ export class MusicDial {
       `<i class="md-eq-bar" data-eqbar="${i}"></i>`
     ).join('')
 
-    const radialEq = Array.from({ length: 14 }, (_, i) => {
-      const deg = -65 + i * 10
-      return `<i class="md-radial-bar" data-radialbar="${i}" style="--rdeg:${deg}deg"></i>`
-    }).join('')
-
     return (
-      '<button type="button" class="md-pill" data-dial-pill aria-expanded="false" title="展开黑胶音乐转盘">' +
+      '<button type="button" class="md-pill" data-dial-pill aria-expanded="false" title="点击展开转盘 / 按住上下拖动位置">' +
         '<span class="md-mini-vinyl" aria-hidden="true"><i class="md-mini-core"></i></span>' +
         '<span class="md-eq" aria-hidden="true">' + miniEq + '</span>' +
         '<span class="md-pill-name" data-pill-title><span class="md-static" data-pill-span></span></span>' +
@@ -118,7 +153,7 @@ export class MusicDial {
         '<div class="md-arc-slots" data-dial-slots></div>' +
         '<div class="md-pointer" aria-hidden="true"><span class="md-pointer-gem"></span></div>' +
         '<div class="md-disc-shell">' +
-          '<div class="md-radial-eq" aria-hidden="true">' + radialEq + '</div>' +
+          '<div class="md-rim-halo" aria-hidden="true"></div>' +
           '<div class="md-vinyl">' +
             '<div class="md-vinyl-grooves"></div>' +
             '<div class="md-vinyl-sheen"></div>' +
@@ -128,7 +163,7 @@ export class MusicDial {
           '</div>' +
           '<div class="md-tonearm" aria-hidden="true"><i class="md-arm-rod"></i><i class="md-arm-head"></i></div>' +
           '<div class="md-core-controls">' +
-            '<div class="md-status-tag" data-dial-mode>顺序轮播</div>' +
+            '<div class="md-status-tag" data-dial-mode>自动轮播 · 8首</div>' +
             '<div class="md-custom-banner" data-dial-custom></div>' +
             '<div class="md-btn-grid">' +
               '<button type="button" class="md-ctrl" data-dial-act="prev" title="上一曲">⏮</button>' +
@@ -158,6 +193,7 @@ export class MusicDial {
         '<span class="md-slot-index">' + String(idx + 1).padStart(2, '0') + '</span>' +
         '<span class="md-slot-title-wrap"><span class="md-slot-title">' + esc(track.name) + '</span></span>'
       btn.onclick = () => {
+        if (performance.now() < this._wheelSuppressClickUntil) return
         if (!this.expanded) this.open()
         if (this._handlers.onSelectTrack) this._handlers.onSelectTrack(track.id)
       }
@@ -167,7 +203,53 @@ export class MusicDial {
   }
 
   _bindEvents() {
-    this._pill.onclick = () => this.toggle()
+    // Vertically draggable edge capsule: tap expands turntable, drag moves dock height smoothly
+    let pillPtr = null
+    this._pill.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      const rect = this._pill.getBoundingClientRect()
+      const h = window.innerHeight || 800
+      pillPtr = {
+        id: e.pointerId,
+        startY: e.clientY,
+        startTopPx: rect.top + rect.height / 2,
+        moved: false,
+        vh: h
+      }
+    })
+    this._pill.addEventListener('pointermove', e => {
+      if (!pillPtr || e.pointerId !== pillPtr.id) return
+      const dy = e.clientY - pillPtr.startY
+      if (!pillPtr.moved && Math.abs(dy) >= 6) {
+        pillPtr.moved = true
+        this.root.classList.add('pill-dragging')
+        if (this._pill.setPointerCapture) {
+          try { this._pill.setPointerCapture(e.pointerId) } catch {}
+        }
+      }
+      if (pillPtr.moved) {
+        e.preventDefault()
+        const h = pillPtr.vh || window.innerHeight || 800
+        const nextY = Math.max(74, Math.min(h - 86, pillPtr.startTopPx + dy))
+        this._pillTopPct = (nextY / h) * 100
+        this._applyDockPosition()
+      }
+    })
+    const finishPillPtr = e => {
+      if (!pillPtr || e.pointerId !== pillPtr.id) return
+      if (pillPtr.moved) {
+        this.root.classList.remove('pill-dragging')
+        this._saveTopPct(this._pillTopPct)
+        this._suppressPillClickUntil = performance.now() + 180
+      }
+      pillPtr = null
+    }
+    this._pill.addEventListener('pointerup', finishPillPtr)
+    this._pill.addEventListener('pointercancel', finishPillPtr)
+    this._pill.onclick = () => {
+      if (performance.now() < this._suppressPillClickUntil) return
+      this.toggle()
+    }
 
     for (const el of Array.from(this.root.querySelectorAll('[data-dial-act="collapse"]'))) {
       /** @type {HTMLElement} */ (el).onclick = () => this.close()
@@ -188,7 +270,80 @@ export class MusicDial {
       }
     }
 
-    // Mouse-wheel rotary jog feel when expanded
+    // Continuous finger & mouse rotary spin across expanded wheel & slots
+    let wheelPtr = null
+    const pivotAngle = (cx, cy, x, y) => Math.atan2(y - cy, Math.max(32, cx - x))
+
+    this._wheel.addEventListener('pointerdown', e => {
+      if (!this.expanded) return
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      const tgt = e.target
+      if (tgt instanceof Element && tgt.closest('.md-core-controls button, .md-core-controls label')) return
+      const dr = this._wheel.getBoundingClientRect()
+      const cy = dr.top || (window.innerHeight || 800) / 2
+      const cx = window.innerWidth || 1200
+      wheelPtr = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        cx,
+        cy,
+        startA: pivotAngle(cx, cy, e.clientX, e.clientY),
+        dragging: false
+      }
+    })
+
+    this._wheel.addEventListener('pointermove', e => {
+      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
+      const dist = Math.hypot(e.clientX - wheelPtr.startX, e.clientY - wheelPtr.startY)
+      if (!wheelPtr.dragging && dist >= 7) {
+        wheelPtr.dragging = true
+        this._isWheelDragging = true
+        this.root.classList.add('is-dragging')
+        if (this._wheel.setPointerCapture) {
+          try { this._wheel.setPointerCapture(e.pointerId) } catch {}
+        }
+      }
+      if (wheelPtr.dragging) {
+        e.preventDefault()
+        const curA = pivotAngle(wheelPtr.cx, wheelPtr.cy, e.clientX, e.clientY)
+        const dAngle = curA - wheelPtr.startA
+        // Combine angular rotation with vertical swipe sensitivity so dragging anywhere spins intuitively
+        const vertBlend = (e.clientY - wheelPtr.startY) / (window.innerWidth <= 600 ? 150 : 195)
+        const slotsDelta = Math.abs(dAngle) > 0.02 ? (dAngle / 0.42 + vertBlend) * 0.55 : vertBlend
+        this._dragSlotDelta = slotsDelta
+        this._layoutWheel(slotsDelta)
+        if (this._vinylEl) {
+          this._vinylEl.style.transform = `rotate(${(slotsDelta * 36).toFixed(1)}deg)`
+        }
+      }
+    })
+
+    const finishWheelPtr = e => {
+      if (!wheelPtr || e.pointerId !== wheelPtr.id) return
+      const wasDrag = wheelPtr.dragging
+      wheelPtr = null
+      if (wasDrag) {
+        this._isWheelDragging = false
+        this.root.classList.remove('is-dragging')
+        if (this._vinylEl) this._vinylEl.style.transform = ''
+        const n = BGM_TRACKS.length
+        const activeIdx = Math.max(0, BGM_TRACKS.findIndex(t => t.id === this._state.mode))
+        const steps = Math.round(-this._dragSlotDelta)
+        this._dragSlotDelta = 0
+        this._wheelSuppressClickUntil = performance.now() + 180
+        if (steps !== 0 && this._handlers.onSelectTrack) {
+          const nextIdx = ((activeIdx + steps) % n + n) % n
+          this._handlers.onSelectTrack(BGM_TRACKS[nextIdx].id)
+        } else {
+          this._layoutWheel(0)
+        }
+      }
+    }
+    this._wheel.addEventListener('pointerup', finishWheelPtr)
+    this._wheel.addEventListener('pointercancel', finishWheelPtr)
+
+    // Mouse-wheel rotary scroll on desktop
     this._wheel.addEventListener('wheel', e => {
       if (!this.expanded) return
       e.preventDefault()
@@ -207,13 +362,15 @@ export class MusicDial {
     this.expanded = true
     this.root.classList.add('open')
     this._pill.setAttribute('aria-expanded', 'true')
-    this._layoutWheel()
+    this._dragSlotDelta = 0
+    this._layoutWheel(0)
     this._syncAnimLoop()
   }
 
   close() {
     this.expanded = false
-    this.root.classList.remove('open')
+    this._dragSlotDelta = 0
+    this.root.classList.remove('open', 'is-dragging')
     this._pill.setAttribute('aria-expanded', 'false')
     this._syncAnimLoop()
   }
@@ -231,7 +388,7 @@ export class MusicDial {
     const def = bgmTrackDef(this._state.mode)
     const labelText = this._state.customTitle || def.name
 
-    // Active song label in collapsed pill — keep persistent span node so pointer sequences never detach mid-click
+    // Keep persistent span node so first-gesture audio unlock never tears down click targets
     if (this._pillSpanEl && this._lastPillTitle !== labelText) {
       this._lastPillTitle = labelText
       this._pillSpanEl.className = labelText.length > 14 ? 'md-marquee' : 'md-static'
@@ -255,51 +412,67 @@ export class MusicDial {
       this._muteBtn.textContent = this._state.muted ? '🔇' : '🔊'
     }
     if (this._modeTagEl) {
-      this._modeTagEl.textContent = this._state.customTitle
-        ? '本地曲目'
-        : (this._state.carousel ? '自动轮播 · ' + BGM_TRACKS.length + '首' : '单曲循环')
+      if (this._state.customTitle) {
+        this._modeTagEl.textContent = '本地曲目'
+      } else if (this._state.bufferingTrack) {
+        this._modeTagEl.textContent = '缓冲中 · 先听轻享'
+      } else {
+        this._modeTagEl.textContent = this._state.carousel ? '自动轮播 · ' + BGM_TRACKS.length + '首' : '单曲循环'
+      }
     }
     if (this._customBarEl) {
       this._customBarEl.textContent = this._state.customTitle ? ('♪ ' + this._state.customTitle) : ''
       this._customBarEl.style.display = this._state.customTitle ? 'block' : 'none'
     }
 
-    this._layoutWheel()
+    if (!this._isWheelDragging) this._layoutWheel(0)
     this._syncAnimLoop()
   }
 
-  _layoutWheel() {
+  _layoutWheel(dragDelta = 0) {
     if (!this._slots || !this._slots.length) return
     const n = this._slots.length
     let activeIdx = BGM_TRACKS.findIndex(t => t.id === this._state.mode)
     if (activeIdx < 0) activeIdx = 0
 
     const isCompact = typeof window !== 'undefined' && window.innerWidth <= 600
-    const rx = isCompact ? 134 : 168
-    const ry = isCompact ? 160 : 204
+    const rx = isCompact ? 140 : 180
+    const ry = isCompact ? 164 : 206
 
     for (let i = 0; i < n; i++) {
       const { btn, track } = this._slots[i]
-      // Wrapped shortest distance in [-n/2, n/2] so turntable wraps infinitely
-      let d = i - activeIdx
-      if (d > n / 2) d -= n
-      if (d < -n / 2) d += n
+      // Continuous wrapped orbital offset around centered pointer
+      let d = (i - activeIdx) + dragDelta
+      while (d > n / 2) d -= n
+      while (d < -n / 2) d += n
 
       const absD = Math.abs(d)
-      const angle = d * 0.48 // generous spacing so inner vinyl core stays unobstructed
-      const tx = -Math.cos(angle) * rx + (absD === 0 ? (isCompact ? -8 : -14) : 0)
+      const angle = d * 0.48
+      const centerPush = Math.max(0, 1 - absD) * (isCompact ? -8 : -10)
+      const tx = -Math.cos(angle) * rx + centerPush
       const ty = Math.sin(angle) * ry
 
-      const scale = absD === 0 ? 1.12 : absD === 1 ? 0.85 : absD === 2 ? 0.72 : 0.60
-      const opacity = absD === 0 ? 1 : absD === 1 ? 0.80 : absD === 2 ? 0.46 : 0
+      let scale = 0.60
+      let opacity = 0
+      if (absD < 1) {
+        scale = 1.12 - absD * (1.12 - 0.85)
+        opacity = 1 - absD * 0.20
+      } else if (absD < 2) {
+        scale = 0.85 - (absD - 1) * (0.85 - 0.72)
+        opacity = 0.80 - (absD - 1) * 0.34
+      } else if (absD < 2.6) {
+        const k = (absD - 2) / 0.6
+        scale = 0.72 - k * 0.12
+        opacity = 0.46 * (1 - k)
+      }
 
-      btn.classList.toggle('active', absD === 0)
-      btn.classList.toggle('near', absD === 1)
+      btn.classList.toggle('active', absD < 0.5)
+      btn.classList.toggle('near', absD >= 0.5 && absD < 1.5)
       btn.classList.toggle('is-long', track.name.length > 18)
-      btn.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) translateY(-50%) scale(${scale})`
-      btn.style.opacity = String(opacity)
-      btn.style.pointerEvents = absD <= 2 ? 'auto' : 'none'
-      btn.style.zIndex = String(10 - absD)
+      btn.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) translateY(-50%) scale(${scale.toFixed(3)})`
+      btn.style.opacity = opacity.toFixed(2)
+      btn.style.pointerEvents = absD <= 2.3 ? 'auto' : 'none'
+      btn.style.zIndex = String(Math.round(12 - absD * 3))
     }
   }
 
@@ -317,13 +490,6 @@ export class MusicDial {
           const bar = /** @type {HTMLElement} */ (this._eqBars[i])
           bar.style.transform = `scaleY(${(0.22 + val * 0.85).toFixed(2)})`
         }
-        if (this.expanded) {
-          for (let i = 0; i < this._radialBars.length; i++) {
-            const val = bars[i] ?? 0.25
-            const rbar = /** @type {HTMLElement} */ (this._radialBars[i])
-            rbar.style.transform = `rotate(var(--rdeg)) scaleX(${(0.35 + val * 1.15).toFixed(2)})`
-          }
-        }
         this._raf = requestAnimationFrame(step)
       }
       this._raf = requestAnimationFrame(step)
@@ -336,10 +502,6 @@ export class MusicDial {
       for (let i = 0; i < this._eqBars.length; i++) {
         const bar = /** @type {HTMLElement} */ (this._eqBars[i])
         bar.style.transform = `scaleY(${idleHeights[i] ?? 0.36})`
-      }
-      for (let i = 0; i < this._radialBars.length; i++) {
-        const rbar = /** @type {HTMLElement} */ (this._radialBars[i])
-        rbar.style.transform = `rotate(var(--rdeg)) scaleX(${(0.35 + (i % 3) * 0.14).toFixed(2)})`
       }
     }
   }
