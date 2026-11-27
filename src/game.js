@@ -79,7 +79,7 @@ export class Game {
     this.community = { whispers: [], stats: null, heat: [] }
 
     // v4 campus preferences
-    this.dormId = this.records.preferredDorm || 'university'
+    this.dormId = this.records.preferredDorm || 'grad'
     this.season = this.records.preferredSeason || 'autumn'
     this.weather = this.records.preferredWeather || 'snow'
     this.viewId = 'stardew'
@@ -268,7 +268,7 @@ export class Game {
     if (this.scene.setQualityMode) this.scene.setQualityMode(this.qualityMode)
     this.scene.setSeason(this.season)
     this.scene.setWeatherFx(this.weather)
-    if (this.dormId !== 'university') await this.scene.switchDorm(this.dormId, true)
+    if (this.dormId !== this.scene.dormId) await this.scene.switchDorm(this.dormId, true)
 
     this.ui.showLoading('2/3 同步校园夜巡档案…')
     const cloud = await Promise.race([

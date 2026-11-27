@@ -50,8 +50,9 @@ describe('campus-critters & tranquil snow night upgrades', () => {
     expect(sys.cats).toHaveLength(0)
   })
 
-  it('defaults preferredWeather to snow and preserves animal random events', () => {
+  it('defaults preferredDorm to 30-window grad and preferredWeather to snow', () => {
     const rec = loadRecords()
+    expect(rec.preferredDorm).toBe('grad')
     expect(rec.preferredWeather).toBe('snow')
     const ids = RANDOM_EVENTS.map(e => e.id)
     expect(ids).toContain('evt_snow_birds')

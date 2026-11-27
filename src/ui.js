@@ -605,7 +605,7 @@ export class UI {
     qs(hub, '[data-act="title"]').onclick = () => opts.onTitle()
 
     for (const b of qsa(hub, '[data-dorm]')) {
-      b.onclick = () => opts.onDorm(b.getAttribute('data-dorm') || 'university')
+      b.onclick = () => opts.onDorm(b.getAttribute('data-dorm') || 'grad')
     }
     for (const b of qsa(hub, '[data-season]')) {
       b.onclick = () => opts.onSeason(b.getAttribute('data-season') || 'autumn')
@@ -1489,7 +1489,7 @@ export class UI {
   showResult(opts) {
     this.hideAll()
     const { run, records, postcard, ending, letter, rank, aiSource, suggestedWhisper } = opts
-    const dorm = dormDef(run.dormType || 'university')
+    const dorm = dormDef(run.dormType || 'grad')
     const gridWindows = buildWindowIds(dorm.rows, dorm.cols)
     const stageReached = Math.max(1, (run.nights && run.nights.length) || 3)
     const tier = evaluateRunTier({

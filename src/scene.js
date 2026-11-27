@@ -556,7 +556,7 @@ export class Scene {
     /** @type {WindowRecord[]} */
     this.windows = []
     this.theme = 'warm_blue'
-    this.dormId = 'university'
+    this.dormId = 'grad'
     this.season = 'autumn'
     this.weather = 'snow'
     /** @type {'front'|'stardew'|'street'|'rooftop'} */
@@ -698,7 +698,7 @@ export class Scene {
     this._buildSeasonParticles()
     this._buildLights()
     this._buildNpcActor()
-    this._buildProceduralDorm('university')
+    this._buildProceduralDorm('grad')
     this._buildComposer()
 
     this.vfx = new VfxPool(this.scene, { max: 1024 })
@@ -1590,9 +1590,16 @@ export class Scene {
     this.moths.position.set(-292, BASE_Y + 95, 190)
     this.dorm.add(this.moths)
 
-    // Keep articulated CampusCritterSystem rooftop cat synced above this dorm's roof
+    // Keep articulated CampusCritterSystem rooftop cat synced cleanly to current dorm roofline
     if (this.critters) {
-      this.critters.setRoofAnchor(74, BASE_Y + 370, 42)
+      const roofAnchor = this.dormId === 'grad'
+        ? [22, BASE_Y + 435, 68]
+        : this.dormId === 'university'
+          ? [74, BASE_Y + 370, 42]
+          : this.dormId === 'highschool'
+            ? [54, BASE_Y + 306, 46]
+            : [42, BASE_Y + 292, 42]
+      this.critters.setRoofAnchor(roofAnchor[0], roofAnchor[1], roofAnchor[2])
       this.roofCat = this.critters.getRooftopCatGroup()
     }
 

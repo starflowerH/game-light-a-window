@@ -26,13 +26,14 @@ function emptyRecords() {
     residentBonds: {},
     titles: ['夜巡新人'],
     lastEnding: '',
-    preferredDorm: 'university',
+    preferredDorm: 'grad',
     preferredSeason: 'autumn',
     preferredWeather: 'snow',
     preferredMode: 'memory_sequence',
     preferredQuality: 'auto',
     seenOpening: false,
-    snowDefaultV52: true
+    snowDefaultV52: true,
+    dormDefaultGradV53: true
   }
 }
 
@@ -57,6 +58,10 @@ export function loadRecords() {
     if (!raw.snowDefaultV52) {
       merged.preferredWeather = 'snow'
       merged.snowDefaultV52 = true
+    }
+    if (!raw.dormDefaultGradV53) {
+      merged.preferredDorm = 'grad'
+      merged.dormDefaultGradV53 = true
     }
     return merged
   } catch {
@@ -236,9 +241,9 @@ export async function syncRun(run, identity = {}) {
     letter: run.letter || {},
     // v4 fields
     gameMode: run.gameMode || 'star_sweep',
-    dormType: run.dormType || 'university',
+    dormType: run.dormType || 'grad',
     season: run.season || 'autumn',
-    weather: run.weather || 'clear',
+    weather: run.weather || 'snow',
     stageReached: run.stageReached || 1,
     correctCount: run.correctCount || run.litTotal || 0,
     accuracyPct: run.accuracyPct || 0,
