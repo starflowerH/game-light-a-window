@@ -88,9 +88,23 @@ export class UI {
     if (this.musicDial) this.musicDial.bindHandlers(handlers)
   }
 
+  /** @param {boolean} [force] */
+  maybeStartMusicCoach(force = false) {
+    return this.musicDial ? this.musicDial.startCoach(force) : false
+  }
+
+  hideMusicCoach() {
+    if (this.musicDial) this.musicDial.hideCoach()
+  }
+
+  replayMusicCoach() {
+    return this.musicDial ? this.musicDial.startCoach(true) : false
+  }
+
   _layer() {
     this.hideCoach()
     this.hideHintBubble()
+    this.hideMusicCoach()
     const d = document.createElement('div')
     d.className = 'screen'
     this.el.appendChild(d)
@@ -107,6 +121,7 @@ export class UI {
     this.hideCoach()
     this.hideTutorialOverlay()
     this.hideHintBubble()
+    this.hideMusicCoach()
     this.clearWindowTags()
     this.hideCrisisPrompt(true)
     this.hideEncounterDock()
@@ -398,6 +413,7 @@ export class UI {
    *   tourActive?: boolean,
    *   onToggleTour?: Function,
    *   onPostcard?: Function,
+   *   onMusicGuide?: Function,
    *   onDocs?: Function,
    *   onTitle: Function
    * }} opts
@@ -449,6 +465,7 @@ export class UI {
               '<button class="chip-sm" data-act="npcs">👘 NPC 图鉴</button>' +
               '<button class="chip-sm" data-act="collection">⭐ 结局线索</button>' +
               '<button class="chip-sm" data-act="key">🔑 AI Key</button>' +
+              '<button class="chip-sm" data-act="music-guide">🎵 音乐指引</button>' +
               '<button class="chip-sm" data-act="docs">📖 作品说明</button>' +
               '<button class="chip-sm" data-act="title">🏠 标题页</button>' +
             '</div>' +
@@ -633,6 +650,15 @@ export class UI {
     qs(hub, '[data-act="key"]').onclick = () => opts.onKeyConfig()
     if (opts.onToggleTour) qs(hub, '[data-act="scenic-tour"]').onclick = () => opts.onToggleTour()
     if (opts.onPostcard) qs(hub, '[data-act="postcard"]').onclick = () => opts.onPostcard()
+    const musicGuideBtn = qs(hub, '[data-act="music-guide"]')
+    if (musicGuideBtn) {
+      musicGuideBtn.onclick = e => {
+        e.stopPropagation()
+        if (moreMenu) moreMenu.classList.remove('open')
+        if (opts.onMusicGuide) opts.onMusicGuide()
+        else this.replayMusicCoach()
+      }
+    }
     if (opts.onDocs) qs(hub, '[data-act="docs"]').onclick = () => opts.onDocs('overview')
     for (const tb of qsa(hub, '[data-act="title"]')) tb.onclick = () => opts.onTitle()
 

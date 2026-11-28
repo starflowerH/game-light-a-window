@@ -2,6 +2,7 @@ import { BGM_TRACKS, bgmTrackDef } from '../shared/constants.js'
 
 const esc = s => String(s === null || s === undefined ? '' : s).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m] || m))
 const DIAL_POS_KEY = 'law_dial_top_pct'
+const DIAL_COACH_KEY = 'law_music_coach_done'
 
 /**
  * Refined crimson-and-gold National Emblem icon for ICP compliance footer.
@@ -71,6 +72,10 @@ export class MusicDial {
     this._dragSlotDelta = 0
     this._lastPillTitle = ''
     this._pillTopPct = this._loadSavedTopPct()
+    /** @type {0|1|2} */
+    this._coachStep = 0
+    /** @type {HTMLElement|null} */
+    this._coachEl = null
 
     this.root = document.createElement('aside')
     this.root.id = 'music-dial'
@@ -174,6 +179,7 @@ export class MusicDial {
               '<button type="button" class="md-mini-btn" data-dial-act="carousel" title="切换自动轮播 / 单曲循环">🔁 轮播</button>' +
               '<button type="button" class="md-mini-btn" data-dial-act="mute" title="静音">🔊</button>' +
               '<label class="md-mini-btn md-upload" title="导入本地音乐">📁<input type="file" accept="audio/*" data-dial-file style="display:none"/></label>' +
+              '<button type="button" class="md-mini-btn" data-dial-act="coach" title="音乐转盘指引">?</button>' +
               '<button type="button" class="md-mini-btn close" data-dial-act="collapse" title="收起转盘">›</button>' +
             '</div>' +
           '</div>' +
@@ -195,6 +201,7 @@ export class MusicDial {
       btn.onclick = () => {
         if (performance.now() < this._wheelSuppressClickUntil) return
         if (!this.expanded) this.open()
+        if (this._coachStep === 2) this.finishCoach(true)
         if (this._handlers.onSelectTrack) this._handlers.onSelectTrack(track.id)
       }
       this._slotsHost.appendChild(btn)
@@ -262,17 +269,22 @@ export class MusicDial {
     }
     const prevBtn = /** @type {HTMLButtonElement|null} */ (this.root.querySelector('[data-dial-act="prev"]'))
     const nextBtn = /** @type {HTMLButtonElement|null} */ (this.root.querySelector('[data-dial-act="next"]'))
-    if (prevBtn) prevBtn.onclick = () => { if (this._handlers.onPrevTrack) this._handlers.onPrevTrack() }
-    if (nextBtn) nextBtn.onclick = () => { if (this._handlers.onNextTrack) this._handlers.onNextTrack() }
+    const coachBtn = /** @type {HTMLButtonElement|null} */ (this.root.querySelector('[data-dial-act="coach"]'))
+    if (prevBtn) prevBtn.onclick = () => { if (this._coachStep === 2) this.finishCoach(true); if (this._handlers.onPrevTrack) this._handlers.onPrevTrack() }
+    if (nextBtn) nextBtn.onclick = () => { if (this._coachStep === 2) this.finishCoach(true); if (this._handlers.onNextTrack) this._handlers.onNextTrack() }
+    if (coachBtn) coachBtn.onclick = () => this.startCoach(true)
     if (this._playBtn) this._playBtn.onclick = () => { if (this._handlers.onTogglePlay) this._handlers.onTogglePlay() }
-    if (this._carouselBtn) this._carouselBtn.onclick = () => { if (this._handlers.onToggleCarousel) this._handlers.onToggleCarousel() }
+    if (this._carouselBtn) this._carouselBtn.onclick = () => { if (this._coachStep === 2) this.finishCoach(true); if (this._handlers.onToggleCarousel) this._handlers.onToggleCarousel() }
     if (this._muteBtn) this._muteBtn.onclick = () => { if (this._handlers.onToggleMute) this._handlers.onToggleMute() }
 
     const fileInp = /** @type {HTMLInputElement|null} */ (this.root.querySelector('[data-dial-file]'))
     if (fileInp) {
       fileInp.onchange = () => {
         const f = fileInp.files && fileInp.files[0]
-        if (f && this._handlers.onUploadFile) this._handlers.onUploadFile(f)
+        if (f && this._handlers.onUploadFile) {
+          if (this._coachStep === 2) this.finishCoach(true)
+          this._handlers.onUploadFile(f)
+        }
       }
     }
 
@@ -329,6 +341,7 @@ export class MusicDial {
         this._wheelSuppressClickUntil = performance.now() + 240
         if (steps !== 0 && this._handlers.onSelectTrack) {
           const nextIdx = ((activeIdx + steps) % n + n) % n
+          if (this._coachStep === 2) this.finishCoach(true)
           this._handlers.onSelectTrack(BGM_TRACKS[nextIdx].id)
         } else {
           this._layoutWheel(0)
@@ -367,6 +380,7 @@ export class MusicDial {
       const now = performance.now()
       if (now < this._wheelLockUntil) return
       this._wheelLockUntil = now + 115
+      if (this._coachStep === 2) this.finishCoach(true)
       if (e.deltaY > 0) {
         if (this._handlers.onNextTrack) this._handlers.onNextTrack()
       } else if (e.deltaY < 0) {
@@ -382,6 +396,9 @@ export class MusicDial {
     this._dragSlotDelta = 0
     this._layoutWheel(0)
     this._syncAnimLoop()
+    if (this._coachStep === 1) {
+      this._setCoachStep(2)
+    }
   }
 
   close() {
@@ -390,6 +407,88 @@ export class MusicDial {
     this.root.classList.remove('open', 'is-dragging')
     this._pill.setAttribute('aria-expanded', 'false')
     this._syncAnimLoop()
+    if (this._coachStep === 2) {
+      this.hideCoach()
+    }
+  }
+
+  hasCompletedCoach() {
+    try {
+      return typeof localStorage !== 'undefined' && localStorage.getItem(DIAL_COACH_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  startCoach(force = false) {
+    if (!force && this.hasCompletedCoach()) return false
+    this._setCoachStep(this.expanded ? 2 : 1)
+    return true
+  }
+
+  hideCoach() {
+    this._coachStep = 0
+    this.root.classList.remove('coach-step-1', 'coach-step-2')
+    if (this._coachEl) {
+      this._coachEl.remove()
+      this._coachEl = null
+    }
+  }
+
+  finishCoach(markDone = true) {
+    const wasActive = this._coachStep > 0
+    this.hideCoach()
+    if (markDone) {
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(DIAL_COACH_KEY, '1')
+      } catch {}
+      if (wasActive && this._handlers.onCoachComplete) {
+        this._handlers.onCoachComplete()
+      }
+    }
+  }
+
+  /** @param {0|1|2} step */
+  _setCoachStep(step) {
+    this._coachStep = step
+    this.root.classList.toggle('coach-step-1', step === 1)
+    this.root.classList.toggle('coach-step-2', step === 2)
+    if (!step) {
+      this.hideCoach()
+      return
+    }
+    if (!this._coachEl) {
+      const box = document.createElement('div')
+      box.className = 'md-coach'
+      box.setAttribute('role', 'status')
+      box.setAttribute('aria-live', 'polite')
+      this.root.appendChild(box)
+      this._coachEl = box
+    }
+    if (step === 1) {
+      this._coachEl.className = 'md-coach step-1'
+      this._coachEl.innerHTML =
+        '<div class="md-coach-head">' +
+          '<span class="md-coach-badge">配乐指引 1/2</span>' +
+          '<button type="button" class="md-coach-skip" data-coach-skip>跳过</button>' +
+        '</div>' +
+        '<div class="md-coach-title">🎵 点开黑胶音乐转盘</div>' +
+        '<p class="md-coach-desc">点击右侧小唱片即可展开切歌；按住上下拖动可自由挪动停靠高度。</p>' +
+        '<span class="md-coach-arrow" aria-hidden="true"></span>'
+      const skipBtn = /** @type {HTMLButtonElement|null} */ (this._coachEl.querySelector('[data-coach-skip]'))
+      if (skipBtn) skipBtn.onclick = () => this.finishCoach(true)
+    } else {
+      this._coachEl.className = 'md-coach step-2'
+      this._coachEl.innerHTML =
+        '<div class="md-coach-head">' +
+          '<span class="md-coach-badge">配乐指引 2/2</span>' +
+          '<button type="button" class="md-coach-skip" data-coach-skip>我学会了 ✓</button>' +
+        '</div>' +
+        '<div class="md-coach-title">👆 拨动转盘或点击选曲</div>' +
+        '<p class="md-coach-desc">上下滑动黑胶即可旋转选歌，也能直接点歌名；盘内支持轮播/单曲、静音及 📁 导入本地音乐。</p>'
+      const doneBtn = /** @type {HTMLButtonElement|null} */ (this._coachEl.querySelector('[data-coach-skip]'))
+      if (doneBtn) doneBtn.onclick = () => this.finishCoach(true)
+    }
   }
 
   toggle() {
@@ -524,6 +623,7 @@ export class MusicDial {
   }
 
   dispose() {
+    this.hideCoach()
     if (this._raf) cancelAnimationFrame(this._raf)
     this._raf = 0
     if (this._onResize && typeof removeEventListener === 'function') removeEventListener('resize', this._onResize)

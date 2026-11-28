@@ -315,10 +315,38 @@ export class Game {
         onToggleCarousel: () => this.toggleBgmCarousel(),
         onToggleMute: () => this.toggleMute(),
         onUploadFile: f => this.loadCustomBgm(f),
+        onCoachComplete: () => {
+          if (this.ui && this.ui.toast) {
+            this.ui.toast('🎵 音乐转盘已掌握', '随时点右侧胶囊或 ? 按钮可重看指引')
+          }
+        },
         getSpectrum: n => (this.audio && this.audio.getVisualizerBars ? this.audio.getVisualizerBars(n) : [])
       })
     }
     this._refreshBgmHud()
+  }
+
+  _clearMusicCoachTimer() {
+    if (this._coachTimer) {
+      clearTimeout(this._coachTimer)
+      this._coachTimer = null
+    }
+  }
+
+  _scheduleMusicCoach() {
+    this._clearMusicCoachTimer()
+    if (!this.ui || !this.ui.musicDial || this.ui.musicDial.hasCompletedCoach()) return
+    this._coachTimer = setTimeout(() => {
+      this._coachTimer = null
+      if (this.state !== 'title' && this.state !== 'hub') return
+      if (typeof document !== 'undefined' && (document.querySelector('.modal-backdrop') || document.querySelector('.tutorial-panel'))) return
+      this.ui.maybeStartMusicCoach(false)
+    }, 1100)
+  }
+
+  replayMusicGuide() {
+    this._clearMusicCoachTimer()
+    if (this.ui) this.ui.replayMusicCoach()
   }
 
   getBgmState() {
@@ -397,6 +425,7 @@ export class Game {
 
   showTitle() {
     this.stopScenicTour()
+    this._clearMusicCoachTimer()
     this._clearMinigame()
     this.state = 'title'
     if (typeof document !== 'undefined') document.body.classList.remove('is-gameplay')
@@ -428,9 +457,12 @@ export class Game {
         onClose: () => this.showTitle()
       })
     })
+    this._scheduleMusicCoach()
   }
 
   async enterCampus() {
+    this._clearMusicCoachTimer()
+    if (this.ui) this.ui.hideMusicCoach()
     if (this.audio) this.audio.unlock()
     if (this.records && this.records.seenOpening) {
       this.showHub()
@@ -495,6 +527,7 @@ export class Game {
   }
 
   showHub() {
+    this._clearMusicCoachTimer()
     this._clearMinigame()
     this.state = 'hub'
     if (typeof document !== 'undefined') document.body.classList.remove('is-gameplay')
@@ -545,9 +578,11 @@ export class Game {
       tourActive: Boolean(this._tourTimer),
       onToggleTour: () => this.toggleScenicTour(),
       onPostcard: () => this.openPostcard(),
+      onMusicGuide: () => this.replayMusicGuide(),
       onDocs: tab => this.openDocs(tab, () => this.showHub()),
       onTitle: () => this.showTitle()
     })
+    this._scheduleMusicCoach()
   }
 
   stopScenicTour() {
@@ -804,6 +839,8 @@ export class Game {
   // ------------------------------------------------------------------- v4 Minigame Matrix
 
   launchGame(modeId) {
+    this._clearMusicCoachTimer()
+    if (this.ui) this.ui.hideMusicCoach()
     if (this.audio) this.audio.unlock()
     this.stopScenicTour()
     this.gameMode = modeId || this.gameMode
@@ -1618,6 +1655,8 @@ export class Game {
   // ---------------------------------------------------------------- v3 Star-Sweep Campaign (preserved)
 
   async start() {
+    this._clearMusicCoachTimer()
+    if (this.ui) this.ui.hideMusicCoach()
     if (this.audio) this.audio.unlock()
     this.stopScenicTour()
     this._clearMinigame()
